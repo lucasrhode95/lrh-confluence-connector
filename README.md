@@ -15,7 +15,12 @@ The connector itself currently supports PAT or HTTP Basic. It does not store cre
 
 ## Run the authentication probe
 
-Requires the project's Python environment (`uv sync` once if needed). Run one mode per invocation:
+Requires the project's Python environment (`uv sync` once if needed).
+For a fresh fork, copy [confluence_config.example.json](confluence_config.example.json) to the
+ignored confluence_config.json and edit its settings. App and probes share this
+required file and a single stdlib loader/validator. Set the base URL, API paths, synthetic
+query, browser login path and capture aliases; an empty captures list works for live probes.
+There are no embedded target, endpoint or query fallback values. Run one mode per invocation:
 
     uv run python src/probe_auth.py --mode anonymous
     uv run python src/probe_auth.py --mode basic
@@ -33,10 +38,39 @@ Preferred: create a Confluence PAT and set `CONFLUENCE_PAT`.
 
 Alternative: set `CONFLUENCE_USERNAME` and `CONFLUENCE_PASSWORD` if HTTP Basic is enabled for the REST API.
 
-    $env:CONFLUENCE_URL = "https://wiki.example.com"
+    $env:CONFLUENCE_CONFIG = (Resolve-Path ./confluence_config.json).Path
     uv run confluence-connector
 
-The server speaks MCP over stdio. Add it to your local MCP client using command `uv` and arguments `run`, `--directory`, this project directory, and `confluence-connector`. Pass `CONFLUENCE_URL` and the selected auth variables through that client's local environment configuration. Do not put real secrets in this repository, source control, or shared MCP configuration.
+The server speaks MCP over stdio. Add it to your local MCP client using command `uv` and arguments `run`, `--directory`, this project directory, and `confluence-connector`. Pass `CONFLUENCE_CONFIG` (the absolute configuration file path) and the selected auth variables through that client's local environment configuration. Do not put real secrets in this repository, source control, or shared MCP configuration.
+
+Configuration defaults to confluence_config.json in the repository root, independent
+of the current working directory. Every command accepts --config PATH; CONFLUENCE_CONFIG
+provides a process-wide override. Precedence is command flag, environment variable,
+then repository default. Once selected, all callers share the parsed settings in memory.
+Restart the process after editing the file.
+
+## Portability and research
+
+The example domain is a placeholder, not a usable deployment or a fallback. Both the
+MCP server and main.py demo load the ignored confluence_config.json, selected by
+CONFLUENCE_CONFIG when an explicit path is needed. Restart the process after editing it:
+the shared loader validates CONFIG once per process. API paths are relative to base_url,
+including when Confluence is installed under a context path such as /wiki.
+
+The same dictionary configures research. Its --config option selects another file.
+The runtime file contains deployment settings only; PAT/Basic secrets continue to come from
+environment variables or the demo/probe's hidden prompts. Capture filenames and the real
+instance URL remain private; published inventories use neutral HAR/ZIP aliases and
+confluence.example.com. The offline tools depend only on the shared stdlib configuration
+module, not the HTTP client or MCP server.
+
+The configuration is JSON data. Never execute downloaded/captured code or capture contents.
+
+The [research guide](research/README.md) is a starting point for another instance or changed
+policy: configure the target, investigate permitted authentication and read-only REST calls,
+and distinguish documented APIs from observed browser/plugin paths. Recorded successes,
+denials and SAML/provider behavior describe the tested environment, not all Confluence sites.
+No expected personal account is fixed in code. Credentials are not persisted by this PoC.
 
 ## Tools
 

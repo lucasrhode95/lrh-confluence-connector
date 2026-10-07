@@ -86,3 +86,6 @@ probe-results/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Private deployment settings; only the generic example is published
+/confluence_config.json

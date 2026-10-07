@@ -1,4 +1,4 @@
-"""Read-only authentication probe for the Confluence instance.
+"""Read-only authentication probe for a configured Confluence instance.
 
 Run one authentication mode per invocation. Secrets are prompted with getpass,
 never accepted as command-line arguments, and never printed or saved.
@@ -10,27 +10,29 @@ import argparse
 import copy
 import getpass
 import http.cookiejar
-import json
-import os
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 import httpx
 
-DEFAULT_URL = "https://wiki.example.com"
-DEFAULT_QUERY = "search example codex claude 123"
-AUTH_PATH = "rest/tsv/1.0/authenticate"
+from confluence_connector.config import add_config_argument, load_config
 
 
 def main() -> int:
     """Entry point: validate the site and mode, prompt for secrets, then make read-only probes."""
     args = _parse_args()
-    base_url = args.base_url or os.environ.get("CONFLUENCE_URL", DEFAULT_URL)
-    _validate_base_url(base_url)
+    settings = load_config(args.config)
+    base_url = args.base_url or settings["base_url"]
+    if args.base_url:
+        _validate_base_url(base_url)
+    query = args.query if args.query is not None else settings["query"]
+    if not query.strip():
+        raise SystemExit("The probe query must not be empty.")
+    endpoints = settings["endpoints"]
 
     if args.mode == "anonymous":
         with _new_client(base_url) as client:
-            _probe_api(client, args.query)
+            _probe_api(client, query, endpoints)
         return 0
 
     if args.mode in {"basic", "form"}:
@@ -44,9 +46,9 @@ def main() -> int:
             return 2
         if args.mode == "basic":
             with _new_client(base_url, auth=httpx.BasicAuth(username, password)) as client:
-                _probe_api(client, args.query)
+                _probe_api(client, query, endpoints)
             return 0
-        return _probe_form_login(base_url, username, password, args.query, args.remember_me)
+        return _probe_form_login(base_url, username, password, query, args.remember_me, settings["form_auth_path"], endpoints)
 
     bearer_token = getpass.getpass(
         "PAT or registered OAuth access token (hidden): "
@@ -57,7 +59,7 @@ def main() -> int:
     with _new_client(
         base_url, headers={"Authorization": f"Bearer {bearer_token}"}
     ) as client:
-        _probe_api(client, args.query)
+        _probe_api(client, query, endpoints)
     return 0
 
 
@@ -72,9 +74,10 @@ def _parse_args() -> argparse.Namespace:
             "pat=PAT; oauth=OAuth access token from an admin-registered app"
         ),
     )
-    parser.add_argument("--base-url", help="Wiki base URL (defaults to CONFLUENCE_URL or the company Wiki).")
+    add_config_argument(parser)
+    parser.add_argument("--base-url", help="Explicit override of the configured Confluence base URL.")
     parser.add_argument("--username", help="Username; password is always prompted securely.")
-    parser.add_argument("--query", default=DEFAULT_QUERY, help="Text used for read-only search probes.")
+    parser.add_argument("--query", help="Text used for read-only search probes.")
     parser.add_argument("--remember-me", action="store_true", help="Send rememberMe=true in form mode to inspect cookie lifetime; nothing is saved locally.")
     return parser.parse_args()
 
@@ -105,7 +108,7 @@ def _new_client(
 
 
 def _probe_form_login(
-    base_url: str, username: str, password: str, query: str, remember_me: bool
+    base_url: str, username: str, password: str, query: str, remember_me: bool, auth_path: str, endpoints: dict
 ) -> int:
     """Entry point: make one transient web-form login attempt and probe its session."""
     print("Form login uses Confluence's web login endpoint observed in the capture.")
@@ -114,7 +117,7 @@ def _probe_form_login(
     with _new_client(base_url) as client:
         try:
             response = client.post(
-                AUTH_PATH,
+                auth_path,
                 json={
                     "username": username,
                     "password": password,
@@ -143,15 +146,15 @@ def _probe_form_login(
             return 1
 
         _print_cookie_summary(client)
-        _probe_api(client, query)
-        _probe_cookie_round_trip(base_url, client, query)
+        _probe_api(client, query, endpoints)
+        _probe_cookie_round_trip(base_url, client, query, endpoints)
     return 0
 
 
-def _probe_api(client: httpx.Client, query: str) -> None:
+def _probe_api(client: httpx.Client, query: str, endpoints: dict) -> None:
     """Assumes a validated base URL and an already selected authentication mode."""
     print("\nRead-only API checks (no response bodies, page titles, or identity values are printed):")
-    identity = _get_json(client, "current user", "rest/api/user/current")
+    identity = _get_json(client, "current user", endpoints["current_user"])
     if identity is not None:
         print(f"  identity signal: {_identity_signal(identity)}")
 
@@ -160,7 +163,7 @@ def _probe_api(client: httpx.Client, query: str) -> None:
     search = _get_json(
         client,
         "CQL content search",
-        "rest/api/content/search",
+        endpoints["search_pages"],
         params=search_params,
     )
     if search is not None:
@@ -170,7 +173,7 @@ def _probe_api(client: httpx.Client, query: str) -> None:
     ui_search = _get_json(
         client,
         "browser UI search route",
-        "rest/api/search",
+        endpoints["ui_search"],
         params={
             "cql": cql,
             "limit": "1",
@@ -186,7 +189,7 @@ def _probe_api(client: httpx.Client, query: str) -> None:
     spaces = _get_json(
         client,
         "space listing",
-        "rest/api/space",
+        endpoints["spaces"],
         params={"limit": "1", "start": "0"},
     )
     if spaces is not None:
@@ -197,7 +200,7 @@ def _probe_api(client: httpx.Client, query: str) -> None:
         page = _get_json(
             client,
             "get one search result",
-            f"rest/api/content/{page_id}",
+            endpoints["content"].format(page_id=page_id),
             params={"expand": "space,version"},
         )
         if page is not None:
@@ -271,7 +274,7 @@ def _identity_signal(body: dict[str, object]) -> str:
     return "account identifier present (value redacted)"
 
 
-def _probe_cookie_round_trip(base_url: str, authenticated: httpx.Client, query: str) -> None:
+def _probe_cookie_round_trip(base_url: str, authenticated: httpx.Client, query: str, endpoints: dict) -> None:
     """Assumes the just-authenticated client owns its fresh cookie jar."""
     jar = http.cookiejar.CookieJar()
     saved_cookies = [copy.copy(cookie) for cookie in authenticated.cookies.jar]
@@ -284,14 +287,14 @@ def _probe_cookie_round_trip(base_url: str, authenticated: httpx.Client, query: 
     print("\nMemory-only cookie round-trip into a fresh HTTP client (nothing written to disk):")
     _print_cookie_summary(authenticated, prefix="  captured")
     with _new_client(base_url, cookies=jar) as replay_client:
-        identity = _get_json(replay_client, "replayed current user", "rest/api/user/current")
+        identity = _get_json(replay_client, "replayed current user", endpoints["current_user"])
         if identity is not None:
             print(f"    replayed identity signal: {_identity_signal(identity)}")
         cql = f"type = page AND siteSearch ~ {_cql_literal(query)}"
         search = _get_json(
             replay_client,
             "replayed CQL search",
-            "rest/api/content/search",
+            endpoints["search_pages"],
             params={"cql": cql, "limit": "1"},
         )
         if search is not None:

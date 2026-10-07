@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import httpx
+
+from confluence_connector.config import load_config
 
 
 class ConfluenceClient:
@@ -14,17 +16,14 @@ class ConfluenceClient:
 
     def __init__(
         self,
-        base_url: str,
+        settings: dict,
         *,
         pat: str | None = None,
         username: str | None = None,
         password: str | None = None,
     ) -> None:
-        parsed = urlsplit(base_url)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError("CONFLUENCE_URL must be an HTTPS URL.")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("CONFLUENCE_URL must not contain credentials, a query, or a fragment.")
+        """Assumes validated settings from load_config; validates the authentication choice."""
+        self._endpoints = settings["endpoints"]
         has_basic_user = bool(username)
         has_basic_password = bool(password)
         if bool(pat) == (has_basic_user or has_basic_password):
@@ -40,7 +39,7 @@ class ConfluenceClient:
             auth = httpx.BasicAuth(username or "", password or "")
 
         self._http = httpx.Client(
-            base_url=base_url.rstrip("/") + "/",
+            base_url=settings["base_url"].rstrip("/") + "/",
             headers=headers,
             auth=auth,
             timeout=httpx.Timeout(20.0, connect=10.0),
@@ -48,15 +47,13 @@ class ConfluenceClient:
         )
 
     @classmethod
-    def from_environment(cls) -> ConfluenceClient:
-        """Create a client from CONFLUENCE_URL and PAT or Basic-auth environment variables."""
-        base_url = os.environ.get("CONFLUENCE_URL", "")
+    def from_configuration(cls) -> ConfluenceClient:
+        """Load the shared private settings and select PAT or Basic environment credentials."""
+        settings = load_config()
         pat = os.environ.get("CONFLUENCE_PAT")
         username = os.environ.get("CONFLUENCE_USERNAME")
         password = os.environ.get("CONFLUENCE_PASSWORD")
-        if not base_url:
-            raise ValueError("Set CONFLUENCE_URL.")
-        return cls(base_url, pat=pat, username=username, password=password)
+        return cls(settings, pat=pat, username=username, password=password)
 
     def close(self) -> None:
         self._http.close()
@@ -77,7 +74,7 @@ class ConfluenceClient:
         _validate_limit(limit)
         cql = f"type = page AND siteSearch ~ {_cql_literal(query)}"
         payload = self._get(
-            "rest/api/content/search",
+            self._endpoints["search_pages"],
             params={"cql": cql, "limit": str(limit), "expand": "space,version"},
         )
         results = payload.get("results", [])
@@ -96,7 +93,7 @@ class ConfluenceClient:
         if start < 0:
             raise ValueError("start must be zero or greater.")
         payload = self._get(
-            "rest/api/space",
+            self._endpoints["spaces"],
             params={"limit": str(limit), "start": str(start)},
         )
         results = payload.get("results", [])
@@ -115,7 +112,7 @@ class ConfluenceClient:
         if not page_id.isdigit():
             raise ValueError("page_id must be a numeric Confluence content ID.")
         payload = self._get(
-            f"rest/api/content/{quote(page_id, safe='')}",
+            self._endpoints["content"].format(page_id=quote(page_id, safe="")),
             params={"expand": "body.storage,space,version"},
         )
         body = payload.get("body", {})

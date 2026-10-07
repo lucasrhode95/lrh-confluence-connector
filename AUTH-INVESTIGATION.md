@@ -8,4 +8,4 @@ User-run probes confirm PAT and form-session access to current user, both search
 
 The HARs show form login, CAPTCHA failure and Microsoft SAML SSO. The ZIP supplies frontend source/resources, not a full login network trace. Directory technology, token lifetime/revocation, OAuth API rights and SSO-only persistence remain unresolved.
 
-The connector currently supports PAT/Basic configuration; src/probe_auth.py prompts locally and saves no secrets or cookies. This change documents research only.
+The connector currently supports PAT/Basic configuration; src/probe_auth.py prompts locally and saves no secrets or cookies. Deployment and probe settings now come from the same ignored confluence_config.json; no credentials are stored in it.
