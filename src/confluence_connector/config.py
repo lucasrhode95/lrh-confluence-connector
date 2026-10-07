@@ -33,16 +33,6 @@ def add_config_argument(parser: ArgumentParser) -> None:
     )
 
 
-def capture_inputs(settings: dict, folder: Path) -> list[tuple[Path, str]]:
-    """Entry point: require existing captures selected by the already validated settings."""
-    if not settings["captures"]:
-        raise SystemExit("Configure at least one capture for offline research.")
-    inputs = [(folder / entry["file"], entry["label"]) for entry in settings["captures"]]
-    if any(not path.is_file() for path, label in inputs):
-        raise SystemExit("One or more configured capture files are missing.")
-    return inputs
-
-
 @lru_cache(maxsize=1)
 def _read_config(path: Path) -> dict:
     """Load and validate JSON once for the selected file; no embedded setting defaults."""
@@ -54,10 +44,10 @@ def _read_config(path: Path) -> dict:
         ) from None
     except (OSError, json.JSONDecodeError):
         raise SystemExit("Cannot parse the local configuration as valid JSON.") from None
-    required = {"base_url", "query", "form_auth_path", "captures", "endpoints"}
+    required = {"base_url", "query", "form_auth_path", "endpoints"}
     if not isinstance(settings, dict) or set(settings) != required:
         raise SystemExit(
-            "Configuration must contain exactly base_url, query, form_auth_path, captures and endpoints."
+            "Configuration must contain exactly base_url, query, form_auth_path and endpoints."
         )
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None
@@ -108,31 +98,4 @@ def _read_config(path: Path) -> dict:
             raise SystemExit(
                 "Only content may contain one {page_id} placeholder; endpoint queries are not allowed."
             )
-    if not isinstance(settings["captures"], list):
-        raise SystemExit(
-            "captures must be a list; use an empty list when only probing live authentication."
-        )
-    labels = set()
-    files = set()
-    for capture in settings["captures"]:
-        if not isinstance(capture, dict) or set(capture) != {"file", "label"}:
-            raise SystemExit("Each capture must contain exactly file and label.")
-        filename, label = capture["file"], capture["label"]
-        if (
-            not isinstance(filename, str)
-            or not filename
-            or Path(filename).name != filename
-            or "/" in filename
-            or "\\" in filename
-        ):
-            raise SystemExit("Capture file must be a basename inside captures-dir.")
-        if not isinstance(label, str) or not re.fullmatch(r"HAR[0-9]+|ZIP[0-9]*", label):
-            raise SystemExit("Capture labels must be neutral aliases such as HAR01 or ZIP.")
-        suffix = Path(filename).suffix.lower()
-        if suffix != (".har" if label.startswith("HAR") else ".zip"):
-            raise SystemExit("Capture label and file type must agree.")
-        if label in labels or filename in files:
-            raise SystemExit("Capture filenames and labels must be unique.")
-        labels.add(label)
-        files.add(filename)
     return settings

@@ -1,4 +1,4 @@
-"""Synthetic offline checks. No real capture, account or network is used."""
+"""Synthetic settings and fake HTTP checks; no live network is used."""
 
 from __future__ import annotations
 
@@ -11,17 +11,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "research" / "probes"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from extract_inventory import Inventory, normalize_route
 from confluence_connector.config import (
     _read_config,
     add_config_argument,
-    capture_inputs,
     load_config,
 )
 import probe_auth
@@ -32,7 +28,6 @@ def settings():
         "base_url": "https://private.example.test/wiki",
         "query": "synthetic search",
         "form_auth_path": "rest/tsv/1.0/authenticate",
-        "captures": [],
         "endpoints": {
             "current_user": "rest/api/user/current",
             "search_pages": "rest/api/content/search",
@@ -43,7 +38,7 @@ def settings():
     }
 
 
-class ResearchChecks(unittest.TestCase):
+class ConfigurationChecks(unittest.TestCase):
     def setUp(self):
         _read_config.cache_clear()
         self.temp = tempfile.TemporaryDirectory()
@@ -73,32 +68,6 @@ class ResearchChecks(unittest.TestCase):
                 str(request.url), "https://private.example.test/wiki/rest/tsv/1.0/authenticate"
             )
 
-    def test_capture_alias_must_be_neutral(self):
-        config = settings()
-        config["captures"] = [{"file": "input.har", "label": "PrivateCompany"}]
-        with self.assertRaisesRegex(SystemExit, "neutral aliases"):
-            self.configure(config)
-
-    def test_capture_aliases_cannot_collide(self):
-        config = settings()
-        config["captures"] = [
-            {"file": "one.har", "label": "HAR01"},
-            {"file": "two.har", "label": "HAR01"},
-        ]
-        with self.assertRaisesRegex(SystemExit, "unique"):
-            self.configure(config)
-
-    def test_capture_paths_cannot_escape_input_folder(self):
-        config = settings()
-        config["captures"] = [{"file": "../input.har", "label": "HAR01"}]
-        with self.assertRaisesRegex(SystemExit, "basename"):
-            self.configure(config)
-
-    def test_capture_list_can_be_empty_for_live_auth_only(self):
-        config = self.configure(settings())
-        with self.assertRaisesRegex(SystemExit, "at least one capture"):
-            capture_inputs(config, self.folder)
-
     def test_unsafe_target_url_is_rejected(self):
         for url in (
             "http://private.example.test",
@@ -110,89 +79,6 @@ class ResearchChecks(unittest.TestCase):
                 config["base_url"] = url
                 with self.assertRaises(SystemExit):
                     self.configure(config)
-
-    def test_local_host_and_page_identifiers_are_anonymized(self):
-        host, route, category, keys = normalize_route(
-            "https://private.example.test/display/PrivateProject/PrivatePage?token=secret",
-            "private.example.test",
-            "",
-        )
-        self.assertEqual(
-            (host, route, category),
-            ("confluence.example.com", "/display/{space}/{title}", "content-link"),
-        )
-        self.assertEqual(keys, {"token"})
-
-    def test_microsoft_sso_tenant_domain_is_anonymized(self):
-        host, route, category, keys = normalize_route(
-            "https://autologon.microsoftazuread-sso.com/company.example.test/winauth/ssoprobe",
-            "private.example.test",
-            "",
-        )
-        self.assertEqual(route, "/{tenant-domain}/winauth/ssoprobe")
-
-    def test_har_alias_replaces_filename_and_provenance_uses_real_entry(self):
-        path = self.folder / "private-source.har"
-        path.write_text(
-            json.dumps(
-                {
-                    "log": {
-                        "entries": [
-                            {
-                                "request": {
-                                    "url": "https://private.example.test/rest/api/user/current",
-                                    "method": "GET",
-                                },
-                                "response": {
-                                    "status": 200,
-                                    "content": {
-                                        "mimeType": "application/javascript",
-                                        "text": 'const base="/rest/tsv/1.0";const suffix="/authenticate";',
-                                    },
-                                },
-                            }
-                        ]
-                    }
-                }
-            ),
-            encoding="utf-8",
-        )
-        inventory = Inventory("private.example.test", "")
-        inventory.read_har(path, "HAR01")
-        out = self.folder / "output"
-        out.mkdir()
-        inventory.write(out)
-        published = "".join(p.read_text() for p in out.iterdir())
-        self.assertNotIn(path.name, published)
-        self.assertNotIn("private.example.test", published)
-        source_ids = {row["id"] for row in inventory.sources}
-        for item in inventory.records.values():
-            for source in item["sources"]:
-                self.assertIn(source.removesuffix(":body"), source_ids)
-        self.assertEqual(inventory.captures[0]["name"], "HAR01")
-
-    def test_zip_member_names_and_local_host_are_not_published(self):
-        path = self.folder / "private-archive.zip"
-        with ZipFile(path, "w") as archive:
-            archive.writestr(
-                "private.example.test/display/PrivateProject/PrivatePage.html",
-                '<html><a href="/display/PrivateProject/PrivatePage">Private Person</a></html>',
-            )
-        inventory = Inventory("private.example.test", "")
-        inventory.read_zip(path, "ZIP01")
-        out = self.folder / "output"
-        out.mkdir()
-        inventory.write(out)
-        published = "".join(p.read_text() for p in out.iterdir())
-        for private in (
-            "private.example.test",
-            path.name,
-            "PrivateProject",
-            "PrivatePage",
-            "Private Person",
-        ):
-            self.assertNotIn(private, published)
-        self.assertEqual(inventory.sources[0]["id"], "ZIP01#001")
 
     def test_missing_configuration_fails_before_credentials_or_network(self):
         args = argparse.Namespace(config=self.config_path, base_url=None, query=None, mode="pat")
@@ -263,14 +149,6 @@ class ResearchChecks(unittest.TestCase):
                         demo.main()
                     username.assert_not_called()
                     password.assert_not_called()
-
-    def test_context_path_does_not_leak_private_page_names(self):
-        host, route, category, keys = normalize_route(
-            "https://private.example.test/private-install/display/PrivateProject/PrivatePage",
-            "private.example.test",
-            "/private-install",
-        )
-        self.assertEqual((host, route), ("confluence.example.com", "/display/{space}/{title}"))
 
     def test_relative_and_absolute_paths_share_the_same_settings(self):
         original = self.configure(settings())

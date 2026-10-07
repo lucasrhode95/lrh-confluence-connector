@@ -7,21 +7,21 @@ Date: 2026-10-07. Saved Wiki HTML metadata identifies Confluence Data Center 9.2
 | Method | Evidence | Status and limit |
 |---|---|---|
 | Personal access token bearer | User's successful `--mode pat` run | 200 for current user, both searches, spaces and content-by-ID. Best verified integration credential. Token classification relies on the user's PAT-creation report; the probe transports PAT and OAuth bearer tokens identically. |
-| Password form plus web session | HAR02 E001 failure; HAR04 E001 success; two user-run form probes | API access and immediate fresh-client cookie replay work. Two secure/HttpOnly cookies, one persistent. Cross-process/reboot reuse and cookie lifetime untested. |
-| Microsoft/Entra SAML browser SSO | HAR02 E002/E004-E006; HAR03 E034/E036/E055/E062/E074-E075 | Browser sign-in returns to samlconsumer and authenticated Wiki content. Does not establish a local app OAuth grant. |
+| Password form plus web session | browser observation failure; browser observation success; two user-run form probes | API access and immediate fresh-client cookie replay work. Two secure/HttpOnly cookies, one persistent. Cross-process/reboot reuse and cookie lifetime untested. |
+| Microsoft/Entra SAML browser SSO | Observed browser sign-in sequence | Browser sign-in returns to samlconsumer and authenticated Wiki content. Does not establish a local app OAuth grant. |
 | HTTP Basic | Documented API option and `--mode basic` | No successful Basic result supplied. Form success does not establish Basic acceptance. |
-| Native OAuth authorization code/PKCE | Official provider documentation; `--mode oauth` | Requires incoming application-link registration by admin. No native OAuth token/test. User expects administrators to reject this setup. |
+| Native OAuth authorization code/PKCE | Official provider documentation; `--mode oauth` | Requires incoming application-link registration by admin. No native OAuth token/test. Not registered in the tested environment. |
 | Anonymous | Prior anonymous live probe | 401 for current user, both searches and spaces. Protected reads unavailable anonymously. |
-| CAPTCHA, TOTP/recovery, enrollment/elevation | HAR03 login JS and split MFA chunk | CAPTCHA-related failure captured. Other variants are source-only, not proven enabled/exercised. |
+| CAPTCHA, TOTP/recovery, enrollment/elevation | browser observation login JS and split MFA chunk | CAPTCHA-related failure captured. Other variants are source-only, not proven enabled/exercised. |
 | Legacy application-link OAuth | App-link provider/consumer fragments in ZIP/HAR JS | Source-only, with no registration/grant/API test. Admin integration, not proven self-service. |
 | Service-account client credentials | Current Atlassian documentation only | No service account or instance evidence. Availability for captured 9.2.10 unestablished. |
 | Hosted Rovo/Teamwork Graph | Official docs, discussed in conversation | Admin/cloud bridge. Not configured in the tested environment; no setup attempted. |
 
 ## Form and login-options contracts
 
-`POST /rest/tsv/1.0/authenticate` accepts the captured JSON field names `username,password,rememberMe,targetUrl,captchaId`. HAR02 E001 returns 401 and keys `message,captchaRequired`; HAR04 E001 returns 200 and `next`. Request query key `os_authType` is observed. Shared JS appends the fixed option `os_authType=none` for supported products. Credential/CAPTCHA/target values are not retained.
+`POST /rest/tsv/1.0/authenticate` accepts the captured JSON field names `username,password,rememberMe,targetUrl,captchaId`. One observed form attempt returned 401 and keys `message,captchaRequired`; another returned 200 and `next`. Request query key `os_authType` is observed. Shared JS appends the fixed option `os_authType=none` for supported products. Credential/CAPTCHA/target values are not retained.
 
-HAR03 E032: `GET /rest/authconfig/1.0/login-options` returns keys `results,size,start,limit,isLastPage`. There are two results, with types `LOGIN_FORM` and `IDP`; item shapes are `type,id` and `type,id,buttonText,loginLink`. This is evidence of a form and a configured identity-provider choice, not proof of OIDC.
+browser observation: `GET /rest/authconfig/1.0/login-options` returns keys `results,size,start,limit,isLastPage`. There are two results, with types `LOGIN_FORM` and `IDP`; item shapes are `type,id` and `type,id,buttonText,loginLink`. This is evidence of a form and a configured identity-provider choice, not proof of OIDC.
 
 The user ran `src/probe_auth.py --mode form --remember-me` twice. Both logins and all API reads passed. Two cookies were secure/HttpOnly; one had an expiry. An immediate copied-jar replay in a fresh HTTP client passed current user and CQL search. The probes retain cookies in memory only. They prove neither persistence after process exit nor a guaranteed remember-me duration.
 
@@ -31,17 +31,17 @@ The same corporate password working in Microsoft SSO and the Wiki form is consis
 
 Observed sequence: `GET /login.action` -> `GET /plugins/servlet/external-login/{id}` with `authDest` -> Microsoft `/{tenant}/saml2` -> interactive Microsoft requests -> `POST /plugins/servlet/samlconsumer` -> Wiki session. The consumer POST has form names `SAMLResponse,RelayState` and returns 302.
 
-HAR03 includes Microsoft `POST /common/GetCredentialType`, `POST /{tenant}/login` and `POST /kmsi`, each 200. These are external browser-auth endpoints, not Wiki integration APIs. Microsoft shared-source device-code/telemetry/cookie routes do not prove a Confluence device-code flow.
+browser observation includes Microsoft `POST /common/GetCredentialType`, `POST /{tenant}/login` and `POST /kmsi`, each 200. These are external browser-auth endpoints, not Wiki integration APIs. Microsoft shared-source device-code/telemetry/cookie routes do not prove a Confluence device-code flow.
 
 A normal browser SAML sign-in does not automatically deliver an app token to Python. Browser-managed SSO cookie reuse was considered, but browser inspection did not complete and SSO-only persistence is unproven. HAR cookie arrays inspected are empty; they do not reveal issued cookie values or lifetimes. The cookie counts above come from user-run form probes.
 
 ## MFA and recovery source routes
 
-HAR03 E016's JS defines `contextPath + /rest/tsv/1.0` and appends a supplied suffix in fetch. E014's split MFA chunk imports that fetch module. Full paths below are reconstructed from those sources; methods are source-derived. Only authenticate was actually observed/probed.
+browser observation's JS defines `contextPath + /rest/tsv/1.0` and appends a supplied suffix in fetch. E014's split MFA chunk imports that fetch module. Full paths below are reconstructed from those sources; methods are source-derived. Only authenticate was actually observed/probed.
 
 | Source method | Full path | Source |
 |---|---|---|
-| POST | `/rest/tsv/1.0/authenticate` | E016, HAR02/HAR04 requests |
+| POST | `/rest/tsv/1.0/authenticate` | E016, browser observation/browser observation requests |
 | GET/default fetch | `/rest/tsv/1.0/authenticate/captcha` | E016 |
 | POST | `/rest/tsv/1.0/authenticate/totp-code` | E014 + E016 base |
 | POST | `/rest/tsv/1.0/authenticate/recovery-code` | E014 + E016 base |

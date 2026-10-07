@@ -2,28 +2,6 @@
   "base_url": "https://confluence.example.com",
   "query": "example probe query",
   "form_auth_path": "rest/tsv/1.0/authenticate",
-  "captures": [
-    {
-      "file": "capture-01.har",
-      "label": "HAR01"
-    },
-    {
-      "file": "capture-02.har",
-      "label": "HAR02"
-    },
-    {
-      "file": "capture-03.har",
-      "label": "HAR03"
-    },
-    {
-      "file": "capture-04.har",
-      "label": "HAR04"
-    },
-    {
-      "file": "capture-bundle.zip",
-      "label": "ZIP"
-    }
-  ],
   "endpoints": {
     "current_user": "rest/api/user/current",
     "search_pages": "rest/api/content/search",

@@ -1,6 +1,6 @@
 # API and frontend findings
 
-Date: 2026-10-07. Full routes/provenance are in [ENDPOINTS.md](ENDPOINTS.md), endpoints.csv and source-occurrences.csv. HTTP methods below are captured HAR methods unless marked user probe or source-only.
+Date: 2026-10-07. Discovered route shapes are documented in [ENDPOINTS.md](ENDPOINTS.md). HTTP methods below are captured HAR methods unless marked user probe or source-only.
 
 ## Standalone read access
 

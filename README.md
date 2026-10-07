@@ -19,7 +19,7 @@ Requires the project's Python environment (`uv sync` once if needed).
 For a fresh fork, copy [confluence_config.example.json](confluence_config.example.json) to the
 ignored confluence_config.json and edit its settings. App and probes share this
 required file and a single stdlib loader/validator. Set the base URL, API paths, synthetic
-query, browser login path and capture aliases; an empty captures list works for live probes.
+query and browser login path. Probes test live endpoints and do not consume capture files.
 There are no embedded target, endpoint or query fallback values. Run one mode per invocation:
 
     uv run python src/probe_auth.py --mode anonymous
@@ -59,10 +59,10 @@ including when Confluence is installed under a context path such as /wiki.
 
 The same dictionary configures research. Its --config option selects another file.
 The runtime file contains deployment settings only; PAT/Basic secrets continue to come from
-environment variables or the demo/probe's hidden prompts. Capture filenames and the real
-instance URL remain private; published inventories use neutral HAR/ZIP aliases and
-confluence.example.com. The offline tools depend only on the shared stdlib configuration
-module, not the HTTP client or MCP server.
+environment variables or the demo/probe's hidden prompts. The instance URL remains in private configuration. Temporary browser captures and downloaded
+bundles are inspected outside the repository during exploratory work; only endpoint findings
+and sanitized observations are documented. Probes need configured endpoints and authorization,
+not capture files.
 
 The configuration is JSON data. Never execute downloaded/captured code or capture contents.
 
@@ -82,4 +82,4 @@ Search and spaces calls return compact result objects. Page bodies are returned 
 
 ## Repository publication
 
-Publish source code and sanitized research only. The Git exclusions cover raw network captures/archives, environment secrets, local MCP/editor configuration, encrypted credential files, token/cookie state, databases, downloaded content and probe logs. Real Wiki captures must stay outside Git, including as test fixtures. Keep `uv.lock` and the sanitized research catalogs versioned; review any explicit `.env.example` or `.env.template` before adding it.
+Publish source code and sanitized research only. The Git exclusions cover raw network captures/archives, environment secrets, local MCP/editor configuration, encrypted credential files, token/cookie state, databases, downloaded content and probe logs. Real Wiki captures must stay outside Git, including as test fixtures. Keep `uv.lock` and the endpoint research notes versioned; review any explicit `.env.example` or `.env.template` before adding it.
