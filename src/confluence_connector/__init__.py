@@ -1,0 +1,1 @@
+"""Read-only Confluence Data Center MCP proof of concept."""
