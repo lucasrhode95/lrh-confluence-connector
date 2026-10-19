@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,8 +13,9 @@ import httpx
 from confluence_connector.__main__ import EXIT_AUTH_REQUIRED, EXIT_OK, build_parser, main
 from confluence_connector.auth.store import StoredCredential
 from confluence_connector.bootstrap import AppContext
-from confluence_connector.domain.errors import AuthenticationRequired
+from confluence_connector.domain.errors import AccountMismatch, AuthenticationRequired
 from confluence_connector.domain.models import AuthStatus, CurrentUser
+from confluence_connector.service.spaces import SpaceService
 from confluence_connector.surfaces.mcp_main import build_server
 from fakes.credentials import FakeCredentialSource
 from fakes.settings import settings
@@ -88,6 +88,24 @@ class AppContextChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(store.credential)
         await context.aclose()
         await client.aclose()
+
+
+class SpaceServiceChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_verified_status_rejects_a_different_server_account(self) -> None:
+        expected_usernames: list[str] = []
+
+        class Api:
+            async def current_user(self, *, expected_username: str) -> CurrentUser:
+                expected_usernames.append(expected_username)
+                return CurrentUser(username="different-user")
+
+        api = Api()
+        service = SpaceService(
+            settings(), FakeCredentialSource(), api, "sample-user"  # type: ignore[arg-type]
+        )
+        with self.assertRaisesRegex(AccountMismatch, "different account"):
+            await service.check_auth_status()
+        self.assertEqual(expected_usernames, ["sample-user"])
 
 
 class CommandLineChecks(unittest.TestCase):

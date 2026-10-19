@@ -36,7 +36,7 @@ class SpaceService:
             raise AuthenticationRequired("No Confluence token is stored.")
         current_user = await self._api.current_user(expected_username=credential.username)
         if current_user.username.casefold() != credential.username.casefold():
-            raise Upstream("Confluence returned a different account than the one bound to the stored token.")
+            raise AccountMismatch("Confluence returned a different account than the one bound to the stored token.")
         return AuthStatus(
             configured=True,
             token_stored=True,
