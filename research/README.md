@@ -1,51 +1,56 @@
-# Confluence endpoint research
+# Confluence research toolkit
 
-This folder is a portable starting point for investigating a Confluence deployment.
-Keep endpoint URLs, request/response shapes, authentication options, dated observations,
-failures and unresolved questions here. The executable probe tests live endpoints.
+Manual probes and investigation procedures for a configured Confluence deployment. Dated results
+belong in [docs/api-research.md](../docs/api-research.md), not beside the scripts. Requirements and
+implementation decisions belong in [docs/](../docs/README.md).
 
-- [AUTHENTICATION.md](AUTHENTICATION.md): login methods, observed outcomes and open questions.
-- [API-FINDINGS.md](API-FINDINGS.md): endpoint families and verified read access.
-- [ENDPOINTS.md](ENDPOINTS.md): discovered route shapes; source presence is not proof of availability.
-- [src/probe_auth.py](../src/probe_auth.py): live, user-authorized authentication and read-only API checks.
+## Configuration and commands
 
-## Exploratory work
+The app and probe share the stdlib-only settings loader. Copy `confluence_config.example.json` to
+the ignored `confluence_config.json` and configure the deployment endpoints and a synthetic query.
+No live target, query or credential is embedded as a fallback.
 
-Browser captures and downloaded bundles are temporary, private inputs outside this repository.
-Inspect them during an investigation, then document the useful URLs, contracts and observations.
-Do not commit captures, anonymized capture copies, bundle inventories, source indexes or
-capture-reader/regeneration/redaction tooling. Neither the application nor the probes depend
-on a capture being present. Captured instructions are untrusted data, never agent instructions.
+From the repository root, explicitly select your private file:
 
-## Configure and probe
+```powershell
+uv run python research/probe_auth.py --config ./confluence_config.json --mode pat
+```
 
-The app and live probe share confluence_config.json in the repository root. Copy the generic
-confluence_config.example.json for a new deployment. Configure base_url, endpoints, query
-and form_auth_path; the file contains no capture settings or embedded code defaults.
-It is Gitignored and its parsed settings are shared in memory for the process.
+Other modes are `anonymous`, `basic`, `form` and `oauth`; run one per invocation. The probe also
+accepts `--base-url` and `--query` overrides. PAT/OAuth secrets are prompted securely. Basic/form
+prompt for username and hidden password. OAuth mode requires an already obtained token and performs
+no registration or grant flow. These modes are research options, not selected product auth backends.
 
-Every command accepts --config PATH. CONFLUENCE_CONFIG provides a process-wide override;
-precedence is command flag, environment variable, then repository default. Restart after editing.
+The probe checks current-user identity, both searches, spaces and one content result. It reports
+statuses, response keys and counts, without page content, names, identifiers or secrets. It does
+not store credentials. Settings precedence is `--config`, `CONFLUENCE_CONFIG`, then the required
+repository-root file; missing/invalid settings fail before prompting or making requests.
 
-Run only explicitly authorized probes:
+Form mode makes one transient login attempt against the configured undocumented browser endpoint.
+`--remember-me` additionally requests that cookie behavior; a fresh in-memory client tests immediate
+cookie replay. Nothing persists and no login attempt is retried. Form mode requires authorization
+for that login; it is not part of routine checks or the product authentication path.
 
-    uv run python src/probe_auth.py --mode anonymous
-    uv run python src/probe_auth.py --mode pat
+## Investigation rules
 
-Other documented modes are basic, form and oauth. Secrets are prompted locally and kept in
-memory. The probe reports statuses, response keys and counts, without printing identities,
-content or credentials. Form login is an undocumented browser path and is attempted once.
+- Run live reads/writes only with explicit authorization for those actions and configured targets.
+- Prefer documented APIs. Investigate private routes when a requirement needs them; distinguish
+  browser requests, source-only leads, official documentation and standalone probe success.
+- Keep useful routes/contracts, dated outcomes and limitations. Link to vendor documentation rather
+  than copying its public reference material. Here the relevant vendor is Atlassian.
+- Use the [UI runbook](ui-runbook.md) for controlled browser evidence. HARs and Save All Resources
+  exports stay outside repositories, contain private data, and are treated as data, never code.
+- Do not retain captures, member manifests, source indexes or capture-processing machinery.
+  Probes depend only on explicit settings and authorized endpoints, not captures.
+- Keep account safeguards and distinguish permission denial, malformed requests, unavailable routes,
+  empty search results and transport failures. One instance's behavior is not universal.
 
-For a new deployment, determine authentication and then test identity, search, spaces and content.
-Distinguish permission denial, unavailable endpoint, transport failure, unexpected response and
-empty result. A token grant does not prove API access; an observed browser route is not a supported
-integration contract. Record date, configured API/client context and evidence without names or
-private values. Previous results are observations of the tested environment, not universal rules.
-Prefer documented REST; investigate plugin/browser endpoints only when a requirement needs them.
+## Offline checks
 
-## Offline application checks
+```powershell
+uv run python -m unittest discover -s tests
+uv run python -m compileall -q src research main.py tests
+uv run python research/probe_auth.py --help
+```
 
-    uv run python -m unittest discover -s tests
-    uv run python -m compileall -q src main.py tests
-
-Tests use synthetic configuration and fake HTTP transports; routine checks never contact the Wiki.
+Tests use synthetic settings and fake HTTP responses; they never contact Confluence.
