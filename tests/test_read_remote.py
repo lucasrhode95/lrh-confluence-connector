@@ -231,7 +231,11 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                     "history": {
                         "createdDate": "2026-10-01T00:00:00Z",
                         "createdBy": {"username": "sample-user", "displayName": "Sample User"},
-                        "contributors": {"users": [{"userKey": "sample-user", "displayName": "Sample User"}]},
+                        "contributors": {
+                            "publishers": {
+                                "users": [{"userKey": "sample-user", "displayName": "Sample User"}]
+                            }
+                        },
                     },
                     "version": {
                         "number": 3,

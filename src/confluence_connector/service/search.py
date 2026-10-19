@@ -8,7 +8,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from confluence_connector.domain.errors import ConnectorError, InvalidRequest, Upstream
+from confluence_connector.domain.errors import (
+    AccountMismatch,
+    AuthenticationRequired,
+    ConnectorError,
+    InvalidRequest,
+    Upstream,
+)
 from confluence_connector.domain.models import (
     ContentSearchHit,
     ContentSearchResult,
@@ -84,7 +90,8 @@ class ContentSearch:
         queries_sent = [SearchQuery(source="cql", value=cql)]
         notes: list[str] = []
         next_seen_ids = set(seen_ids)
-        if fields == "title" and start == 0:
+        quicknav_allowed = _quicknav_allowed(normalized_scope)
+        if fields == "title" and start == 0 and quicknav_allowed:
             title_query = " ".join(query_terms)
             queries_sent.append(SearchQuery(source="quicknav", value=title_query))
             try:
@@ -93,6 +100,8 @@ class ContentSearch:
                     limit=min(QUICKNAV_LIMIT, limit),
                     expected_username=self._username,
                 )
+            except (AccountMismatch, AuthenticationRequired):
+                raise
             except ConnectorError as exc:
                 notes.append(
                     "Quick navigation was unavailable ("
@@ -126,8 +135,10 @@ class ContentSearch:
             notes.append("More results exist, but the maximum supported search offset was reached.")
         if page.total_size is not None:
             notes.append("The total is Confluence's approximate count and can change between pages.")
-        if fields == "title":
+        if fields == "title" and quicknav_allowed:
             notes.append("The first page can include additional title matches from quick navigation.")
+        elif fields == "title" and start == 0:
+            notes.append("Quick navigation was skipped so its unfiltered results cannot bypass scope filters.")
         return ContentSearchResult(
             query=query,
             match=match,
@@ -324,12 +335,13 @@ def _check_range(name: str, after: str | None, before: str | None) -> None:
 
 def _build_cql(terms: list[str], match: SearchMatch, fields: SearchFields, scope: SearchScope) -> str:
     search_field = "title" if fields == "title" else "siteSearch"
-    phrase = '"' + " ".join(terms) + '"'
+    escaped_terms = [_text_search_term(term) for term in terms]
     if match == "all":
-        clauses = [f"{search_field} ~ {_cql_literal(term)}" for term in terms]
+        clauses = [f"{search_field} ~ {_cql_literal(term)}" for term in escaped_terms]
     elif match == "any":
-        clauses = [f"{search_field} ~ {_cql_literal(' '.join(terms))}"]
+        clauses = [f"{search_field} ~ {_cql_literal(' '.join(escaped_terms))}"]
     else:
+        phrase = '"' + " ".join(escaped_terms) + '"'
         clauses = [f"{search_field} ~ {_cql_literal(phrase)}"]
     if scope.space_keys:
         clauses.append("space IN (" + ", ".join(_cql_literal(key) for key in scope.space_keys) + ")")
@@ -367,6 +379,32 @@ def _build_cql(terms: list[str], match: SearchMatch, fields: SearchFields, scope
 
 def _cql_literal(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _text_search_term(value: str) -> str:
+    """Escape Lucene-style text syntax before the containing CQL string is escaped."""
+    reserved = frozenset(r'+-&|!(){}[]^~*?\:/"')
+    return "".join("\\\\" + char if char in reserved else char for char in value)
+
+
+def _quicknav_allowed(scope: SearchScope) -> bool:
+    """Quick navigation has no filters; supplement only an otherwise unscoped title search."""
+    return scope.include_archived and not any(
+        (
+            scope.space_keys,
+            scope.space_type,
+            scope.content_types,
+            scope.labels,
+            scope.creator_usernames,
+            scope.contributor_usernames,
+            scope.created_after,
+            scope.created_before,
+            scope.modified_after,
+            scope.modified_before,
+            scope.parent,
+            scope.ancestor,
+        )
+    )
 
 
 def _cursor_ids(value: Any) -> set[str]:

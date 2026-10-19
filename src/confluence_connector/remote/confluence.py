@@ -508,7 +508,11 @@ def _labels(value: Any) -> list[str]:
 def _people(value: Any) -> list[PersonSummary]:
     """Map source contributor containers without inferring user identity from display names."""
     if isinstance(value, dict):
-        value = value.get("results", value.get("users"))
+        publishers = value.get("publishers")
+        if isinstance(publishers, dict):
+            value = publishers.get("users", publishers.get("results"))
+        else:
+            value = value.get("results", value.get("users"))
     if not isinstance(value, list):
         return []
     return [person for item in value if (person := _person(item)) is not None]

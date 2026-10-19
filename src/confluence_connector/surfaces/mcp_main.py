@@ -37,7 +37,8 @@ drafts, comments and attachment references; links to other products remain links
   internally using the server's actual page size.
 - search_content searches page and content fields, or titles only. It accepts literal query text,
   structured scope filters, match=all/any/phrase, and a continuation cursor. Archived spaces are
-  included by default. A title search may add first-page results from quick navigation, labelled by source.
+  included by default. An unscoped title search may add first-page quick-navigation results, labelled
+  by source; the supplement is skipped when filters cannot be applied to that source.
 - find_users searches current people by display name. Pass username alone for an exact lookup, including
   former users; a cursor continues a display-name search.
 - get_page_tree returns ordered child pages from a page or space root, with ancestors for page roots.
@@ -84,7 +85,8 @@ def build_server(context: AppContext) -> FastMCP:
 
         For continuation, pass only the returned cursor. `match` is all, any or phrase; `fields`
         is all or title. Scope supports spaces, space type, content types, labels, creators,
-        contributors, created/modified ranges, parent/ancestor and include_archived.
+        contributors, created/modified ranges, parent/ancestor and include_archived. Quick-navigation
+        supplements apply only to unscoped title searches.
         """
         services = await context.services()
         result = await services.search.search_content(

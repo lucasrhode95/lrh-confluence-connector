@@ -24,7 +24,7 @@ the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
   `start + size` paging and requests up to 500 spaces at a time.
 - `search_content` performs literal, scoped content or title searches with stateless continuation
   cursors. Archived spaces are included by default; title searches can add labelled quick-navigation
-  results.
+  results when no additional filters are set.
 - `find_users` resolves current users by display name and former users by exact username.
 - `get_page_tree` returns ordered children and ancestors from a page or space root with bounded depth.
 - `get_page_metadata` returns history, retained versions, labels, contributors and ancestors for up

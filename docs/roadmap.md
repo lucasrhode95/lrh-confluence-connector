@@ -69,8 +69,11 @@ in the personal space, including a rich-text sample page.
 - Quick-navigation title rows are mapped from the observed `contentNameMatches` envelope using
   `contentId/id`, `title/name`, `spaceKey` or nested `space`, and `url/href`. This route and row shape
   are browser-observed and deployment-specific; verify result coverage and returned fields on the
-  configured instance. User lookup continues to use the CQL search and exact `/rest/api/user?key=`
-  lookup for former users; quick navigation with `type=user` is known to fail.
+  configured instance. The supplement is skipped for scoped title searches because quick navigation
+  does not accept those filters. Search terms escape text-query syntax separately from CQL string
+  quoting; verify metacharacter behavior on the configured instance. User lookup continues to use the
+  CQL search and exact `/rest/api/user?key=` lookup for former users; quick navigation with `type=user`
+  is known to fail.
 - `get_page_tree` uses `rest/api/space/{spaceKey}/content/page` for space-root pages and
   `rest/api/content/{id}/child/page` for descendants. Verify space-root response order and paging on
   the configured instance. Page depth is 1–5 (default 3), counting the selected page as level 1;

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import unittest
 
-from confluence_connector.domain.errors import InvalidRequest, Upstream
+from confluence_connector.domain.errors import (
+    AccountMismatch,
+    AuthenticationRequired,
+    InvalidRequest,
+    Upstream,
+)
 from confluence_connector.domain.models import (
     ContentSearchHit,
     RemoteContentSearchPage,
@@ -25,6 +30,19 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         terms = ["one", "two"]
         self.assertEqual(_build_cql(terms, "any", "all", SearchScope()), "siteSearch ~ 'one two'")
         self.assertEqual(_build_cql(terms, "phrase", "all", SearchScope()), 'siteSearch ~ \'"one two"\'')
+
+    async def test_text_syntax_metacharacters_are_escaped_inside_terms(self) -> None:
+        query, terms = _normalize_query('foo*bar x?y a"b a-b')
+        self.assertEqual(query, 'foo*bar x?y a"b a-b')
+        cql = _build_cql(terms, "all", "all", SearchScope())
+        cql_escape = "\\" * 4
+        for term in (
+            f"foo{cql_escape}*bar",
+            f"x{cql_escape}?y",
+            f'a{cql_escape}"b',
+            f"a{cql_escape}-b",
+        ):
+            self.assertIn(f"siteSearch ~ '{term}'", cql)
 
     async def test_scope_is_quoted_and_timezone_is_normalized_to_utc(self) -> None:
         api = _SearchApi()
@@ -66,6 +84,27 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([hit.content_id for hit in result.hits], ["10"])
         self.assertEqual(len(result.notes), 2)
         self.assertIn("quick navigation was unavailable", result.notes[0].lower())
+
+    async def test_quicknav_is_skipped_when_filters_cannot_be_applied_to_it(self) -> None:
+        api = _SearchApi(pages=[_hit("10", "Scoped title")], quicknav=[_hit("99", "Other space")])
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        result = await service.search_content(
+            "title", fields="title", scope={"space_keys": ["ENG"]}
+        )
+        self.assertEqual(api.quicknav_calls, [])
+        self.assertEqual([query.source for query in result.queries_sent], ["cql"])
+        self.assertTrue(any("skipped" in note for note in result.notes))
+
+    async def test_quicknav_does_not_swallow_account_changes(self) -> None:
+        for error in (
+            AccountMismatch("Synthetic account switch"),
+            AuthenticationRequired("Synthetic sign-out"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                api = _SearchApi(quicknav_error=error)
+                service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+                with self.assertRaises(type(error)):
+                    await service.search_content("title", fields="title")
 
     async def test_cursor_advances_by_actual_size_and_carries_request(self) -> None:
         api = _SearchApi(
@@ -133,7 +172,7 @@ class _SearchApi:
         *,
         pages: list[ContentSearchHit] | None = None,
         quicknav: list[ContentSearchHit] | None = None,
-        quicknav_error: bool = False,
+        quicknav_error: bool | Exception = False,
         page_size: int | None = None,
         total_size: int | None = None,
     ) -> None:
@@ -168,6 +207,8 @@ class _SearchApi:
         self, query: str, *, limit: int, expected_username: str
     ) -> list[ContentSearchHit]:
         self.quicknav_calls.append((query, limit))
+        if isinstance(self.quicknav_error, Exception):
+            raise self.quicknav_error
         if self.quicknav_error:
             raise Upstream("Synthetic quick-navigation outage")
         return self.quicknav[:limit]
