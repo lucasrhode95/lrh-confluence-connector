@@ -127,6 +127,75 @@ content-child/descendant and history route references, including `/pages/resumed
 `/rest/api/content/{id}/history`. This was static inspection only. It establishes no new HTTP status,
 write behavior or successful standalone endpoint. No archive/member inventory is retained.
 
+## Read-only browser-session probes
+
+**2026-10-19 — Live, browser session:** user-authorized read-only `GET` requests sent from a signed-in
+page with `fetch`, following runbook sessions 0–2b. No HAR was kept and nothing was written. One
+instance, one account; counts are rounded indicators, not limits that apply everywhere. PAT behavior on
+the same routes was not retested.
+
+### Instance profile
+
+Version 9.2.10 (`ajs-version-number`), build 9111. The macro browser lists about 100 macros from
+standard Atlassian plugins plus multi-excerpt, PlantUML, numbered headings, a Git plugin, tree view,
+image map and the HTML macro. No diagram editor such as draw.io or Gliffy appeared. The personal
+access token page loads for this account. Whether collaborative editing is enabled was not determined
+without opening an editor.
+
+### Search
+
+| Question | Result |
+|---|---|
+| Page caps | `content/search` returns at most 500 without body expansion, 50 with `body.storage`. `rest/api/search` returns at most 500. `rest/api/content?type=page` returns at most 500 and took about 9 s |
+| Echoed limit | When the cap applies, both report the requested `limit`, not the applied one. `content/search` `_links.next` then advances by the requested limit (`start=1000` after 500 results), skipping results. Page on `start + size` |
+| Deep paging | `start=10000` works on both. `rest/api/search` gives no `next` link |
+| Known title (31 recent pages, one per space) | Quick navigation `/rest/quicknav/1/search` ranked 30/31 first and 31/31 in its results. Quoted `siteSearch` and `title ~` each missed 6, always titles with `-/:()",`. Replacing punctuation with spaces found 9/9 with `siteSearch` and 8/9 with `title ~`. `title = "exact"` matched unless the title contained `"` |
+| Body phrase | Quoted phrases found every page whose phrase was really contiguous, mostly at rank 1. All 5 misses were probe artefacts: phrases joined across element boundaries |
+| Unquoted words | `siteSearch ~ "a b"` is an OR match (total higher than either word alone); `text ~ "a b"` behaves as AND. Unquoted `siteSearch` put the target first for 15/31 pages and in the top 10 for 24/31 |
+| Normalization | Case-insensitive. Accents are folded (Portuguese words with and without diacritics return identical totals). English stemming (`deploy`, `deployed`, `deployments` identical; `configure` ≠ `configuration`). No Portuguese plural stemming. `word*`, `de*oy` and `?` wildcards work; a leading `*` returned almost nothing |
+| Identifiers | Hyphenated `a-b` is split; quoting it equals the phrase `"a b"`. Dotted `a.b` returned nothing, while the phrase `"a b"` found it. Underscore `a_b` is one token, matched only exactly or by `a_*` |
+| Filters | `space`, `creator`, `contributor` (username, not display name), `label`, `parent`, `ancestor`, `created`, `lastmodified` all matched as expected. `space.status` is not a CQL field. Invalid CQL returns 400 with a log referral |
+| Archived spaces | Excluded by default from both endpoints, including explicit `space = <archived key>`. Only `rest/api/search` with `includeArchivedSpaces=true` adds them (about 8% more pages); `content/search` ignores that parameter. Personal spaces are included by default |
+| Types | `page`, `blogpost`, `comment`, `attachment`, `space` and `user` are searchable. Comment text finds the comment, not its page. Attachment results carry an excerpt (indexed content), `resultParentContainer` and media type |
+| Latency | Most searches took 0.3–1 s, including pages edited within the last hour |
+
+### Bodies and macros
+
+`storage`, `view`, `export_view`, `styled_view` and `editor` are all readable. None contained base64
+except one CSS data URI in `styled_view`. `view` keeps `data-macro-name` wrappers and attachment
+identity (`data-linked-resource-id`, `-container-id`, `-default-alias`, MIME type). `export_view` is
+rendered, but it drops the macro wrappers and attachment IDs. Large pages took 3–6 s per
+representation.
+
+| Macro | `view` result | Storage source |
+|---|---|---|
+| `include`, `excerpt-include` | Included text resolved inline | `ri:page` reference |
+| `expand` | Full body present with a hidden class | Rich-text body |
+| `code` | Code text plus a `language` parameter | Plain-text body |
+| `plantuml` | Client-side script; no server-rendered image | PlantUML source text |
+| `view-file` | Embedded-file link with attachment ID and filename | `ri:attachment` |
+| `jira` | "Unable to render" warning, also in the UI page HTML | `key`, `server`, `serverId`, `columns` |
+| `html` | No `data-macro-name` wrapper found | Unresolved |
+
+Inline-comment anchors appear in storage (`ac:inline-comment-marker`) and in rendered output.
+
+### Trees, attachments, comments, versions
+
+- `child/page` returned all 205 children with `limit=500`; one call with `expand=position` stopped at
+  200. An embedded `children.page` expansion reports only 25.
+- `descendant/page` returned HTTP 500 for every page and limit tried. CQL `ancestor = {id}` works.
+  `/plugins/pagetree/naturalchildren.action` returns every child as HTML.
+- `child/attachment` returned all 38 with `limit=500`, including `fileSize`, `mediaType` and the
+  download link `/download/attachments/{container}/{filename}?version=…&api=v2`. A browser download
+  returned 200 with no redirect and `inline` disposition. `/rest/api/content/{id}/download` returned 404.
+- `child/comment` returns top-level comments only. `depth=all` adds replies, which have comment
+  ancestors. `extensions.location` is `footer` or `inline`. Inline comments carry `originalSelection`
+  and `markerRef`. Resolution status takes the values `open`, `resolved` and `dangling`.
+  `/rest/inlinecomments/1.0/comments` adds author and permission fields.
+- `/rest/api/content/{id}/version` returned 404; `/rest/experimental/content/{id}/version` lists
+  versions (200 per page, `next` link). `?status=historical&version=N` reads old bodies, including
+  version 1 of a page at version 738.
+
 Official schemas and CQL behavior remain at the
 [Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and
 [CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/).

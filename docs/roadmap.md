@@ -24,10 +24,16 @@ Delete items when complete. Snapshot **2026-10-18**.
 
 ## Live verification
 
-- Begin with UI search and representative page/tree reading in the [runbook](../research/ui-runbook.md).
-  Compare known-title/body hits, filters, paging, archived/personal content and indexing delay.
+- Read-only sessions 0–2b ran on 2026-10-19 through a browser session (see
+  [API research](api-research.md)). Still open from them: whether collaborative editing is on, search
+  by a deactivated contributor, the HTML macro's rendered output, and the same routes with a PAT.
+- Decide from that evidence: normalizing title and identifier punctuation, quoting or ANDing multi-word
+  queries, `includeArchivedSpaces` via `rest/api/search`, `view` versus `storage` for reads, CQL
+  `ancestor` in place of the failing `descendant/page`, and paging on `start + size`.
 - Capture rich content, comments, attachment references, metadata and version behavior; then perform
-  explicitly authorized disposable draft/page/move/delete tests.
+  explicitly authorized disposable draft/page/move/delete tests, preferably in the personal space.
+  Establish whether collaborative drafts are visible through documented REST and how stale-version
+  edits conflict.
 - Verify token lifecycle, identity/account safeguards, concurrent processes and eventual export behavior.
 
 Live probes require authorization for the exact reads/writes performed. Resource bundles expose UI
