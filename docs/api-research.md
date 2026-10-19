@@ -149,15 +149,19 @@ without opening an editor.
 | Page caps | `content/search` returns at most 500 without body expansion, 50 with `body.storage`. `rest/api/search` returns at most 500. `rest/api/content?type=page` returns at most 500 and took about 9 s |
 | Echoed limit | When the cap applies, both report the requested `limit`, not the applied one. `content/search` `_links.next` then advances by the requested limit (`start=1000` after 500 results), skipping results. Page on `start + size` |
 | Deep paging | `start=10000` works on both. `rest/api/search` gives no `next` link |
-| Known title (31 recent pages, one per space) | Quick navigation `/rest/quicknav/1/search` ranked 30/31 first and 31/31 in its results. Quoted `siteSearch` and `title ~` each missed 6, always titles with `-/:()",`. Replacing punctuation with spaces found 9/9 with `siteSearch` and 8/9 with `title ~`. `title = "exact"` matched unless the title contained `"` |
+| Known title (31 recent pages, one per space) | Quick navigation `/rest/quicknav/1/search` (the undocumented route behind the header search's suggestion list, first seen in browser captures 2026-10-07) ranked 30/31 first and 31/31 in its results. Quoted `siteSearch` and `title ~` each missed 6, always titles with `-/:()",`. Replacing punctuation with spaces found 9/9 with `siteSearch` and 8/9 with `title ~`. `title = "exact"` matched unless the title contained `"` |
 | Body phrase | Quoted phrases found every page whose phrase was really contiguous, mostly at rank 1. All 5 misses were probe artefacts: phrases joined across element boundaries |
 | Unquoted words | `siteSearch ~ "a b"` is an OR match (total higher than either word alone); `text ~ "a b"` behaves as AND. Unquoted `siteSearch` put the target first for 15/31 pages and in the top 10 for 24/31 |
-| Normalization | Case-insensitive. Accents are folded (Portuguese words with and without diacritics return identical totals). English stemming (`deploy`, `deployed`, `deployments` identical; `configure` ≠ `configuration`). No Portuguese plural stemming. `word*`, `de*oy` and `?` wildcards work; a leading `*` returned almost nothing |
-| Identifiers | Hyphenated `a-b` is split; quoting it equals the phrase `"a b"`. Dotted `a.b` returned nothing, while the phrase `"a b"` found it. Underscore `a_b` is one token, matched only exactly or by `a_*` |
+| Normalization | Case-insensitive. Accents are folded (Portuguese words with and without diacritics return identical totals). English stemming (`deploy`, `deployed`, `deployments` identical; `configure` ≠ `configuration`). No Portuguese plural stemming. `word*`, `de*oy` and `?` wildcards work; a leading `*` returned almost nothing. Stemming and stop words follow the instance-wide *Indexing Language* that a Confluence administrator sets ([documentation](https://confluence.atlassian.com/doc/configuring-indexing-language-150130.html)). The results fit English, the default. The setting is not visible to users, and the connector cannot change it per query |
+| Escaping title punctuation | 8 known titles missed by quoted searches were retried three ways. As written (only `\` and `"` escaped): `siteSearch` found 3/8, `title ~` found 2/8. Escaping CQL reserved characters with `\\` ([documented](https://developer.atlassian.com/cloud/confluence/cql-functions/)): 6/8 and 6/8. Replacing punctuation with spaces: 8/8 and 7/8, at rank 1 except one at rank 7. Escaping is less reliable than spaces here, consistent with a [developer forum report](https://community.developer.atlassian.com/t/cql-title-search-with-special-characters/13601) |
+| Identifiers | Hyphenated `a-b` is split; quoting it equals the phrase `"a b"`. A dotted pair of words taken from prose, `a.b`, returned nothing, while the phrase `"a b"` found it. Underscore `a_b` is one token, matched only exactly or by `a_*`. Code identifiers shaped `x_y.z`, found in code macros on 4 pages, matched only when searched whole (3/4; one matched nothing). Searching their parts (`x_y`, `z`, `"x_y z"`, `"x y"`, or `x_y AND z`) missed every time, so the whole identifier is one index token |
 | Filters | `space`, `creator`, `contributor` (username, not display name), `label`, `parent`, `ancestor`, `created`, `lastmodified` all matched as expected. `space.status` is not a CQL field. Invalid CQL returns 400 with a log referral |
 | Archived spaces | Excluded by default from both endpoints, including explicit `space = <archived key>`. Only `rest/api/search` with `includeArchivedSpaces=true` adds them (about 8% more pages); `content/search` ignores that parameter. Personal spaces are included by default |
 | Types | `page`, `blogpost`, `comment`, `attachment`, `space` and `user` are searchable. Comment text finds the comment, not its page. Attachment results carry an excerpt (indexed content), `resultParentContainer` and media type |
 | Latency | Most searches took 0.3–1 s, including pages edited within the last hour |
+| Throttling | Not load-tested. Hundreds of mostly sequential requests and one parallel write pair saw no 429 or `Retry-After`. A browser-session response carried no `X-RateLimit-*` headers, which Data Center's administrator-configured [rate limiting](https://confluence.atlassian.com/doc/improving-instance-stability-with-rate-limiting-992679004.html) would add. PAT responses were not inspected for them |
+| Concurrency (2026-10-19, user-authorized, browser session) | Requests: fixture page `GET` with `expand=body.view,version` (5.4 KB). The server speaks HTTP/1.1 only; connections were reused. 6 parallel: all 200, 854 ms wall, median 582 ms (one earlier attempt failed with a browser "Failed to fetch" network error and no HTTP status). 10 parallel: all 200, 594 ms wall, median 333 ms; the browser allows 6 connections per host on HTTP/1.1, so at most 6 were truly concurrent. 50 sequential: all 200, 15.4 s, median 285 ms, p90 329 ms, max 1068 ms. Time to first byte was about 270 ms with no connection setup, so server processing, not transfer, dominates. No 429, `Retry-After` or `X-RateLimit-*` headers appeared |
+| One combined read versus split reads (2026-10-19, one page, two runs) | One `GET` expanding `body.view`, `body.storage`, `version`, `history`, `children.attachment` and `children.comment.body.view` took 3.4 s and 1.0 s. The same data as three requests (page bodies; `child/attachment?limit=500`; `child/comment?depth=all`) took 1.2 s and 1.7 s in sequence, and 0.75 s and 0.38 s in parallel. The embedded expansions are also incomplete: attachments stop at 25 (`limit` 25) and comments omit replies. Separate parallel requests are both faster and complete |
 
 ### Bodies and macros
 
@@ -178,6 +182,43 @@ representation.
 | `html` | No `data-macro-name` wrapper found | Unresolved |
 
 Inline-comment anchors appear in storage (`ac:inline-comment-marker`) and in rendered output.
+
+**2026-10-19 — Live, browser session, fixture page:** no server route returns plain text.
+
+| Route | Result |
+|---|---|
+| `POST /rest/api/contentbody/convert/{to}` (documented) from storage | `view`, `export_view`, `styled_view` and `editor` return HTML. `wiki` and `plain` return 500; `text`, `atlas_doc_format` and `anonymous_export_view` return 404 |
+| Same route, wiki markup → storage | 200 |
+| *Export to Word*, `/exportword?pageId=` (undocumented) | 200 `application/vnd.ms-word`, an HTML document inside a MIME wrapper; includes code and expand text and images |
+| *Export to PDF*, `/spaces/flyingpdf/pdfpageexport.action?pageId=` (`GET`) | 403 HTML |
+| *View Source*, `/plugins/viewsource/viewpagesrc.action?pageId=` | HTML page showing the editor format (`wysiwyg-macro` placeholders), the same as `body.editor` |
+| *View Storage Format*, `/plugins/viewstorage/viewpagestorage.action?pageId=` | `text/plain` storage XHTML |
+
+**2026-10-19 — Live, browser session, rich-text writes:** 25 snippets of typical AI-generated HTML and
+Confluence storage tags were checked with `contentbody/convert` (storage → view). The safe ones were
+saved together as `Connector Lab Rich` in the personal space.
+
+| Input | Saved storage and rendering |
+|---|---|
+| Headings, `strong/em/u/s/sup/sub`, inline `<code>`, nested lists, `<blockquote>`, tables with `<thead>`, `colspan` and `text-align`, task lists | Kept unchanged |
+| `<br/>`, `<hr/>` (XHTML) | Kept, as `<br />` and `<hr />` |
+| `<br>`, `<hr>` (HTML5 void) and unclosed tags | Save rejected with 400 "Error parsing xhtml" giving row and column. `convert` instead returned 200 with a `fatal-render-error` block |
+| Named and numeric entities (`&nbsp;`, `&mdash;`, `&#8212;`) | Accepted; stored as characters |
+| Code macro (`language`, `title`, `linenumbers`) | Kept; renders as a titled panel with line numbers and highlighting |
+| `<pre><code class="language-…">` and plain `<pre>` | Kept, but render as bare monospace text without a panel, highlighting or language |
+| Inline `<code>` | Monospace font only; no background or padding on this instance's theme |
+| Info/note/warning/tip, expand, status, table of contents, emoticon, user mention, page link by title | Kept. Every macro gains `ac:schema-version` and a stored `ac:macro-id`, which `view` does not expose |
+| Inline `style` on `span` and `div` | Kept, with values normalized |
+| `<details>`, `<summary>`, `<mark>`, `<kbd>` | Tags stripped, text kept |
+| `<script>`, `<style>`, `onclick`, `javascript:` links, HTML macro | Passed through `convert` to `view` unchanged. Not saved to any page; whether page display sanitizes them was not tested |
+
+**2026-10-19 — Live, browser session, storage structure** (200 pages edited since 2025; pages whose
+storage failed a quick XML parse were skipped): average storage 19 KB. 19 pages use `ac:layout`
+columns and 12 carry inline-comment markers. Of 105 parsed pages with headings, 74 have all headings
+at the top level, 16 have headings inside layout cells and 9 inside macro bodies (panels, expand).
+
+Macro rendering can be delegated to the server (`view`, or `convert` for any storage body), but text
+extraction from HTML stays with the connector.
 
 ### Trees, attachments, comments, versions
 
@@ -230,6 +271,23 @@ touched.
 | Rename | `PUT` with new title | Same ID. The tiny link redirects to the page; the old `/display/{space}/{title}` URL returned 404 |
 | Trash | `DELETE /rest/api/content/{id}` | 204. `GET` 404; `?status=trashed` 200. A second `DELETE` returned 404, so it does not purge. The trashed page's child became a top-level page in the space, not a child of the grandparent |
 
+**2026-10-19 — Source (move dialog JavaScript) and live:** the UI's move dialog offers a *New space*
+field when the user may move the page and its children between spaces. It submits
+`POST /pages/movepage.action` (`dataType: json`) with `pageId`, the target `spaceKey`, `mode`
+(`ASYNC` or `LEGACY`), and one of: `position` (`above`, `below` or `append`) with `targetId`;
+`targetTitle` with `position=append`; or `position=topLevel` for the space root. `ASYNC` returns
+`longTaskId` and `page`, which the UI polls until the task finishes, plus `validationErrors`,
+`actionErrors` and `errorMessage` on failure.
+
+**2026-10-19 — Live, user-authorized cross-space move:** the `Connector Lab Sample` page (one child,
+two attachments, one comment, one label) was moved under a user-chosen page in another space with
+`position=append`, `targetId`, `spaceKey` and `mode=ASYNC`. The response carried `longTaskId`;
+`GET /rest/api/longtask/{id}` (documented) reported `successful: true` and "Page move complete." after
+about 0.3 s. The page kept its ID and version (no new version). Its child moved with it, and
+attachments (still downloadable), comment and label were intact. The page was moved straight back the
+same way, with the same results, and no longer appears under the target page. The documented copy routes `POST /rest/api/content/{id}/copy` and `…/pagehierarchy/copy` return 404 on
+9.2.10.
+
 Fixture text in the page body, comment text, attachment content, image alt text, and text inside
 `code` and `expand` macros were all found by search within seconds. A renamed page was found by its
 new title shortly afterwards. Remaining in the personal space: `Connector Lab`, `Connector Lab
@@ -246,9 +304,48 @@ prompt, sent read-only `GET`s to the routes above. Results matched the browser s
 the inline-comments plugin, the experimental version list, historical version 1, the page-tree action
 and the macro browser all returned 200. `descendant/page` again returned 500.
 
-The attachment download link (`_links.download`, redirects followed) returned 200 `text/html` with no
-`Content-Disposition`, not the file. PAT access to `/download/attachments/…` is therefore unproven,
-possibly a sign-in page. The final URL and body were not inspected.
+In that first run, an attachment download link picked from a search result (redirects followed)
+returned 200 `text/html` with no `Content-Disposition`. The final URL and body were not inspected,
+and the result was not reproduced in the follow-up below.
+
+### PAT writes, downloads and concurrency
+
+**2026-10-19 — Live, PAT, user-run `httpx` script on fixtures:**
+
+- **Download:** the fixture's text attachment link returned 200 with no redirect, the attachment's own
+  media type and exactly the listed size, with or without the query string. PAT downloads from
+  `/download/attachments/…` work.
+- **Writes:** create, update, label, parent change through `ancestors`, and trash all succeeded with
+  the bearer token. A REST `POST` needed no `X-Atlassian-Token` header. `POST /pages/movepage.action`
+  with `X-Atlassian-Token: no-check` and no `atl_token` returned the JSON long task, which completed
+  successfully.
+- **Concurrency:** 30 reads at 6 in parallel took 3.4 s and 50 reads at 10 in parallel took 2.9 s,
+  all 200, median about 280 ms. The slowest request in each run (about 2.8 s) fell in the first wave.
+  No 429, `Retry-After` or `X-RateLimit-*` headers appeared.
+
+## Users, drafts and trash
+
+**2026-10-19 — Live, browser session:**
+
+- **User lookup:** `rest/api/search` with `type = user AND user.fullname ~ "name"` (also `title ~` and
+  `siteSearch ~`) finds current users. `/rest/prototype/1/search/user.json` works too, but is a
+  prototype route. `rest/api/search/user` returns 404, and quick navigation with `type=user` returns
+  500. CQL `creator.fullname ~` and `contributor.fullname ~` match current users by name, giving the
+  same totals as `creator = username`.
+- **Former users:** 24 of 26 authors of the oldest pages were absent from user search. Their display
+  names show only their username, and `creator.fullname ~` and `contributor.fullname ~` return
+  nothing for them. `GET /rest/api/user?key=` still returns them as `known`, and `creator = "username"`
+  still finds their pages.
+- **Draft listing:** `GET /rest/api/content?type=page&status=draft`, across all spaces or one
+  `spaceKey`, lists the user's new-page drafts. CQL with `cqlcontext` `contentStatuses: ["draft"]` did
+  not include the draft. With the user's explicit approval, `DELETE /rest/api/content/{id}?status=draft`
+  deleted a synthetic draft (204). It was then absent from `?status=draft`, `?status=trashed`, the
+  draft listing and the Drafts page: deletion is permanent and bypasses the trash.
+- **Trash:** `GET /rest/api/content?spaceKey=…&status=trashed` lists the space trash.
+  `PUT /rest/api/content/{id}?status=trashed` with `status: current` and the next version number
+  restores a page (200, version unchanged). A restored page has no ancestors: it returns at the space
+  root, not under its former parent. A child whose parent was trashed and later restored also stays
+  at the root. Trashing loses the hierarchy; restoring does not bring it back.
 
 Official schemas and CQL behavior remain at the
 [Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and

@@ -2,41 +2,72 @@
 
 Open work only. Settled requirements are in [requirements](requirements.md); the current implementation
 is in [architecture](architecture.md); dated evidence is in [API research](api-research.md).
-Delete items when complete. Snapshot **2026-10-18**.
+Delete items when complete. Snapshot **2026-10-19**.
+
+Work is split by what it needs: **implementation** is code still to write; **decisions** wait for the
+user; **live verification** checks something on the real instance before it is built or relied on.
 
 ## Implementation
 
-- Expand the read-only proof of concept into structured search scopes, complete page/tree reads,
-  batch metadata, textual extraction, comments and attachment references/retrieval.
-- Add batch ZIP extraction with page/version selection and a parsing/fetching scope.
-- Add page/draft CRUD and moves after verifying lifecycle and conflict semantics.
-- Add encrypted persistent token storage, explicit logout and cross-process coordination.
-- Establish the service/remote/domain boundaries, typed source metadata, reliable errors and safe
-  retries needed by those capabilities; keep MCP as the only product surface.
+### Proposed MCP tools
+
+Names follow the sibling connectors (no product prefix; the MCP server name namespaces them). The
+three proof-of-concept tools (`confluence_search_pages`, `confluence_list_spaces`, `confluence_get_page`)
+are replaced, not kept as aliases. **Ready** means the evidence is enough to build it; otherwise the
+blocking decision (D) or verification (V) is named. Every write tool also waits on V2, because writes
+were verified only through a browser session.
+
+| Tool | Purpose | Status |
+|---|---|---|
+| `auth_status` | Configured instance, whether a token is stored, current user | Ready |
+| `search_content` | Query plus `scope` (spaces, space type, content types, labels, creators/contributors, created/modified ranges, parent/ancestor, archived on by default), `match` and `fields` per [requirements §3](requirements.md#3-search-and-navigation); cursor paging | Ready |
+| `find_users` | Resolve a current user's name to a username for creator/contributor filters; former users are findable only by username | Ready |
+| `list_spaces` | Spaces by name, type and status, including archived | Ready |
+| `get_page_tree` | Children (ordered, paged) and ancestors from a page or space root; depth-bounded | Ready |
+| `get_pages` | Read pages by ID or URL as text with attachment/macro markers, comments per parse scope, and short version metadata | Ready |
+| `get_page_metadata` | Fuller metadata for one or many pages: history, version list, labels, contributors, ancestors | Ready |
+| `download_attachments` | Save named attachments of a page locally; return paths | Ready |
+| `export_pages` | Pages and versions plus parse scope into one ZIP with text and attachment folders | Ready |
+| `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Ready |
+| `update_page` | Replace title and/or whole body with an explicit `expected_version` | Ready |
+| `publish_draft` | Publish a new-page draft, keeping its ID | Ready |
+| `list_drafts` | The user's new-page drafts | Ready |
+| `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Ready |
+| `move_page` | Move to a target space, parent (or space root) and optional position, as one call | Ready |
+| `delete_page` | Move a page to the trash, with `children`: refuse (default), `move_up` or `trash` | Ready |
+| `restore_page` | Restore a trashed page; Confluence restores to the space root, so the connector applies a placement | Ready |
+| `set_labels` | Add or remove page labels | Ready |
+
+Logging in and out stay command-line subcommands (`confluence-connector login` with a hidden prompt,
+`confluence-connector logout`), so a token never passes through an agent conversation. Comment and attachment writes are not
+in the requirements and are not proposed here.
+
+### Foundations shared by all tools
+
+- Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
+  mirrored by offline tests with synthetic fake responses.
+- Typed models carrying source metadata and ordered content references (page, version, attachment,
+  comment, macro) mapped from REST JSON and storage/`view` structure before any text is rendered.
+- REST client covering the observed contracts: paging on `start + size` (never the echoed `limit` or
+  `next` link), 500-item caps, 409 version conflicts, 400 CQL errors and 500 log referrals.
+- Encrypted token storage with `msal-extensions` and the `login`, `logout`, `status` and `serve`
+  subcommands ([architecture §3.1](architecture.md#31-token-storage-decided-not-built)); remove `main.py`.
+- Retry and error policy from the shared rules: bounded read retries, writes retried only on proven
+  non-application, uncertain writes reported. Offline tests with fake responses: connection reset then
+  success, read timeout retried, write timeout reported as uncertain, persistent 500 reported after
+  the retries, and 429 with `Retry-After`. Multi-step writes (page plus labels) report what was
+  completed.
 
 ## Decisions
 
-- Use search probes to decide whether native search is sufficient; choose a local index/cache only
-  if evidence warrants it. Search traversal, paging contracts and coverage limits remain open.
-- Select enriched content representation, plain-text edit semantics, macro handling and export schema.
-- Set draft/publish/delete behavior, cancellation and token storage/revocation contracts from evidence.
-- Choose representative acceptance cases and practical operation/output limits.
+None open. Settled decisions are in [requirements](requirements.md).
 
 ## Live verification
 
-- Read-only sessions and personal-space write tests ran on 2026-10-19 through a browser session (see
-  [API research](api-research.md)). Still open: attachment download and writes with a PAT, search by a
-  deactivated contributor, trash restore/purge, hierarchy deletion, inline-comment creation and cross-space moves.
-- Decide whether unpublished edits of published pages (undocumented editor-draft routes) and sibling
-  reordering (`movepage.action`) are worth supporting, since documented REST covers neither.
-- Decide from that evidence: normalizing title and identifier punctuation, quoting or ANDing multi-word
-  queries, `includeArchivedSpaces` via `rest/api/search`, `view` versus `storage` for reads, CQL
-  `ancestor` in place of the failing `descendant/page`, and paging on `start + size`.
-- Capture rich content, comments, attachment references, metadata and version behavior; then perform
-  explicitly authorized disposable draft/page/move/delete tests, preferably in the personal space.
-  Establish whether collaborative drafts are visible through documented REST and how stale-version
-  edits conflict.
-- Verify token lifecycle, identity/account safeguards, concurrent processes and eventual export behavior.
+Each check needs authorization for the exact requests. Synthetic `Connector Lab` fixture pages remain
+in the personal space, including a rich-text sample page.
 
-Live probes require authorization for the exact reads/writes performed. Resource bundles expose UI
-code, not successful requests. Record dated results and limitations in the research record.
+- Token lifecycle (expiry, revocation visibility) and concurrent processes once D1 is built.
+
+Resource bundles expose UI code, not successful requests. Record dated results and limitations in the
+research record.

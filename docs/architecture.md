@@ -51,6 +51,26 @@ Application credentials come from either `CONFLUENCE_PAT` or both `CONFLUENCE_US
 There is no credential persistence, account binding, sign-out, shared token provider or cross-process
 authentication coordination yet. The Microsoft authentication library is not used.
 
+### 3.1 Token storage (decided, not built)
+
+Decided 2026-10-19; the current code still reads environment credentials.
+
+The token will be stored in an encrypted file in a per-user application folder, written through
+`msal-extensions` (`build_encrypted_persistence`) and guarded by its `CrossPlatLock`. The library is
+used only as a storage layer. It persists arbitrary bytes, so no MSAL sign-in or Microsoft token is
+involved. It was chosen because:
+
+- it encrypts with the operating system's user-scoped protection (DPAPI on Windows, the keychain or
+  keyring elsewhere), with no key for us to manage;
+- its file lock lets concurrent MCP processes and the CLI read and replace the token safely;
+- `lrh-m365-auth` already uses it, so storage and locking behave the same across the `lrh-*`
+  connectors.
+
+Every Confluence call reads the token from storage under the lock, so a logout or replacement takes
+effect in all running processes at their next call. Missing encryption is an error; there is no
+plaintext fallback. `confluence-connector` will gain `login`, `logout`, `status` and `serve`
+subcommands through a `confluence_connector.__main__` entry point, replacing `main.py`.
+
 ## 4. Retrieval and errors
 
 The client escapes a text query into a fixed CQL expression; it does not accept raw caller CQL.
