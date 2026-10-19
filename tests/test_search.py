@@ -77,6 +77,27 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([query.source for query in result.queries_sent], ["cql", "quicknav"])
         self.assertEqual(api.quicknav_calls[0][0], "title")
 
+    async def test_quicknav_does_not_exceed_the_page_limit_or_hide_unreturned_hits(self) -> None:
+        api = _SearchApi(
+            pages=[_hit(str(index), f"CQL {index}") for index in range(1, 12)],
+            quicknav=[
+                _hit("1", "CQL 1", source="quicknav"),
+                _hit("11", "Quick title 11", source="quicknav"),
+                _hit("12", "Quick title 12", source="quicknav"),
+            ],
+            page_size=10,
+            total_size=11,
+        )
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+
+        first = await service.search_content("title", fields="title", limit=10)
+        self.assertEqual(len(first.hits), 10)
+        self.assertEqual([hit.content_id for hit in first.hits], [str(i) for i in range(1, 11)])
+        self.assertIn("quicknav", first.hits[0].sources)
+
+        second = await service.search_content(cursor=first.next_cursor)
+        self.assertEqual([hit.content_id for hit in second.hits], ["11"])
+
     async def test_quicknav_failure_keeps_cql_results(self) -> None:
         api = _SearchApi(pages=[_hit("10", "CQL title")], quicknav_error=True)
         service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]

@@ -107,10 +107,12 @@ class ContentSearch:
                     "Quick navigation was unavailable ("
                     f"{type(exc).__name__}); CQL title matches are returned."
                 )
-            next_seen_ids.update(
-                hit.content_id for hit in quicknav_hits if hit.content_id is not None
-            )
-        hits = _merge_hits(page.hits, quicknav_hits, seen_ids)
+        hits = _merge_hits(page.hits, quicknav_hits, seen_ids)[:limit]
+        next_seen_ids.update(
+            hit.content_id
+            for hit in hits
+            if hit.content_id is not None and "quicknav" in hit.sources
+        )
         next_start = page.start + page.size
         # ``totalSize`` is approximate on this endpoint. A full server page is the
         # reliable signal to offer a continuation; an extra empty page is harmless.

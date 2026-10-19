@@ -100,10 +100,12 @@ Search sends only CQL constructed from literal terms and validated scope values.
 one `siteSearch` or `title` clause per term joined by AND; `any` sends the terms together; `phrase`
 preserves their order. Query punctuation is retained inside terms and stripped at their edges. Title
 search replaces punctuation with spaces and adds the observed quick-navigation source on the first
-page only when no scope filters are set; each hit reports its source. Quick-navigation failures leave
-CQL results usable, while account changes still fail the call. Cursors carry the normalized request
-and actual next offset, are revalidated on use, and do not depend on process memory. Full pages can
-have a continuation even when Confluence's approximate total suggests otherwise.
+page only when no scope filters are set; CQL hits keep their order and the merged page is capped at the
+requested limit. Each hit reports its source, and cursors remember only quick-navigation IDs included
+in the returned page. Quick-navigation failures leave CQL results usable, while account changes still
+fail the call. Cursors carry the normalized request and actual next offset, are revalidated on use, and
+do not depend on process memory. Full pages can have a continuation even when Confluence's approximate
+total suggests otherwise.
 
 Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
 `contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
