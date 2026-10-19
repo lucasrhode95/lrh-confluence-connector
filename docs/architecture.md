@@ -16,15 +16,18 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes two read-only tools:
+The MCP surface currently exposes six read-only tools:
 
 | Tool | Implemented behavior |
 |---|---|
 | `auth_status` | Offline configured-instance, stored-token, and account-name status |
 | `list_spaces` | Current and archived visible spaces with IDs, keys, names, types, statuses and same-instance links |
+| `search_content` | Literal CQL search with structured scope, approximate totals, stateless cursors, and labelled quick-navigation title matches |
+| `find_users` | Current users by display-name query; former users by exact username |
+| `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
+| `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
 
-Search, page reads, tree navigation, comments, attachment downloads, exports and write tools are not
-implemented yet.
+Page text reads, comments, attachment downloads, exports and write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -36,14 +39,20 @@ implemented yet.
 - `src/confluence_connector/logs.py`: process-scoped rotating logs with credential redaction.
 - `src/confluence_connector/auth/store.py`: encrypted PAT and username persistence under
   `CrossPlatLock`.
-- `src/confluence_connector/domain/`: connector errors and typed status/space results.
+- `src/confluence_connector/domain/`: connector errors and typed status, space, search, user, tree and metadata results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
   checks; it never logs request URLs or payloads.
-- `src/confluence_connector/remote/confluence.py`: configured current-user and space routes, space
-  paging and response mapping.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for later page tools; it
+- `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
+  quick navigation, user lookup, ordered children and page-history mapping.
+- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and later page tools; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
+- `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
+  merging and self-contained search cursors.
+- `src/confluence_connector/service/users.py`: display-name paging and exact username lookups.
+- `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
+- `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
+- `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
 
@@ -87,11 +96,28 @@ using the returned `start + size`; the connector does not use the echoed `limit`
 `next` URL. Invalid offsets, sizes, totals and duplicate spaces fail with an upstream error instead
 of silently dropping entries.
 
+Search sends only CQL constructed from literal terms and validated scope values. `match=all` creates
+one `siteSearch` or `title` clause per term joined by AND; `any` sends the terms together; `phrase`
+preserves their order. Query punctuation is retained inside terms and stripped at their edges. Title
+search replaces punctuation with spaces and adds the observed quick-navigation source on the first
+page; each hit reports its source. Quick-navigation failures leave CQL results usable. Cursors carry
+the normalized request and actual next offset, are revalidated on use, and do not depend on process
+memory. Full pages can have a continuation even when Confluence's approximate total suggests otherwise.
+
+Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
+`contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
+`include_archived` (true by default). Dates with offsets are normalized to UTC. Page/space trees keep
+the server's child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
+Metadata accepts at most 20 references; experimental page versions are read in 200-item pages and
+capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
+historical metadata reads are not implemented. Results identify truncation or per-reference failures.
+
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title
 inside their space, and a renamed title fails clearly. Short-link redirects are followed manually and
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
-comment focus are ignored. No page-reading MCP tool exposes this resolver yet.
+comment focus are ignored. Search scope, page trees and metadata use this resolver for page references;
+page text reading is still open work.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

@@ -1,7 +1,7 @@
 # Confluence connector requirements
 
 Decisions recorded 2026-10-18. These describe the intended product, not completed implementation.
-See [architecture](architecture.md) for the current proof of concept.
+See [architecture](architecture.md) for the current implementation.
 
 ## 1. Product and ownership
 

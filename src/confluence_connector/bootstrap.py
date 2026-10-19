@@ -15,7 +15,11 @@ from confluence_connector.domain.models import AuthStatus, CurrentUser
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
+from confluence_connector.service.metadata import PageMetadataService
+from confluence_connector.service.search import ContentSearch
 from confluence_connector.service.spaces import SpaceService
+from confluence_connector.service.tree import PageTree
+from confluence_connector.service.users import UserSearch
 
 
 @dataclass
@@ -26,6 +30,10 @@ class Services:
     api: ConfluenceApi
     links: PageLinkResolver
     spaces: SpaceService
+    search: ContentSearch
+    users: UserSearch
+    tree: PageTree
+    metadata: PageMetadataService
 
 
 class AppContext:
@@ -104,11 +112,16 @@ class AppContext:
 
     def _build(self, username: str) -> Services:
         api = self._api()
+        links = PageLinkResolver(self.settings, self._transport_or_raise(), api)
         return Services(
             username=username,
             api=api,
-            links=PageLinkResolver(self.settings, self._transport_or_raise(), api),
+            links=links,
             spaces=SpaceService(self.settings, self.store, api, username),
+            search=ContentSearch(api, links, username),
+            users=UserSearch(api, username),
+            tree=PageTree(api, links, username),
+            metadata=PageMetadataService(api, links, username),
         )
 
     def _api(self) -> ConfluenceApi:

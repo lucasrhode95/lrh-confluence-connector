@@ -197,12 +197,58 @@ class CommandLineChecks(unittest.TestCase):
 
 
 class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
-    async def test_server_registers_only_the_two_foundation_tools(self) -> None:
+    async def test_server_registers_the_foundation_and_read_path_tools(self) -> None:
         context = AppContext(settings(), store=FakeCredentialSource())  # type: ignore[arg-type]
         server = build_server(context)
         tools = await server.list_tools()
-        self.assertEqual({tool.name for tool in tools}, {"auth_status", "list_spaces"})
+        self.assertEqual(
+            {tool.name for tool in tools},
+            {
+                "auth_status",
+                "list_spaces",
+                "search_content",
+                "find_users",
+                "get_page_tree",
+                "get_page_metadata",
+            },
+        )
         await context.aclose()
+
+    async def test_search_tool_runs_through_the_account_bound_mcp_service(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Synthetic search result",
+                            "content": {"id": "123", "type": "page", "title": "Synthetic search result"},
+                        }
+                    ],
+                    "start": 0,
+                    "size": 1,
+                    "totalSize": 1,
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://confluence.example.test/wiki/",
+            transport=httpx.MockTransport(respond),
+        )
+        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
+        server = build_server(context)
+        try:
+            result = await server.call_tool("search_content", {"query": "synthetic", "limit": 1})
+            self.assertIn("Synthetic search result", str(result))
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].url.path, "/wiki/rest/api/search")
+            self.assertEqual(requests[0].url.params["includeArchivedSpaces"], "true")
+        finally:
+            await context.aclose()
+            await client.aclose()
 
     async def test_both_foundation_tools_work_offline_against_fake_responses(self) -> None:
         requests: list[httpx.Request] = []

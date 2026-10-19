@@ -3,7 +3,8 @@
 # Confluence connector
 
 Local MCP connector for one user's Confluence Data Center account. The current release provides
-encrypted token setup, account status, and visible-space listing. The remaining product scope is in
+encrypted token setup, account status, space listing, content search, user lookup, page trees and page
+metadata. The remaining product scope is in
 the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
@@ -21,8 +22,15 @@ the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 - `list_spaces` lists current and archived spaces visible to the stored account, including their name,
   key, type, status and link when Confluence supplies one. It follows the server's actual
   `start + size` paging and requests up to 500 spaces at a time.
+- `search_content` performs literal, scoped content or title searches with stateless continuation
+  cursors. Archived spaces are included by default; title searches can add labelled quick-navigation
+  results.
+- `find_users` resolves current users by display name and former users by exact username.
+- `get_page_tree` returns ordered children and ancestors from a page or space root with bounded depth.
+- `get_page_metadata` returns history, retained versions, labels, contributors and ancestors for up
+  to 20 page references.
 
-Search, page reading, exports, attachment retrieval, and page or draft changes remain open work.
+Page text reading, exports, attachment retrieval, and page or draft changes remain open work.
 Authentication is separate from Microsoft 365 sign-in.
 
 ## Setup
