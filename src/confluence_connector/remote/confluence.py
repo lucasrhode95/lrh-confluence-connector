@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
-from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from typing import Any, BinaryIO
+from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit, urlunsplit
 
 from confluence_connector.domain.errors import InvalidRequest, NotFound, Upstream
 from confluence_connector.domain.models import (
@@ -278,6 +278,28 @@ class ConfluenceApi:
                 raise Upstream("Confluence returned an attachment without its ID or filename.")
             attachments.append(attachment)
         return attachments
+
+    async def download_attachment(
+        self,
+        attachment: PageAttachment,
+        destination: BinaryIO,
+        *,
+        expected_username: str,
+    ) -> tuple[str | None, int]:
+        """Stream an attachment through its mapped same-instance download link.
+
+        The service passes an attachment mapped from the configured instance's child list; this
+        adapter still validates origin and installation context before creating a relative route.
+        """
+        if not attachment.download_url:
+            raise Upstream("Confluence did not provide a safe download link for this attachment.")
+        path, params = _attachment_download_route(str(self._settings["base_url"]), attachment.download_url)
+        return await self._transport.download_to(
+            path,
+            destination,
+            params=params,
+            expected_username=expected_username,
+        )
 
     async def list_page_comments(
         self, page_id: str, *, expected_username: str
@@ -805,6 +827,40 @@ def _same_instance_link(base_url: str, value: Any) -> str | None:
         return None
     in_context = not base_path or link.path == base_path or link.path.startswith(base_path + "/")
     return target if same_origin and in_context and link.username is None and link.password is None else None
+
+
+def _attachment_download_route(base_url: str, value: str) -> tuple[str, dict[str, str]]:
+    """Validate a mapped download URL and reduce it to an in-context route and query."""
+    base = urlsplit(base_url)
+    link = urlsplit(value)
+    try:
+        same_origin = (
+            base.scheme.casefold() == link.scheme.casefold()
+            and (base.hostname or "").casefold() == (link.hostname or "").casefold()
+            and _port(base) == _port(link)
+            and link.username is None
+            and link.password is None
+        )
+    except ValueError:
+        same_origin = False
+    if not same_origin:
+        raise Upstream("Confluence returned an unsafe attachment download link.")
+
+    base_path = base.path.rstrip("/")
+    if base_path:
+        if not link.path.startswith(base_path + "/"):
+            raise Upstream("Confluence returned an attachment link outside the configured context path.")
+        path = link.path[len(base_path) + 1 :]
+    else:
+        path = link.path.lstrip("/")
+    decoded_segments = [unquote(segment) for segment in path.split("/")]
+    if (
+        not path
+        or "\\" in path
+        or any(segment in {".", ".."} or "/" in segment or "\\" in segment for segment in decoded_segments)
+    ):
+        raise Upstream("Confluence returned an unsafe attachment download path.")
+    return path, dict(parse_qsl(link.query, keep_blank_values=True))
 
 
 def _port(parts: Any) -> int:

@@ -258,6 +258,7 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "get_page_tree",
                 "get_page_metadata",
                 "get_pages",
+                "download_attachments",
             },
         )
         await context.aclose()
@@ -339,6 +340,53 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         finally:
             await context.aclose()
             await client.aclose()
+
+    async def test_download_attachments_tool_returns_a_local_file(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path.endswith("/child/attachment"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "att-1",
+                                "title": "guide.txt",
+                                "mediaType": "text/plain",
+                                "fileSize": 8,
+                                "_links": {"download": "/download/attachments/55/guide.txt"},
+                            }
+                        ]
+                    },
+                )
+            if request.url.path.endswith("/download/attachments/55/guide.txt"):
+                return httpx.Response(200, content=b"synthetic", headers={"content-type": "text/plain"})
+            self.fail(f"Unexpected route {request.url.path}")
+
+        client = httpx.AsyncClient(
+            base_url="https://confluence.example.test/wiki/",
+            transport=httpx.MockTransport(respond),
+        )
+        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
+        server = build_server(context)
+        with TemporaryDirectory() as directory, patch(
+            "confluence_connector.config.data_dir", return_value=Path(directory)
+        ):
+            try:
+                result = await server.call_tool(
+                    "download_attachments",
+                    {"page": "55", "attachment_ids": ["att-1"]},
+                )
+                self.assertIn("guide.txt", str(result))
+                self.assertIn("size_bytes", str(result))
+                self.assertIn("/wiki/download/attachments/55/guide.txt", str(requests[-1].url))
+            finally:
+                await context.aclose()
+                await client.aclose()
 
     async def test_both_foundation_tools_work_offline_against_fake_responses(self) -> None:
         requests: list[httpx.Request] = []

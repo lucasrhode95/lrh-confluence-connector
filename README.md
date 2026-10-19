@@ -33,8 +33,10 @@ the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
   storage markup. Text reads include typed references, attachment lists, and threaded comments by
   default; attachments are not downloaded. A character budget packs whole pages and uses a
   version-pinned cursor when the first page needs continuation.
+- `download_attachments` saves selected attachment IDs from one page to the local downloads folder.
+  It verifies each ID belongs to that page and returns a path or per-attachment failure.
 
-Exports, attachment retrieval, and page or draft changes remain open work.
+Batch exports and page or draft changes remain open work.
 Authentication is separate from Microsoft 365 sign-in.
 
 ## Setup

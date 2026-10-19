@@ -278,6 +278,45 @@ class PageAttachment(BaseModel):
     download_url: str | None = None
 
 
+class SavedAttachment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    attachment_id: str
+    filename: str
+    path: str
+    media_type: str | None = None
+    size_bytes: int
+
+
+class AttachmentDownloadFailure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    attachment_id: str
+    filename: str | None = None
+    error: str
+
+
+class AttachmentDownloadResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    files: list[SavedAttachment] = Field(default_factory=list)
+    failures: list[AttachmentDownloadFailure] = Field(default_factory=list)
+
+
+class PageExportResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    path: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    pages_exported: int
+    pages_failed: int
+    attachments_exported: int = 0
+    attachments_failed: int = 0
+
+
 class PageComment(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

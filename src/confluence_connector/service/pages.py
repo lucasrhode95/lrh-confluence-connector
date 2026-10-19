@@ -115,6 +115,29 @@ class PageTextService:
             parse_scope=scope,
         )
 
+    async def read_full_page(
+        self,
+        page_id: str,
+        *,
+        version: int | None,
+        page_format: PageTextFormat,
+        parse_scope: PageParseScope,
+    ) -> PageReadRecord:
+        """Read one complete validated page for export, without the interactive character budget.
+
+        The export service resolves and validates ``page_id`` and ``version`` before calling this
+        internal operation. It reuses the same source mapping, rendering and section layout as
+        ``get_pages`` so text exports stay identical to direct reads.
+        """
+        request = _PageRequest(reference=page_id, page_id=page_id, version=version)
+        loaded = await self._load_page(
+            request,
+            page_format=page_format,
+            parse_scope=parse_scope,
+            forced_version=version,
+        )
+        return _record(loaded, list(loaded.blocks), page_format=page_format)
+
     async def _resolve(
         self, references: list[str]
     ) -> tuple[list[_PageRequest], list[PageReadFailure]]:
@@ -378,15 +401,15 @@ class PageTextService:
         )
 
 
-def _page_references(value: Any) -> list[str]:
+def _page_references(value: Any, *, maximum: int = MAX_PAGE_REFERENCES) -> list[str]:
     if isinstance(value, str):
         values = [value]
     elif isinstance(value, list):
         values = value
     else:
         raise InvalidRequest("pages must be one page reference or a list of page references.")
-    if not values or len(values) > MAX_PAGE_REFERENCES:
-        raise InvalidRequest(f"pages must contain 1 to {MAX_PAGE_REFERENCES} page references.")
+    if not values or len(values) > maximum:
+        raise InvalidRequest(f"pages must contain 1 to {maximum} page references.")
     result: list[str] = []
     for item in values:
         if (
@@ -428,6 +451,12 @@ def _page_header(source: RemotePageContent, extracted_at: str) -> str:
     lines = [f"# {metadata.title}"]
     if metadata.url:
         lines.append(f"Link: {metadata.url}")
+    breadcrumb = [metadata.space_name or metadata.space_key]
+    breadcrumb.extend(ancestor.title for ancestor in metadata.ancestors if ancestor.title)
+    breadcrumb.append(metadata.title)
+    breadcrumb = [part for part in breadcrumb if part]
+    if breadcrumb:
+        lines.append(f"Breadcrumb: {' › '.join(breadcrumb)}")
     version = f"Version: {source.version}"
     if source.total_versions is not None:
         version += f" of {source.total_versions}"

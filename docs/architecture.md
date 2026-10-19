@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes seven read-only tools:
+The MCP surface currently exposes seven read tools and one local-file tool:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -27,8 +27,9 @@ The MCP surface currently exposes seven read-only tools:
 | `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
 | `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
 | `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
+| `download_attachments` | Verify selected attachment IDs belong to one page, then save each file locally with per-file failures |
 
-Attachment downloads, exports and write tools are not implemented yet.
+Page exports and write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -43,7 +44,7 @@ Attachment downloads, exports and write tools are not implemented yet.
   `CrossPlatLock`.
 - `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
-  checks; it never logs request URLs or payloads.
+  checks, plus bounded streaming downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
   quick navigation, user lookup, ordered children, page bodies, attachments, comments and history mapping.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and page reads; it
@@ -59,6 +60,8 @@ Attachment downloads, exports and write tools are not implemented yet.
 - `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
+- `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
+- `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
@@ -186,6 +189,13 @@ inside their space, and a renamed title fails clearly. Short-link redirects are 
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
 comment focus are ignored. Search scope, page trees, metadata and page text reads use this resolver for
 page references.
+
+`download_attachments` accepts one page reference and up to 500 attachment IDs. The service lists that
+page's attachments before downloading, so an ID cannot select a file from another page. Files are
+streamed through the shared six-request transport limit into a per-account subfolder under the local
+`downloads` directory. Names replace Windows-invalid path characters; an existing name receives a
+numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
+Output files older than seven days are removed when the folder is next used.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

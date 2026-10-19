@@ -18,7 +18,6 @@ writes were verified only through a browser session.
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `download_attachments` | Save named attachments of a page locally; return paths | Ready |
 | `export_pages` | Pages and versions plus parse scope into one ZIP with text and attachment folders | Ready |
 | `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Ready |
 | `update_page` | Replace title and/or whole body with an explicit `expected_version` | Ready |
@@ -37,7 +36,7 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 - Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
   mirrored by offline tests with synthetic fake responses.
-- Remaining content routes and adapters for attachments, exports and writes, including
+- Remaining content routes and adapters for exports and writes, including
   paging caps, CQL 400 details, 409 conflicts and Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
   offline tests; each later write capability still needs its own refusal and partial-failure coverage.
 
@@ -95,6 +94,9 @@ in the personal space, including a rich-text sample page.
   Attachment and comment lists are fetched again by a continuation, so their content may change while
   the page body remains version-pinned. Check whether either child route can exceed its 500-item
   request limit on the configured instance.
+- `download_attachments` accepts a page and selected attachment IDs; verify that the 500-ID request
+  cap and per-file failure behavior fit expected use. `export_pages` defaults to excluding attachment
+  bytes and includes them only when `include_attachments` is true; confirm this scope is clear to agents.
 - `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
   Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
   1,000,000. Verify current and former-user results during acceptance.

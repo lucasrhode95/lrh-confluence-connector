@@ -15,6 +15,7 @@ from confluence_connector.domain.models import AuthStatus, CurrentUser
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
+from confluence_connector.service.attachments import AttachmentDownloads
 from confluence_connector.service.metadata import PageMetadataService
 from confluence_connector.service.pages import PageTextService
 from confluence_connector.service.search import ContentSearch
@@ -40,6 +41,7 @@ class Services:
     tree: PageTree
     metadata: PageMetadataService
     pages: PageTextService
+    attachments: AttachmentDownloads
 
 
 class AppContext:
@@ -136,6 +138,7 @@ class AppContext:
             tree=PageTree(api, links, username),
             metadata=PageMetadataService(api, links, username),
             pages=PageTextService(api, links, username, str(self.settings["base_url"])),
+            attachments=AttachmentDownloads(api, links, username),
         )
 
     def _api(self) -> ConfluenceApi:

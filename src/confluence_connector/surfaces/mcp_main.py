@@ -14,6 +14,7 @@ from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
+    AttachmentDownloadResult,
     PageParseScope,
     PageTextFormat,
     SearchFields,
@@ -27,6 +28,9 @@ log = logging.getLogger(__name__)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+LOCAL_FILE = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\
@@ -55,6 +59,9 @@ drafts, comments and attachment references; links to other products remain links
   typed attachment references and, by default, attachment and threaded comment sections; they never
   download attachment content. Use the returned cursor alone to continue an oversized page at its
   original version. Page-read timestamps remain the UTC values returned by REST.
+- download_attachments saves selected attachment IDs from one page into the local downloads folder.
+  Attachment IDs come from get_pages references or the page's attachment list; the tool verifies each
+  ID belongs to the selected page and returns a path or per-attachment failure.
 - Authenticate or remove the local token with `confluence-connector auth` or
   `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
 - Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
@@ -187,6 +194,19 @@ def build_server(context: AppContext) -> FastMCP:
             parse_scope=parse_scope,
             cursor=cursor,
         )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=LOCAL_FILE)
+    @_logged
+    async def download_attachments(page: str, attachment_ids: list[str]) -> dict[str, Any]:
+        """Save selected attachment IDs from one page into the local downloads folder.
+
+        Pass page as a numeric ID or same-instance URL, and attachment_ids from a typed reference or
+        the page's attachment list. The tool verifies ownership on that page. Up to 500 IDs may be
+        selected; successful files return local paths and failures are listed per attachment.
+        """
+        services = await context.services()
+        result: AttachmentDownloadResult = await services.attachments.download_attachments(page, attachment_ids)
         return result.model_dump(mode="json")
 
     return mcp
