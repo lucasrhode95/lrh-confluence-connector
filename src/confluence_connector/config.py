@@ -10,6 +10,10 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+APP_NAME = "lrh-confluence-connector"
+CLI_NAME = "confluence-connector"
+MCP_SERVER_NAME = "lrh-confluence-connector"
+LOG_LEVEL_VARIABLE = "CONFLUENCE_CONNECTOR_LOG_LEVEL"
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = ROOT / "confluence_config.json"
 CONFIG_PATH = Path(os.environ.get("CONFLUENCE_CONFIG", str(DEFAULT_CONFIG_PATH)))
@@ -61,6 +65,10 @@ def _read_config(path: Path) -> dict:
         or parsed.fragment
     ):
         raise SystemExit("base_url must be an HTTPS URL without credentials, query or fragment.")
+    try:
+        parsed.port
+    except ValueError:
+        raise SystemExit("base_url must contain a valid HTTPS port.") from None
     if not isinstance(settings["query"], str) or not settings["query"].strip():
         raise SystemExit("query must contain a nonempty synthetic search term.")
     auth_path = settings["form_auth_path"]
@@ -99,3 +107,14 @@ def _read_config(path: Path) -> dict:
                 "Only content may contain one {page_id} placeholder; endpoint queries are not allowed."
             )
     return settings
+
+
+def data_dir() -> Path:
+    """Return the per-user application directory; the named environment setting overrides it."""
+    override = os.environ.get("CONFLUENCE_CONNECTOR_HOME")
+    if override:
+        return Path(override).expanduser().resolve()
+    if os.name == "nt":
+        return Path.home() / f".{APP_NAME}"
+    root = os.environ.get("XDG_DATA_HOME")
+    return (Path(root) if root else Path.home() / ".local" / "share") / APP_NAME

@@ -49,7 +49,7 @@ for that login; it is not part of routine checks or the product authentication p
 
 ```powershell
 uv run python -m unittest discover -s tests
-uv run python -m compileall -q src research main.py tests
+uv run python -m compileall -q src research tests
 uv run python research/probe_auth.py --help
 ```
 

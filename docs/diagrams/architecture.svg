@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Confluence connector architecture</title>
+  <desc id="desc">The CLI and MCP surface compose account-bound services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#61778d" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <style>
+      .title{font:700 32px system-ui,sans-serif;fill:#15283a}.head{font:700 18px system-ui,sans-serif;fill:#15283a}
+      .body{font:400 14px system-ui,sans-serif;fill:#52677b}.label{font:600 13px system-ui,sans-serif;fill:#35536e}
+      .box{fill:#fff;stroke:#c7d4df;stroke-width:1.5}.entry{fill:#edf5fc;stroke:#8db8d8}.core{fill:#f6f3fb;stroke:#b8a9d1}
+      .remote{fill:#eff7f3;stroke:#a8cbbb}.secure{fill:#fff6e9;stroke:#d9bd87}.cloud{fill:#f2f5f8;stroke:#a8b7c5}
+      .line{fill:none;stroke:#61778d;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1280" height="760" rx="26" fill="#f6f8fb"/>
+  <text x="52" y="62" class="title">Process and request flow</text>
+  <text x="52" y="92" class="body">Each local MCP process owns one lazy context and one async client. Credentials are loaded only for a request.</text>
+
+  <rect x="55" y="142" width="218" height="132" rx="16" class="box entry"/>
+  <text x="78" y="180" class="head">CLI</text>
+  <text x="78" y="207" class="body"><tspan x="78">auth / sign-out</tspan><tspan x="78" dy="22">status / mcp</tspan></text>
+
+  <rect x="55" y="345" width="218" height="132" rx="16" class="box entry"/>
+  <text x="78" y="383" class="head">MCP surface</text>
+  <text x="78" y="410" class="body"><tspan x="78">auth_status</tspan><tspan x="78" dy="22">list_spaces</tspan></text>
+
+  <rect x="359" y="235" width="250" height="164" rx="18" class="box core"/>
+  <text x="384" y="274" class="head">AppContext</text>
+  <text x="384" y="303" class="body"><tspan x="384">One account-bound service set</tspan><tspan x="384" dy="22">Rebuilt on username change</tspan><tspan x="384" dy="22">Lazy HTTP client lifecycle</tspan></text>
+
+  <rect x="691" y="142" width="250" height="132" rx="16" class="box remote"/>
+  <text x="716" y="180" class="head">SpaceService</text>
+  <text x="716" y="207" class="body"><tspan x="716">Offline auth status</tspan><tspan x="716" dy="22">List visible spaces</tspan></text>
+
+  <rect x="691" y="345" width="250" height="132" rx="16" class="box remote"/>
+  <text x="716" y="383" class="head">ConfluenceApi</text>
+  <text x="716" y="410" class="body"><tspan x="716">Current-user and space routes</tspan><tspan x="716" dy="22">Maps REST JSON to models</tspan></text>
+
+  <rect x="1013" y="235" width="220" height="164" rx="18" class="box cloud"/>
+  <text x="1038" y="274" class="head">Confluence DC</text>
+  <text x="1038" y="303" class="body"><tspan x="1038">Configured base URL</tspan><tspan x="1038" dy="22">REST API</tspan><tspan x="1038" dy="22">No cookie extraction</tspan></text>
+
+  <rect x="359" y="535" width="250" height="132" rx="16" class="box secure"/>
+  <text x="384" y="573" class="head">TokenStore</text>
+  <text x="384" y="600" class="body"><tspan x="384">Encrypted PAT + username</tspan><tspan x="384" dy="22">CrossPlatLock</tspan></text>
+
+  <rect x="691" y="535" width="250" height="132" rx="16" class="box core"/>
+  <text x="716" y="573" class="head">Transport</text>
+  <text x="716" y="600" class="body"><tspan x="716">HTTP/1.1, six connections</tspan><tspan x="716" dy="22">Bounded retries and account checks</tspan></text>
+
+  <path d="M273 208h48q26 0 26 27v31" class="line"/>
+  <path d="M273 410h48q26 0 26-27v-27" class="line"/>
+  <path d="M609 280h48q26 0 26-27v-28" class="line"/>
+  <path d="M609 354h48q26 0 26 26v30" class="line"/>
+  <path d="M941 411h42q30 0 30-30v-30" class="line"/>
+  <path d="M609 601h42" class="line"/>
+  <path d="M816 477v34q0 24-25 24h-22" class="line"/>
+  <path d="M741 535v-30q0-28-29-28h-10" class="line"/>
+  <text x="312" y="220" class="label">compose</text>
+  <text x="612" y="521" class="label">credential per request</text>
+  <text x="958" y="399" class="label">HTTPS</text>
+</svg>

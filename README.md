@@ -1,67 +1,90 @@
+![Confluence connector overview](docs/connector-overview.svg)
+
 # Confluence connector
 
-Local MCP connector for one user's Confluence Data Center account. The current implementation is a
-read-only proof of concept; the agreed product also includes page/tree reading, structured search,
-exports, attachment retrieval, draft/page CRUD and moves. See the [documentation index](docs/README.md).
+Local MCP connector for one user's Confluence Data Center account. The current release provides
+encrypted token setup, account status, and visible-space listing. The remaining product scope is in
+the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
 |---|---|
 | [Requirements](docs/requirements.md) | Agreed scope, capabilities and ownership |
-| [Architecture](docs/architecture.md) | Current code and tool contracts |
-| [Roadmap](docs/roadmap.md) | Short register of open work and decisions |
-| [API research](docs/api-research.md) | Dated evidence and limits |
-| [Research toolkit](research/README.md) | Manual probes and UI investigation |
+| [Architecture](docs/architecture.md) | Current code and implemented contracts |
+| [Roadmap](docs/roadmap.md) | Open implementation and live-verification work |
+| [API research](docs/api-research.md) | Dated evidence and limitations |
+| [Research toolkit](research/README.md) | Explicit manual probes and UI investigation |
 
-## Configure and run
+## Current MCP tools
 
-Requires Python 3.12+ and `uv`. Run `uv sync` to prepare the environment. Copy
-`confluence_config.example.json` to the ignored `confluence_config.json` and set the deployment URL,
-relative API paths and synthetic probe query. There are no embedded deployment fallbacks.
+- `auth_status` reports whether a token is stored and which account name it is bound to. It is offline;
+  use the CLI's `status --check` to verify that Confluence still accepts the token.
+- `list_spaces` lists current and archived spaces visible to the stored account, including their name,
+  key, type, status and link when Confluence supplies one. It follows the server's actual
+  `start + size` paging and requests up to 500 spaces at a time.
 
-The existing app accepts either a PAT in `CONFLUENCE_PAT`, or HTTP Basic credentials in both
-`CONFLUENCE_USERNAME` and `CONFLUENCE_PASSWORD`. PAT access was verified in the recorded environment;
-Basic acceptance was not. Credentials are not persisted. Encrypted persistent authentication and
-logout are requirements, not implemented features.
+Search, page reading, exports, attachment retrieval, and page or draft changes remain open work.
+Authentication is separate from Microsoft 365 sign-in.
+
+## Setup
+
+Requires Python 3.12+ and `uv`. Copy `confluence_config.example.json` to the ignored
+`confluence_config.json`, then set the deployment URL and relative API paths. The probe query and form
+login path are used only by the separate research toolkit.
+
+From the repository root:
 
 ```powershell
-uv run confluence-connector --config ./confluence_config.json
+uv sync --locked
+uv run confluence-connector auth
+uv run confluence-connector status --check
 ```
 
-For a local MCP client, use command `uv`, arguments `run`, `--directory`, the absolute project
-folder, `confluence-connector`, `--config`, and the absolute private configuration path. Supply the
-selected credentials through private process environment settings, never committed/shared config.
+`auth` prompts for a personal access token without echoing it, checks it against the configured
+current-user endpoint, then stores the token and account name in encrypted per-user storage. If
+encrypted storage is unavailable, the command fails without a plaintext fallback. To clear the local
+token, run `uv run confluence-connector auth --sign-out`; this does not revoke the token on the server.
 
-Configuration selection is `--config PATH`, then `CONFLUENCE_CONFIG`, then repository-root
-`confluence_config.json`, independently of the working directory. Every command supports `--config`.
-Restart after editing: validated settings are cached per process. API paths are relative to the
-base URL, including an installation context such as `/wiki`.
+Configuration precedence is `--config PATH`, `CONFLUENCE_CONFIG`, then the repository-root
+`confluence_config.json`, independent of the working directory. Every command supports `--config`.
+Validated settings are cached per process, so restart after editing. API paths are relative to the
+configured base URL, including an installation context such as `/wiki`.
 
-## Current tools
+## MCP client configuration
 
-- `confluence_search_pages(query, limit)`: one page of compact page-only CQL search results.
-- `confluence_list_spaces(limit, start)`: one page of accessible spaces.
-- `confluence_get_page(page_id)`: current page title, space, version, link and storage-format body.
+Use command `uv` and these arguments, replacing both paths with absolute local paths:
 
-All current tools are read-only. Bodies may contain macro markup. Structured scopes, tree traversal,
-comments, downloads, exports and writes remain open work. The manual `main.py` Basic-auth demo is
-retained for investigation; MCP is the only intended product surface.
+```json
+{
+  "mcpServers": {
+    "lrh-confluence-connector": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "C:\\path\\to\\lrh-confluence-connector",
+        "confluence-connector",
+        "--config",
+        "C:\\path\\to\\lrh-confluence-connector\\confluence_config.json",
+        "mcp"
+      ]
+    }
+  }
+}
+```
 
 ## Research and checks
 
-Live probes are manual and require authorization. The [research toolkit](research/README.md)
-explains the modes; the [UI runbook](research/ui-runbook.md) starts with search and page reading.
-Browser form login is an isolated research option, not the app's authentication backend.
+Live probes are manual and require authorization for the requested operations. The [research toolkit](research/README.md)
+explains its modes; the [UI runbook](research/ui-runbook.md) starts with search and page reading.
+Browser form login is an isolated research option, not the application authentication backend.
 
 Run offline checks from the repository root:
 
 ```powershell
 uv run python -m unittest discover -s tests
-uv run python -m compileall -q src research main.py tests
+uv run python -m compileall -q src research tests
 uv run python research/probe_auth.py --help
 ```
 
-## Private data
-
-Publish source and sanitized findings only. Keep deployment settings, tokens, cookies, page content,
-HARs and downloaded resource bundles outside Git. Captures are temporary exploratory inputs outside
-repositories; tests use synthetic content. No probe or application call consumes a capture.
+Keep deployment settings, tokens, cookies, page content, HARs and downloaded resource bundles outside
+Git. Tests and fixtures use synthetic content only.

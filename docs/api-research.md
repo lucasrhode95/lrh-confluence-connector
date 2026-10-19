@@ -87,6 +87,14 @@ coverage. Current-user success is standalone evidence, not a claim that it appea
 The sample proves credential access to these operations, not search recall, exhaustive coverage,
 paging, attachment retrieval, macros, permission completeness or writes.
 
+**2026-10-19 — Atlassian REST reference, source only:** `GET /rest/api/space` documents a `status`
+query parameter and a paged response with `totalCount`, `start`, `limit`, `size` and `results` in the
+[Data Center Space API](https://developer.atlassian.com/server/confluence/rest/v1000/api-group-space/).
+The generated reference does not enumerate accepted status values. The connector requests `current`
+and `archived` separately based on the response status names and the planned space-list contract; no
+request was made to the configured instance, so archived-space inclusion still needs acceptance
+verification there.
+
 ## Search and content browser contracts
 
 **2026-10-07 — Browser:** these useful contracts were observed independently of the PAT probe.
