@@ -24,9 +24,11 @@ Delete items when complete. Snapshot **2026-10-18**.
 
 ## Live verification
 
-- Read-only sessions 0–2b ran on 2026-10-19 through a browser session (see
-  [API research](api-research.md)). Still open from them: whether collaborative editing is on, search
-  by a deactivated contributor, the HTML macro's rendered output, and the same routes with a PAT.
+- Read-only sessions and personal-space write tests ran on 2026-10-19 through a browser session (see
+  [API research](api-research.md)). Still open: attachment download and writes with a PAT, search by a
+  deactivated contributor, trash restore/purge, hierarchy deletion, inline-comment creation and cross-space moves.
+- Decide whether unpublished edits of published pages (undocumented editor-draft routes) and sibling
+  reordering (`movepage.action`) are worth supporting, since documented REST covers neither.
 - Decide from that evidence: normalizing title and identifier punctuation, quoting or ANDing multi-word
   queries, `includeArchivedSpaces` via `rest/api/search`, `view` versus `storage` for reads, CQL
   `ancestor` in place of the failing `descendant/page`, and paging on `start + size`.

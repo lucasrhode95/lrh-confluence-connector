@@ -196,6 +196,60 @@ Inline-comment anchors appear in storage (`ac:inline-comment-marker`) and in ren
   versions (200 per page, `next` link). `?status=historical&version=N` reads old bodies, including
   version 1 of a page at version 738.
 
+### Follow-up reads
+
+**2026-10-19 — Live, browser session:** the edit page reports `collaborative-content=false`,
+`shared-drafts=false`, empty Synchrony settings and `draft-save-interval=30000`. Collaborative editing is
+off; drafts use the legacy per-user editor drafts. The HTML macro is enabled: its raw HTML, including
+scripts, is injected into `view` verbatim with no `data-macro-name` wrapper, so only storage identifies
+it. Search by a deactivated contributor was not tested.
+
+## Authorized writes in a personal space
+
+**2026-10-19 — Live, browser session:** user-authorized writes to synthetic `Connector Lab` pages in the
+account's personal space, using documented REST unless marked undocumented. Requests were sent from
+the signed-in page with `X-Atlassian-Token: no-check`. Nothing was purged and no other content was
+touched.
+
+| Operation | Request | Result |
+|---|---|---|
+| Create page | `POST /rest/api/content` with `space`, `ancestors`, storage body | 200, version 1 |
+| Label | `POST /rest/api/content/{id}/label` | 200 |
+| Upload attachment | `POST …/child/attachment` (multipart) | 200; page version unchanged. Same filename again: 400. New attachment version: `POST …/child/attachment/{attachmentId}/data` |
+| Update page | `PUT /rest/api/content/{id}` with `version.number = current + 1` | 200. Stale or skipped numbers: 409 "Version must be incremented". Two parallel writers on the same version: one 200, one 409. `minorEdit: true` was sent but versions later reported `minorEdit: false` |
+| New draft | `POST` with `status: draft` | 200. Readable only with `?status=draft`; absent from search and child listings |
+| Update draft | `PUT …?status=draft` with `status: draft` | 400 "Updating a draft without publishing is not possible" |
+| Publish draft | `PUT /rest/api/content/{draftId}` (no query) with `status: current`, `version 1`, `space`, `ancestors` | 200, same ID. `PUT …?status=draft` with `status: current` returned 400 without `space`, 404 with it |
+| Unpublished edit of a published page | Undocumented `POST /rest/tinymce/1/drafts` (`draftId`, `pageId`, `parentPageId`, `type`, `title`, `spaceKey`, `content`, `pageVersion`), found in editor JavaScript | 200 with `draftId,time,pageId`. Published body unchanged. Listed in `/users/viewmydrafts.action`, not readable by `GET /rest/api/content/{id}?status=draft` |
+| Discard that edit | Undocumented `DELETE /rest/tinymce/1/drafts/discard` (`draftId`, `pageId`, `type`, `spaceKey`) | 200; removed from the drafts list |
+| Footer comment and reply | `POST` with `type: comment`, `container`, reply `ancestors` | 200 |
+| Inline comment | `POST` with `extensions.location: inline` | 400 "Could not create content with type comment". The UI uses the inline-comments plugin |
+| Move | `PUT /rest/api/content/{id}/move/{position}/{target}` | 404: not available on 9.2.10 |
+| Move | `PUT /rest/api/content/{id}` with new `ancestors` | 200; creates a page version. Children, attachments and comments follow |
+| Reorder siblings | Undocumented `POST /pages/movepage.action?pageId&position=above&targetId&atl_token` | 200 JSON `commandDelegate`; explicit positions set; no page version |
+| Rename | `PUT` with new title | Same ID. The tiny link redirects to the page; the old `/display/{space}/{title}` URL returned 404 |
+| Trash | `DELETE /rest/api/content/{id}` | 204. `GET` 404; `?status=trashed` 200. A second `DELETE` returned 404, so it does not purge. The trashed page's child became a top-level page in the space, not a child of the grandparent |
+
+Fixture text in the page body, comment text, attachment content, image alt text, and text inside
+`code` and `expand` macros were all found by search within seconds. A renamed page was found by its
+new title shortly afterwards. Remaining in the personal space: `Connector Lab`, `Connector Lab
+Destination`, `Connector Lab Sample` (with child, attachments and comments) and `Connector Lab Draft`,
+plus two trashed disposable pages. Not tested: restore and purge from trash, hierarchy deletion,
+cross-space moves, inline-comment creation, and any write with a PAT.
+
+### PAT on the same read routes
+
+**2026-10-19 — Live, PAT:** a user-run standalone stdlib script with a bearer PAT, entered at a hidden
+prompt, sent read-only `GET`s to the routes above. Results matched the browser session: current user
+(`known`), the 500 cap with the requested `limit` echoed, `view`/`storage`/`export_view` bodies, the
+`includeArchivedSpaces` difference, quick navigation, `child/attachment`, `child/comment?depth=all`,
+the inline-comments plugin, the experimental version list, historical version 1, the page-tree action
+and the macro browser all returned 200. `descendant/page` again returned 500.
+
+The attachment download link (`_links.download`, redirects followed) returned 200 `text/html` with no
+`Content-Disposition`, not the file. PAT access to `/download/attachments/…` is therefore unproven,
+possibly a sign-in page. The final URL and body were not inspected.
+
 Official schemas and CQL behavior remain at the
 [Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and
 [CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/).
