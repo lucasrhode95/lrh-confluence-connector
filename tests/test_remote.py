@@ -57,6 +57,46 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, 2)
         sleep.assert_awaited_once()
 
+    async def test_read_retries_each_documented_timeout(self) -> None:
+        timeout_types = (
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+        )
+        for timeout_type in timeout_types:
+            with self.subTest(timeout=timeout_type.__name__):
+                attempts = 0
+
+                def handler(request: httpx.Request) -> httpx.Response:
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == 1:
+                        raise timeout_type("synthetic timeout", request=request)
+                    return httpx.Response(200, json={"ok": True})
+
+                _, transport = self.make_client(handler)
+                self.assertTrue((await transport.get_json("rest/api/user/current"))["ok"])
+                self.assertEqual(attempts, 2)
+
+    async def test_read_retries_each_documented_status(self) -> None:
+        for status in (429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                attempts = 0
+                sleep = AsyncMock()
+
+                def handler(_: httpx.Request) -> httpx.Response:
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == 1:
+                        return httpx.Response(status, headers={"Retry-After": "0"}, json={})
+                    return httpx.Response(200, json={"ok": True})
+
+                _, transport = self.make_client(handler, sleep=sleep)
+                self.assertTrue((await transport.get_json("rest/api/user/current"))["ok"])
+                self.assertEqual(attempts, 2)
+                sleep.assert_awaited_once_with(0.0)
+
     async def test_read_timeout_is_retried(self) -> None:
         attempts = 0
 
