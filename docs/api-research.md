@@ -346,6 +346,29 @@ and the result was not reproduced in the follow-up below.
   restores a page (200, version unchanged). A restored page has no ancestors: it returns at the space
   root, not under its former parent. A child whose parent was trashed and later restored also stays
   at the root. Trashing loses the hierarchy; restoring does not bring it back.
+- **Content properties across trash:** `POST /rest/api/content/{id}/property` (documented) stored a
+  JSON value without creating a page version. While the page was trashed, the property returned 404
+  (with or without `?status=trashed`), and listing or expanding properties returned 500. After
+  restore it was readable again, unchanged. Re-parenting the restored page from the stored value then
+  worked. A property set before trashing can therefore carry a page's original placement to
+  `restore_page`.
+- **Native restore location:** a page under a parent was restored through the trash page's own
+  *Restore* (`/pages/restoretrashitem.action`, confirmation form) twice: once after a REST delete and
+  once after the UI's *Delete Page* (`/pages/removepage.action`). Both times it returned at the space
+  root with no ancestors. Confluence never restores the original parent.
+- **Listing the trash:** `GET /rest/api/content?type=page&status=trashed` works per `spaceKey` and
+  without one (paged, every trash the user can see), including spaces where the user is not an admin.
+  `type=blogpost` works; `type=attachment` returns 500. CQL search excludes trashed content even with
+  `cqlcontext` `contentStatuses: ["trashed"]`. Trashed pages show no ancestors and only their last
+  edit (`version.when` and `version.by`), not when or by whom they were deleted.
+- **Permissions:** `GET /rest/api/content/{id}?expand=operations` lists the current user's operations
+  on that page, including restrictions: `read`, `update` and `delete` on a personal-space page; only
+  `read` and `update` on a page in a space where the user cannot delete. `expand=operations` on a space
+  returned an empty list. `GET /rest/api/space/{key}?expand=permissions` returned the permission list,
+  including the user's `administer:space`, only in the user's own space; in a space the user does not
+  administer it returned 500. The UI delete dialog states that recovery goes through the space
+  administrator, and the UI trash page showed a permission message in the non-administered space.
+  `/rest/api/content/{id}/permission/check` returns 404.
 
 Official schemas and CQL behavior remain at the
 [Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and

@@ -175,8 +175,24 @@ with the documented `DELETE`, never purges, and takes `children`:
 
 The result lists the page and every descendant affected. A failed step stops the operation and
 reports which pages were moved or trashed and which were not; nothing is undone automatically, and an
-uncertain step is reported, not retried. Undo goes through `restore_page`. Confluence restores pages
-to the space root (verified 2026-10-19), so restoring the original hierarchy needs a placement.
+uncertain step is reported, not retried.
+
+**Decided 2026-10-19, delete and restore:** Confluence always restores a page to the space root,
+whether it was deleted through REST or the UI, and restoring needs space-admin rights.
+
+- `delete_page` first checks the user's `delete` operation on every affected page and refuses before
+  any write if one is missing. Its result reports each page's former parent and position. When the
+  space permissions cannot be read (the user is likely not a space admin), it warns that restoring
+  will probably not be possible, so the agent can treat the delete as one-way.
+- Best effort: before trashing, `delete_page` stores each page's placement in a content property on
+  the page. Failing to store it is logged and does not stop the delete.
+- `restore_page` uses the documented restore, then places the page: an explicit `placement` from the
+  caller first, otherwise the stored property, otherwise the space root. Any failure reading or
+  applying the property (missing, unreadable, parent gone or trashed, move refused) is logged and the
+  page stays at the space root. The property is removed after a successful restore where possible. The
+  result states where each page ended up and why.
+- `list_trash` lists trashed pages per space or across all visible spaces (title, space, last edit,
+  page ID). Confluence does not expose when or by whom a page was deleted.
 
 **Decided 2026-10-19 (D5), body formats**, mirroring the Outlook connector's text-or-HTML bodies:
 

@@ -34,8 +34,9 @@ were verified only through a browser session.
 | `list_drafts` | The user's new-page drafts | Ready |
 | `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Ready |
 | `move_page` | Move to a target space, parent (or space root) and optional position, as one call | Ready |
-| `delete_page` | Move a page to the trash, with `children`: refuse (default), `move_up` or `trash` | Ready |
-| `restore_page` | Restore a trashed page; Confluence restores to the space root, so the connector applies a placement | Ready |
+| `delete_page` | Trash a page after a per-page `delete` check, with `children`: refuse (default), `move_up` or `trash`; reports former placement and a one-way warning | Ready |
+| `list_trash` | Trashed pages per space or across visible spaces | Ready |
+| `restore_page` | Restore, then place: caller placement, else stored property (best effort), else space root | Ready |
 | `set_labels` | Add or remove page labels | Ready |
 
 Logging in and out stay command-line subcommands (`confluence-connector login` with a hidden prompt,
