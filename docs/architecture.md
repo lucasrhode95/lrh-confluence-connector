@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes seven read tools and two local-file tools:
+The MCP surface exposes eight read tools, two local-file tools and five write tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -29,8 +29,12 @@ The MCP surface currently exposes seven read tools and two local-file tools:
 | `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
 | `download_attachments` | Verify selected attachment IDs belong to one page, then save each file locally with per-file failures |
 | `export_pages` | Write up to 500 complete pages as a single file or flat ZIP, optionally including attachment bytes and reporting incomplete items |
-
-Write tools are not implemented yet.
+| `create_page` | Create a current page or new-page draft with validated placement, body conversion and a duplicate-title preflight |
+| `update_page` | Replace a page body with expected-version and content-loss checks |
+| `list_drafts` | List the signed-in user's new-page drafts with bounded paging and cursors |
+| `publish_draft` | Publish a new-page draft under the same page ID |
+| `delete_draft` | Permanently delete a new-page draft, bypassing the trash |
+| `set_labels` | Add or remove global labels with explicit partial-failure results |
 
 ## 2. Modules and boundaries
 
@@ -46,9 +50,10 @@ Write tools are not implemented yet.
 - `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
   checks, plus bounded streaming downloads; it never logs request URLs or payloads.
-- `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
-  quick navigation, user lookup, ordered children, page bodies, attachments, comments and history mapping.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and page reads; it
+- `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
+  page-write and label routes; quick navigation, user lookup, ordered children, page bodies,
+  attachments, comments and history mapping. The legacy move action is isolated here.
+- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
 - `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
@@ -63,6 +68,8 @@ Write tools are not implemented yet.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
 - `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
+- `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors and partial results.
+- `src/confluence_connector/service/write_markup.py`: text escaping, safe rich-body conversions, active-content refusal and source-reference loss detection.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
@@ -199,6 +206,29 @@ streamed through the shared six-request transport limit into a per-account subfo
 numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
 Output files older than seven days are removed when the folder is next used.
 On POSIX systems, output directories are owner-only and claimed files use owner read/write permissions.
+
+### Page and draft writes
+
+`create_page` accepts exactly one parent_id page reference or space root. It checks for a current duplicate title
+before creating the page, converts the body, and uses the configured REST content route. First/before/
+after positioning uses the isolated Confluence UI move action after creation; if that follow-up fails,
+the result says the page remains created and placement was not confirmed. A draft receives the same
+best-effort position request.
+
+`update_page` reads the current storage body and version, refuses a stale expected version before
+writing, then sends the next version so Confluence's 409 protects against a concurrent edit. The
+service compares inline-comment anchors, macro names and attachment references. Losing an inline
+comment anchor is refused unless the caller confirms with `allow_comment_loss`; confirmed losses
+and removed macros/attachment references are returned as warnings.
+
+`list_drafts` reads the documented content collection with `status=draft`, at most 100 rows per
+request, and cursors that carry the space filter and next offset. The offset cap is 1,000,000 and
+the result reports truncation if drafts remain. Publishing verifies a new-page
+draft and sends its complete storage body, space and parent with version 1, retaining the ID.
+`delete_draft` verifies draft status before using `DELETE ?status=draft`; this is permanent and
+bypasses the trash. `set_labels` reads the current labels, skips already-satisfied changes, and
+sends one request per change. It stops on the first failure and returns completed, failed and
+unattempted labels.
 
 `export_pages` validates up to 500 references before any request, then reads two full pages at a time;
 the transport still caps total in-flight HTTP requests at six. It resolves each requested version and

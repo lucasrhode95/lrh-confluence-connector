@@ -27,6 +27,7 @@ from confluence_connector.service.timezone_calibration import (
 )
 from confluence_connector.service.tree import PageTree
 from confluence_connector.service.users import UserSearch
+from confluence_connector.service.writes import PageWrites
 
 
 @dataclass
@@ -44,6 +45,7 @@ class Services:
     pages: PageTextService
     attachments: AttachmentDownloads
     exports: PageExports
+    writes: PageWrites
 
 
 class AppContext:
@@ -144,6 +146,7 @@ class AppContext:
             pages=pages,
             attachments=attachments,
             exports=PageExports(api, links, pages, attachments, username),
+            writes=PageWrites(api, links, username, str(self.settings["base_url"])),
         )
 
     def _api(self) -> ConfluenceApi:

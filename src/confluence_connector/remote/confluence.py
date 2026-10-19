@@ -6,10 +6,13 @@ from collections.abc import Mapping
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit, urlunsplit
 
-from confluence_connector.domain.errors import InvalidRequest, NotFound, Upstream
+from pydantic import ValidationError
+
+from confluence_connector.domain.errors import InvalidRequest, NotFound, UncertainWrite, Upstream
 from confluence_connector.domain.models import (
     ContentSearchHit,
     CurrentUser,
+    DraftSummary,
     PageMetadata,
     PageAttachment,
     RemotePageComment,
@@ -18,6 +21,7 @@ from confluence_connector.domain.models import (
     PageVersion,
     PersonSummary,
     RemoteContentSearchPage,
+    RemoteDraftPage,
     RemoteUserSearchPage,
     SpaceList,
     SpaceSummary,
@@ -28,6 +32,7 @@ SPACE_PAGE_SIZE = 500
 CHILD_PAGE_SIZE = 500
 VERSION_PAGE_SIZE = 200
 MAX_PAGE_VERSIONS = 5_000
+DRAFT_PAGE_SIZE = 100
 
 
 class ConfluenceApi:
@@ -112,6 +117,15 @@ class ConfluenceApi:
         self, space_key: str, title: str, *, expected_username: str
     ) -> str:
         """Resolve a legacy display URL by its validated space key and decoded title."""
+        page_id = await self.find_page_id_by_title(space_key, title, expected_username=expected_username)
+        if page_id is None:
+            raise NotFound("The page in this display URL no longer matches a page; it may have been renamed.")
+        return page_id
+
+    async def find_page_id_by_title(
+        self, space_key: str, title: str, *, expected_username: str
+    ) -> str | None:
+        """Return an exact page-title match, distinguishing no match from a failed search request."""
         if not space_key or not title:
             raise InvalidRequest("A display URL must include both a space key and page title.")
         cql = (
@@ -128,7 +142,7 @@ class ConfluenceApi:
             raise Upstream("Confluence returned an unexpected page-title search response.")
         matches = [row for row in rows if isinstance(row, dict) and _page_id(row.get("id"))]
         if not matches:
-            raise NotFound("The page in this display URL no longer matches a page; it may have been renamed.")
+            return None
         if len(matches) > 1:
             raise Upstream("The display URL matched more than one page in its space.")
         return str(matches[0]["id"])
@@ -221,11 +235,16 @@ class ConfluenceApi:
             raise Upstream("Confluence returned a user without a username or user key.")
         return user
 
-    async def get_page_metadata(self, page_id: str, *, expected_username: str) -> PageMetadata:
+    async def get_page_metadata(
+        self, page_id: str, *, expected_username: str, status: str | None = None
+    ) -> PageMetadata:
         """Read one page's expanded history, ancestors and labels; ``page_id`` is service-validated."""
+        params = {"expand": "space,version,history,ancestors,metadata.labels,history.contributors"}
+        if status is not None:
+            params["status"] = status
         payload = await self._transport.get_json(
             self._content_route(page_id),
-            params={"expand": "space,version,history,ancestors,metadata.labels,history.contributors"},
+            params=params,
             expected_username=expected_username,
         )
         return _page_metadata(payload, base_url=str(self._settings["base_url"]))
@@ -235,6 +254,7 @@ class ConfluenceApi:
         page_id: str,
         *,
         version: int | None = None,
+        status: str | None = None,
         include_storage: bool = True,
         expected_username: str,
     ) -> RemotePageContent:
@@ -249,6 +269,8 @@ class ConfluenceApi:
         params = {"expand": expansions}
         if version is not None:
             params.update({"status": "historical", "version": str(version)})
+        elif status is not None:
+            params["status"] = status
         payload = await self._transport.get_json(
             self._content_route(page_id), params=params, expected_username=expected_username
         )
@@ -257,6 +279,171 @@ class ConfluenceApi:
             base_url=str(self._settings["base_url"]),
             requested_version=version,
             include_storage=include_storage,
+        )
+
+    async def create_page(
+        self,
+        *,
+        title: str,
+        space_key: str,
+        storage_body: str,
+        parent_id: str | None,
+        status: str,
+        expected_username: str,
+    ) -> PageMetadata:
+        """Create one current page or new-page draft from validated service inputs."""
+        body: dict[str, Any] = {
+            "type": "page",
+            "title": title,
+            "space": {"key": space_key},
+            "status": status,
+            "body": {"storage": {"value": storage_body, "representation": "storage"}},
+        }
+        if parent_id is not None:
+            body["ancestors"] = [{"id": parent_id}]
+        payload = await self._transport.send_json(
+            "POST",
+            self._content_collection_route(),
+            body=body,
+            expected_username=expected_username,
+        )
+        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def update_page(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        storage_body: str,
+        next_version: int,
+        expected_username: str,
+    ) -> PageMetadata:
+        """Replace a validated current page's title and complete storage body once."""
+        payload = await self._transport.send_json(
+            "PUT",
+            self._content_route(page_id),
+            body={
+                "id": page_id,
+                "type": "page",
+                "title": title,
+                "version": {"number": next_version},
+                "body": {"storage": {"value": storage_body, "representation": "storage"}},
+            },
+            expected_username=expected_username,
+        )
+        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def list_drafts_page(
+        self,
+        *,
+        space_key: str | None,
+        start: int,
+        limit: int,
+        expected_username: str,
+    ) -> RemoteDraftPage:
+        """Read one bounded page of new-page drafts; caller validates scope and cursor state."""
+        params = {
+            "type": "page",
+            "status": "draft",
+            "start": str(start),
+            "limit": str(limit),
+            "expand": "space,version,history",
+        }
+        if space_key is not None:
+            params["spaceKey"] = space_key
+        payload = await self._transport.get_json(
+            self._content_collection_route(), params=params, expected_username=expected_username
+        )
+        rows = _result_rows(payload)
+        actual_start = _nonnegative_int(payload.get("start"), default=start)
+        if actual_start != start:
+            raise Upstream("Confluence returned an inconsistent draft-list offset.")
+        actual_size = _nonnegative_int(payload.get("size"), default=len(rows))
+        if actual_size != len(rows):
+            raise Upstream("Confluence returned an inconsistent draft-list size.")
+        total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
+        return RemoteDraftPage(
+            drafts=[_draft_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
+            start=actual_start,
+            size=actual_size,
+            total_size=total,
+        )
+
+    async def publish_draft(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        space_key: str,
+        parent_id: str | None,
+        storage_body: str,
+        expected_username: str,
+    ) -> PageMetadata:
+        """Publish a validated new-page draft under the same ID."""
+        body: dict[str, Any] = {
+            "id": page_id,
+            "type": "page",
+            "title": title,
+            "status": "current",
+            "version": {"number": 1},
+            "space": {"key": space_key},
+            "body": {"storage": {"value": storage_body, "representation": "storage"}},
+        }
+        if parent_id is not None:
+            body["ancestors"] = [{"id": parent_id}]
+        payload = await self._transport.send_json(
+            "PUT", self._content_route(page_id), body=body, expected_username=expected_username
+        )
+        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def delete_draft(self, page_id: str, *, expected_username: str) -> None:
+        """Permanently delete one validated new-page draft through its draft status route."""
+        await self._transport.send_json(
+            "DELETE",
+            self._content_route(page_id),
+            params={"status": "draft"},
+            expected_username=expected_username,
+        )
+
+    async def add_page_label(self, page_id: str, label: str, *, expected_username: str) -> None:
+        """Add one validated global label to a page."""
+        await self._transport.send_json(
+            "POST",
+            f"{self._content_route(page_id)}/label",
+            body=[{"prefix": "global", "name": label}],
+            expected_username=expected_username,
+        )
+
+    async def remove_page_label(self, page_id: str, label: str, *, expected_username: str) -> None:
+        """Remove one validated global label from a page."""
+        await self._transport.send_json(
+            "DELETE",
+            f"{self._content_route(page_id)}/label/{quote(label, safe='')}",
+            expected_username=expected_username,
+        )
+
+    async def position_page(
+        self,
+        page_id: str,
+        *,
+        space_key: str,
+        position: str,
+        target_id: str,
+        expected_username: str,
+    ) -> None:
+        """Use Confluence's isolated UI move action to place a page above or below a sibling."""
+        await self._transport.send_json(
+            "POST",
+            "pages/movepage.action",
+            params={
+                "pageId": page_id,
+                "spaceKey": space_key,
+                "position": position,
+                "targetId": target_id,
+                "mode": "LEGACY",
+            },
+            skip_atlassian_token_check=True,
+            expected_username=expected_username,
         )
 
     async def list_page_attachments(
@@ -390,6 +577,14 @@ class ConfluenceApi:
 
     def _content_route(self, page_id: str) -> str:
         return self._endpoint("content").replace("{page_id}", page_id)
+
+    def _content_collection_route(self) -> str:
+        """Derive the configured content collection route from its page route template."""
+        template = self._endpoint("content")
+        marker = "{page_id}"
+        if marker not in template:
+            raise Upstream("The configured Confluence content endpoint has no page ID placeholder.")
+        return template.split(marker, maxsplit=1)[0].rstrip("/")
 
     def _space_summary(self, item: Any) -> SpaceSummary:
         if not isinstance(item, dict):
@@ -554,6 +749,37 @@ def _page_metadata(payload: dict[str, Any], *, base_url: str) -> PageMetadata:
         ancestors=_page_summaries(payload.get("ancestors"), base_url=base_url),
         labels=_labels(metadata.get("labels")),
         contributors=_people(history.get("contributors")),
+    )
+
+
+def _write_page_metadata(payload: Any, *, base_url: str) -> PageMetadata:
+    """Map a successful write response, reporting unusable success bodies as uncertain writes."""
+    if not isinstance(payload, dict):
+        raise UncertainWrite(
+            "Confluence returned success for a page write without usable page details; inspect before retrying."
+        )
+    try:
+        return _page_metadata(payload, base_url=base_url)
+    except (Upstream, ValidationError):
+        raise UncertainWrite(
+            "Confluence returned success for a page write without usable page details; inspect before retrying."
+        ) from None
+
+
+def _draft_summary(value: Any, *, base_url: str) -> DraftSummary:
+    """Map one new-page draft from its source content fields, rejecting other content types."""
+    if not isinstance(value, dict):
+        raise Upstream("Confluence returned a malformed page draft.")
+    metadata = _page_metadata(value, base_url=base_url)
+    if metadata.content_type != "page" or metadata.status not in (None, "draft"):
+        raise Upstream("Confluence returned content that was not a new-page draft.")
+    return DraftSummary(
+        page_id=metadata.page_id,
+        title=metadata.title,
+        space_key=metadata.space_key,
+        space_name=metadata.space_name,
+        url=metadata.url,
+        modified_at=metadata.modified_at,
     )
 
 

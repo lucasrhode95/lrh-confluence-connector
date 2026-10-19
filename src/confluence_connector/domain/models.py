@@ -11,6 +11,7 @@ SearchMatch = Literal["all", "any", "phrase"]
 SearchFields = Literal["all", "title"]
 SearchSource = Literal["cql", "quicknav"]
 PageTextFormat = Literal["text", "rich"]
+PageWriteStatus = Literal["current", "draft"]
 
 
 class CurrentUser(BaseModel):
@@ -315,6 +316,77 @@ class PageExportResult(BaseModel):
     pages_failed: int
     attachments_exported: int = 0
     attachments_failed: int = 0
+
+
+class PageWriteResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    status: PageWriteStatus
+    version: int | None = None
+    url: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DraftSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    space_key: str | None = None
+    space_name: str | None = None
+    url: str | None = None
+    modified_at: str | None = None
+
+
+class DraftListResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    drafts: list[DraftSummary]
+    start: int
+    size: int
+    approximate_total: int | None = None
+    more_results_available: bool
+    truncated: bool = False
+    next_cursor: str | None = None
+
+
+class DraftDeletionResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    deleted: bool
+    permanent: bool = True
+
+
+class RemoteDraftPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    drafts: list[DraftSummary]
+    start: int
+    size: int
+    total_size: int | None = None
+
+
+class LabelChangeFailure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    action: Literal["add", "remove"]
+    label: str
+    error: str
+
+
+class LabelChangeResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    unchanged: list[str] = Field(default_factory=list)
+    failures: list[LabelChangeFailure] = Field(default_factory=list)
+    not_attempted: list[LabelChangeFailure] = Field(default_factory=list)
 
 
 class PageComment(BaseModel):

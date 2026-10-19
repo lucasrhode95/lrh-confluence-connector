@@ -244,7 +244,7 @@ class CommandLineChecks(unittest.TestCase):
 
 
 class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
-    async def test_server_registers_the_foundation_and_read_path_tools(self) -> None:
+    async def test_server_registers_read_file_and_write_tools(self) -> None:
         context = AppContext(settings(), store=FakeCredentialSource())  # type: ignore[arg-type]
         server = build_server(context)
         tools = await server.list_tools()
@@ -260,6 +260,12 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "get_pages",
                 "download_attachments",
                 "export_pages",
+                "create_page",
+                "update_page",
+                "list_drafts",
+                "publish_draft",
+                "delete_draft",
+                "set_labels",
             },
         )
         tools_by_name = {tool.name: tool for tool in tools}

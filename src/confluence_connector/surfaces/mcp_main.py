@@ -1,4 +1,4 @@
-"""MCP tools: thin wrappers over Confluence read operations and local-file outputs."""
+"""MCP declarations for account-bound Confluence reads, writes and local-file outputs."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import functools
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -15,9 +15,13 @@ from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
     AttachmentDownloadResult,
+    DraftDeletionResult,
+    DraftListResult,
+    LabelChangeResult,
     PageExportResult,
     PageParseScope,
     PageTextFormat,
+    PageWriteResult,
     SearchFields,
     SearchMatch,
     SearchScope,
@@ -32,6 +36,15 @@ OFFLINE_READ = ToolAnnotations(
 )
 LOCAL_FILE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+)
+WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+)
+REPLACE_PAGE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
+PERMANENT_DELETE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\
@@ -66,6 +79,11 @@ drafts, comments and attachment references; links to other products remain links
 - export_pages writes full text or rich exports for up to 500 pages into the local exports folder.
   Attachment bytes are excluded by default; large exports may take minutes and incomplete items are
   listed in the ZIP report.
+- create_page makes a published page or new-page draft. update_page replaces the entire published
+  page body and requires expected_version; it refuses to detach inline comments unless explicitly
+  confirmed. publish_draft publishes a new-page draft without changing its ID. delete_draft is
+  permanent and bypasses the trash. set_labels adds or removes global page labels. These tools write
+  to Confluence and require the user's explicit request.
 - Authenticate or remove the local token with `confluence-connector auth` or
   `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
 - Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
@@ -234,6 +252,125 @@ def build_server(context: AppContext) -> FastMCP:
             format=format,
             parse_scope=parse_scope,
             include_attachments=include_attachments,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=WRITE)
+    @_logged
+    async def create_page(
+        title: str,
+        body: str,
+        format: PageTextFormat | None = None,
+        status: Literal["current", "draft"] | None = None,
+        parent_id: str | None = None,
+        space_key: str | None = None,
+        position: Literal["first", "last", "before", "after"] | None = None,
+        sibling: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a page or new-page draft in exactly one parent or space root.
+
+        Rich is the default format: provide HTML and Confluence storage tags, not Markdown or wiki
+        markup. The connector converts pre/code to the code macro, details/summary to expand, and
+        HTML void tags to self-closing tags. It refuses scripts, styles, frames, objects, embeds,
+        event handlers, javascript URLs and the Confluence HTML macro. Storage can use code, expand,
+        panels, status, table of contents, task lists, page/attachment links, images and mentions.
+        Text is escaped and split into paragraphs. A duplicate title in the target space is refused.
+        Position defaults to last; before/after require sibling in the same parent.
+        """
+        services = await context.services()
+        result: PageWriteResult = await services.writes.create_page(
+            title,
+            body,
+            format=format if format is not None else "rich",
+            status=status if status is not None else "current",
+            parent_id=parent_id,
+            space_key=space_key,
+            position=position,
+            sibling=sibling,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=REPLACE_PAGE)
+    @_logged
+    async def update_page(
+        page: str,
+        body: str,
+        expected_version: int,
+        format: PageTextFormat | None = None,
+        title: str | None = None,
+        allow_comment_loss: bool = False,
+    ) -> dict[str, Any]:
+        """Replace a published page's complete body, with an optional title change.
+
+        expected_version is required; a stale version is never overwritten. Rich is the default:
+        provide HTML and Confluence storage tags, not Markdown or wiki markup. The connector converts
+        pre/code to the code macro, details/summary to expand, and HTML void tags to self-closing
+        tags. It refuses scripts, styles, frames, objects, embeds, event handlers, javascript URLs
+        and the Confluence HTML macro. Storage can use code, expand, panels, status, table of
+        contents, task lists, page/attachment links, images and mentions. Text is escaped and split
+        into paragraphs. Inline-comment anchors that would be detached require allow_comment_loss.
+        Removed macros and attachment references are reported in warnings.
+        """
+        services = await context.services()
+        result: PageWriteResult = await services.writes.update_page(
+            page,
+            body,
+            expected_version=expected_version,
+            format=format if format is not None else "rich",
+            title=title,
+            allow_comment_loss=allow_comment_loss,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_logged
+    async def list_drafts(
+        space_key: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """List the signed-in user's new-page drafts; pass only cursor to continue."""
+        services = await context.services()
+        result: DraftListResult = await services.writes.list_drafts(
+            space_key=space_key,
+            limit=limit,
+            cursor=cursor,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=WRITE)
+    @_logged
+    async def publish_draft(draft: str) -> dict[str, Any]:
+        """Publish a new-page draft without changing its page ID."""
+        services = await context.services()
+        result: PageWriteResult = await services.writes.publish_draft(draft)
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=PERMANENT_DELETE)
+    @_logged
+    async def delete_draft(draft: str) -> dict[str, Any]:
+        """Permanently delete a new-page draft. This bypasses the trash and cannot be restored."""
+        services = await context.services()
+        result: DraftDeletionResult = await services.writes.delete_draft(draft)
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=WRITE)
+    @_logged
+    async def set_labels(
+        page: str,
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Add or remove global labels on one published page.
+
+        If a later change fails, the result lists completed changes, the failed label and any
+        changes not attempted.
+        """
+        services = await context.services()
+        result: LabelChangeResult = await services.writes.set_labels(
+            page,
+            add=add,
+            remove=remove,
         )
         return result.model_dump(mode="json")
 
