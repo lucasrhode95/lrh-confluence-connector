@@ -834,6 +834,12 @@ class _StorageBlockParser(HTMLParser):
         if not self.stack and data:
             self.blocks.append(data)
 
+    def handle_entityref(self, name: str) -> None:
+        self._append_reference()
+
+    def handle_charref(self, name: str) -> None:
+        self._append_reference()
+
     def handle_comment(self, data: str) -> None:
         self._append_construct("-->")
 
@@ -873,6 +879,14 @@ class _StorageBlockParser(HTMLParser):
         end = self.source.find(terminator, start)
         if end >= 0:
             self.blocks.append(self.source[start : end + len(terminator)])
+
+    def _append_reference(self) -> None:
+        if self.stack:
+            return
+        start = self._offset(self.getpos())
+        end = self.source.find(";", start)
+        if end >= 0:
+            self.blocks.append(self.source[start : end + 1])
 
 
 def _source_positions(source: str) -> list[int]:
