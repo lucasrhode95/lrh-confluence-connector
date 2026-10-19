@@ -20,7 +20,7 @@ from confluence_connector.domain.errors import (
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
-from fakes.credentials import FakeCredentialSource
+from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
 
 

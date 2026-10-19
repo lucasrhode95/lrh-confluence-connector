@@ -17,7 +17,7 @@ from confluence_connector.domain.errors import AccountMismatch, AuthenticationRe
 from confluence_connector.domain.models import AuthStatus, CurrentUser
 from confluence_connector.service.spaces import SpaceService
 from confluence_connector.surfaces.mcp_main import build_server
-from fakes.credentials import FakeCredentialSource
+from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
 
 
