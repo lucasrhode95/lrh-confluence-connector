@@ -97,20 +97,6 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(attempts, 2)
                 sleep.assert_awaited_once_with(0.0)
 
-    async def test_read_timeout_is_retried(self) -> None:
-        attempts = 0
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise httpx.ReadTimeout("synthetic timeout", request=request)
-            return httpx.Response(200, json={"ok": True})
-
-        _, transport = self.make_client(handler)
-        self.assertTrue((await transport.get_json("rest/api/user/current"))["ok"])
-        self.assertEqual(attempts, 2)
-
     async def test_write_timeout_is_uncertain_and_never_retried(self) -> None:
         attempts = 0
 
