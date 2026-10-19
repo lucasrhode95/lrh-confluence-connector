@@ -1,0 +1,21 @@
+<ac:storage>
+  <ac:structured-macro ac:name="info"><ac:rich-text-body><p>Panel source</p></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="note"><ac:rich-text-body><p>Note source</p></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="warning"><ac:rich-text-body><p>Warning source</p></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="tip"><ac:rich-text-body><p>Tip source</p></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="panel"><ac:parameter ac:name="title">Deployment</ac:parameter><ac:rich-text-body><p>Panel source</p></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="status"><ac:parameter ac:name="title">Approved</ac:parameter></ac:structured-macro>
+  <ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">More</ac:parameter></ac:structured-macro>
+  <ac:structured-macro ac:name="code"><ac:parameter ac:name="language">python</ac:parameter><ac:plain-text-body>print(1)</ac:plain-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="include"><ac:rich-text-body><ri:page ri:content-id="91" ri:content-title="Shared guide"/></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="excerpt-include"><ac:rich-text-body><ri:page ri:content-id="92" ri:content-title="Shared excerpt"/></ac:rich-text-body></ac:structured-macro>
+  <ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">OPS-7</ac:parameter></ac:structured-macro>
+  <ac:structured-macro ac:name="plantuml"><ac:plain-text-body>@startuml
+A -&gt; B
+@enduml</ac:plain-text-body></ac:structured-macro>
+  <ac:image><ri:attachment ri:filename="diagram.png" ri:content-id="att-7"/></ac:image>
+  <ac:link><ri:attachment ri:filename="guide.txt" ri:content-id="att-8"/></ac:link>
+  <ac:structured-macro ac:name="mystery"/>
+  <ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[<script>htmlMacroScript()</script>]]></ac:plain-text-body></ac:structured-macro>
+  <ac:inline-comment-marker ac:ref="inline-4">reviewed text</ac:inline-comment-marker>
+</ac:storage>

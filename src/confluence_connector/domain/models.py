@@ -10,6 +10,7 @@ ContentType = Literal["page", "blogpost", "comment", "attachment", "space", "use
 SearchMatch = Literal["all", "any", "phrase"]
 SearchFields = Literal["all", "title"]
 SearchSource = Literal["cql", "quicknav"]
+PageTextFormat = Literal["text", "rich"]
 
 
 class CurrentUser(BaseModel):
@@ -233,3 +234,121 @@ class ResolvedPageReference(BaseModel):
 
     page_id: str
     version: int | None = None
+
+
+class PageParseScope(BaseModel):
+    """Validated switches for optional page-read sections and source metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    comments: bool = True
+    attachments: bool = True
+    macros_from_storage: bool = True
+    header: bool = True
+
+
+class PageReference(BaseModel):
+    """Typed source identity carried beside rendered page text."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["page", "attachment", "image", "comment", "jira", "macro", "inline_comment"]
+    page_id: str | None = None
+    version: int | None = None
+    title: str | None = None
+    attachment_id: str | None = None
+    comment_id: str | None = None
+    filename: str | None = None
+    media_type: str | None = None
+    size: int | None = None
+    owner_page_id: str | None = None
+    url: str | None = None
+    alt_text: str | None = None
+    key: str | None = None
+    macro_name: str | None = None
+
+
+class PageAttachment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    attachment_id: str
+    filename: str
+    media_type: str | None = None
+    file_size: int | None = None
+    download_url: str | None = None
+
+
+class PageComment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    comment_id: str
+    parent_comment_id: str | None = None
+    author: PersonSummary | None = None
+    created_at: str | None = None
+    body: str = ""
+    location: str | None = None
+    resolution: str | None = None
+    selected_text: str | None = None
+
+
+class RemotePageComment(BaseModel):
+    """Mapped comment source fields before its rendered HTML body becomes plain text."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    comment_id: str
+    parent_comment_id: str | None = None
+    author: PersonSummary | None = None
+    created_at: str | None = None
+    body_view: str
+    location: str | None = None
+    resolution: str | None = None
+    selected_text: str | None = None
+
+
+class RemotePageContent(BaseModel):
+    """Mapped page source fields required to render one current or historical version."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    metadata: PageMetadata
+    view_body: str
+    storage_body: str
+    version: int
+    total_versions: int | None = None
+
+
+class PageReadRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    url: str | None = None
+    version: int
+    total_versions: int | None = None
+    modified_at: str | None = None
+    extracted_at: str
+    format: PageTextFormat
+    text: str
+    header: str | None = None
+    references: list[PageReference] = Field(default_factory=list)
+    attachments: list[PageAttachment] = Field(default_factory=list)
+    comments: list[PageComment] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class PageReadFailure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    reference: str
+    error: str
+
+
+class PageReadResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    pages: list[PageReadRecord]
+    remaining: list[str] = Field(default_factory=list)
+    failures: list[PageReadFailure] = Field(default_factory=list)
+    next_cursor: str | None = None
+    notes: list[str] = Field(default_factory=list)

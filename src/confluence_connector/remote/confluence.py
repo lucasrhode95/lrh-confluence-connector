@@ -11,6 +11,9 @@ from confluence_connector.domain.models import (
     ContentSearchHit,
     CurrentUser,
     PageMetadata,
+    PageAttachment,
+    RemotePageComment,
+    RemotePageContent,
     PageSummary,
     PageVersion,
     PersonSummary,
@@ -226,6 +229,70 @@ class ConfluenceApi:
             expected_username=expected_username,
         )
         return _page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def get_page_content(
+        self,
+        page_id: str,
+        *,
+        version: int | None = None,
+        include_storage: bool = True,
+        expected_username: str,
+    ) -> RemotePageContent:
+        """Read page view/storage bodies and provenance, optionally pinning a historical version.
+
+        ``page_id`` and ``version`` are validated by the page-reading service before this adapter is
+        called. Historical reads use the verified Data Center query contract in API research.
+        """
+        expansions = "space,version,history,ancestors,metadata.labels,body.view"
+        if include_storage:
+            expansions += ",body.storage"
+        params = {"expand": expansions}
+        if version is not None:
+            params.update({"status": "historical", "version": str(version)})
+        payload = await self._transport.get_json(
+            self._content_route(page_id), params=params, expected_username=expected_username
+        )
+        return _page_content(payload, base_url=str(self._settings["base_url"]), requested_version=version)
+
+    async def list_page_attachments(
+        self, page_id: str, *, expected_username: str
+    ) -> list[PageAttachment]:
+        """Read the documented attachment child list; the service validates ``page_id``."""
+        payload = await self._transport.get_json(
+            f"{self._content_route(page_id)}/child/attachment",
+            params={"limit": "500"},
+            expected_username=expected_username,
+        )
+        rows = payload.get("results")
+        if not isinstance(rows, list):
+            raise Upstream("Confluence returned an unexpected page-attachment response.")
+        attachments = []
+        for row in rows:
+            attachment = _page_attachment(row, base_url=str(self._settings["base_url"]))
+            if attachment is None:
+                raise Upstream("Confluence returned an attachment without its ID or filename.")
+            attachments.append(attachment)
+        return attachments
+
+    async def list_page_comments(
+        self, page_id: str, *, expected_username: str
+    ) -> list[RemotePageComment]:
+        """Read footer and inline comments with replies, using one bounded child-list request."""
+        payload = await self._transport.get_json(
+            f"{self._content_route(page_id)}/child/comment",
+            params={"limit": "500", "depth": "all", "expand": "body.view,history"},
+            expected_username=expected_username,
+        )
+        rows = payload.get("results")
+        if not isinstance(rows, list):
+            raise Upstream("Confluence returned an unexpected page-comment response.")
+        comments = []
+        for row in rows:
+            comment = _page_comment(row)
+            if comment is None:
+                raise Upstream("Confluence returned a comment without its ID.")
+            comments.append(comment)
+        return comments
 
     async def list_page_versions(
         self, page_id: str, *, expected_username: str
@@ -543,6 +610,105 @@ def _page_version(value: Any) -> PageVersion:
         author=_person(value.get("by")),
         message=_optional_string(value.get("message")),
         minor_edit=minor_edit if isinstance(minor_edit, bool) else None,
+    )
+
+
+def _page_content(
+    payload: dict[str, Any], *, base_url: str, requested_version: int | None
+) -> RemotePageContent:
+    """Map expanded page source fields before any body rendering takes place."""
+    metadata = _page_metadata(payload, base_url=base_url)
+    version = metadata.version or requested_version
+    if version is None:
+        raise Upstream("Confluence returned page content without a version number.")
+    if requested_version is not None and metadata.version not in (None, requested_version):
+        raise Upstream("Confluence returned a different page version than the requested historical version.")
+    body = payload.get("body")
+    body = body if isinstance(body, dict) else {}
+    view = body.get("view")
+    view = view if isinstance(view, dict) else {}
+    storage = body.get("storage")
+    storage = storage if isinstance(storage, dict) else {}
+    view_value = view.get("value")
+    storage_value = storage.get("value")
+    if not isinstance(view_value, str) or (storage_value is not None and not isinstance(storage_value, str)):
+        raise Upstream("Confluence returned page content without an expanded view or a valid storage body.")
+    history = payload.get("history")
+    history = history if isinstance(history, dict) else {}
+    total_versions = _optional_nonnegative_int(
+        history.get("totalVersions", history.get("numberOfVersions"))
+    )
+    return RemotePageContent(
+        metadata=metadata,
+        view_body=view_value,
+        storage_body=storage_value if isinstance(storage_value, str) else "",
+        version=version,
+        total_versions=total_versions,
+    )
+
+
+def _page_attachment(value: Any, *, base_url: str) -> PageAttachment | None:
+    """Map a child attachment only from its source identity and media fields."""
+    if not isinstance(value, dict):
+        return None
+    attachment_id = _identifier(value.get("id"))
+    filename = _optional_string(value.get("title")) or _optional_string(value.get("filename"))
+    if attachment_id is None or filename is None:
+        return None
+    extensions = value.get("extensions")
+    extensions = extensions if isinstance(extensions, dict) else {}
+    links = value.get("_links")
+    links = links if isinstance(links, dict) else {}
+    return PageAttachment(
+        attachment_id=attachment_id,
+        filename=filename,
+        media_type=_optional_string(value.get("mediaType")) or _optional_string(extensions.get("mediaType")),
+        file_size=_optional_nonnegative_int(value.get("fileSize", extensions.get("fileSize"))),
+        download_url=_same_instance_link(base_url, links.get("download")),
+    )
+
+
+def _page_comment(value: Any) -> RemotePageComment | None:
+    """Map comment body and provenance from the comment response, not rendered page text."""
+    if not isinstance(value, dict):
+        return None
+    comment_id = _identifier(value.get("id"))
+    if comment_id is None:
+        return None
+    body = value.get("body")
+    body = body if isinstance(body, dict) else {}
+    view = body.get("view")
+    view = view if isinstance(view, dict) else {}
+    view_body = view.get("value") if isinstance(view.get("value"), str) else ""
+    history = value.get("history")
+    history = history if isinstance(history, dict) else {}
+    extensions = value.get("extensions")
+    extensions = extensions if isinstance(extensions, dict) else {}
+    inline_properties = extensions.get("inlineProperties")
+    inline_properties = inline_properties if isinstance(inline_properties, dict) else {}
+    ancestors = value.get("ancestors")
+    ancestors = ancestors if isinstance(ancestors, list) else []
+    parent_comment_id = next(
+        (
+            identifier
+            for ancestor in reversed(ancestors)
+            if isinstance(ancestor, dict)
+            and ancestor.get("type") == "comment"
+            and (identifier := _identifier(ancestor.get("id"))) is not None
+        ),
+        None,
+    )
+    author = _person(history.get("createdBy")) or _person(value.get("author"))
+    return RemotePageComment(
+        comment_id=comment_id,
+        parent_comment_id=parent_comment_id,
+        author=author,
+        created_at=_optional_string(history.get("createdDate")),
+        body_view=view_body,
+        location=_optional_string(extensions.get("location")),
+        resolution=_optional_string(extensions.get("resolutionStatus"))
+        or _optional_string(extensions.get("resolution")),
+        selected_text=_optional_string(inline_properties.get("originalSelection")),
     )
 
 
