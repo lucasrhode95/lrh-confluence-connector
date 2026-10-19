@@ -272,10 +272,11 @@ and ensure running processes respect logout/replacement before their next acquis
 **Decided 2026-10-19 (D1):** store the token with `msal-extensions` encrypted persistence and its
 cross-process lock, as `lrh-m365-auth` does; no Microsoft sign-in is involved. If encryption is
 unavailable, refuse to run. Read the stored token on every Confluence call rather than keeping it in
-process memory. `confluence-connector login` prompts for the token without echoing it, verifies it
-with the current-user endpoint and stores it with that username. `confluence-connector logout` warns
-that the token cannot be recovered, then deletes it locally; it does not revoke it in Confluence.
-Tokens never pass through MCP tools.
+process memory. The command line matches the Microsoft 365 connectors: `confluence-connector auth`
+prompts for the token without echoing it, verifies it with the current-user endpoint and stores it
+with that username. `confluence-connector auth --sign-out` warns that the token cannot be recovered,
+then deletes it locally; it does not revoke it in Confluence. `status [--check]` reports the stored
+account offline, or verifies it, and `mcp` runs the stdio server. Tokens never pass through MCP tools.
 
 ## 8. Reliability and acceptance
 
@@ -288,8 +289,9 @@ short and readable, with no private content in operational logs.
 [concurrency measurements](api-research.md#search); the PAT run reached 10 in parallel without
 throttling; 6 per tool call matches one browser tab on HTTP/1.1):
 
-- One `httpx` client per tool call, reused for every request in that call (keep-alive), HTTP/1.1
-  only. At most 6 connections. One limit of 6 requests in flight per tool call, shared by every page
+- As in the Microsoft 365 connectors, one lazily built async `httpx` client per MCP process, kept
+  across tool calls (keep-alive) and rebuilt when the stored account changes. HTTP/1.1 only. At most
+  6 connections. One limit of 6 requests in flight per tool call, shared by every page
   and every part of each page. Each chat runs its own connector process and limits are not
   coordinated across processes; a few concurrent chats stay within the tested 10-parallel range, and
   429 handling covers the rest.

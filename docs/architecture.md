@@ -66,10 +66,29 @@ involved. It was chosen because:
 - `lrh-m365-auth` already uses it, so storage and locking behave the same across the `lrh-*`
   connectors.
 
-Every Confluence call reads the token from storage under the lock, so a logout or replacement takes
+Every Confluence call reads the token from storage under the lock, so a sign-out or replacement takes
 effect in all running processes at their next call. Missing encryption is an error; there is no
-plaintext fallback. `confluence-connector` will gain `login`, `logout`, `status` and `serve`
-subcommands through a `confluence_connector.__main__` entry point, replacing `main.py`.
+plaintext fallback.
+
+### 3.2 Harmonization with the Microsoft 365 connectors (decided, not built)
+
+Decided 2026-10-19. The connector follows the organisation of `lrh-sharepoint-connector`,
+`lrh-outlook-connector` and `lrh-teams-connector`:
+
+- **Command line:** `confluence-connector auth`, `auth --sign-out`, `status [--check]` and `mcp`
+  through `confluence_connector.__main__`, with the same exit codes, replacing `server.py` and
+  `main.py`.
+- **Process model:** a lazy composition root (`bootstrap.AppContext`) per MCP process holds one async
+  `httpx` client, rebuilt when the stored account changes.
+- **Layers:** `surfaces/` (MCP), `service/`, `remote/` (ports, transport, Confluence adapters and
+  mapping) and `domain/` (errors, models), plus `config.py` and `logs.py`. Modules doing the same job
+  as in the siblings (`logs.py`, `service/localfiles.py`, the error names) keep their names and
+  behavior.
+- **Local data:** `%USERPROFILE%\.lrh-confluence-connector` on Windows (outside AppData, which
+  packaged apps redirect), the XDG data folder elsewhere, or `CONFLUENCE_CONNECTOR_HOME`.
+- **Documentation:** this document links an overview diagram (`diagrams/architecture.svg`) and a code
+  map (`diagrams/code-map.svg`), and the README opens with `connector-overview.svg`, as in the
+  siblings.
 
 ## 4. Retrieval and errors
 

@@ -39,8 +39,9 @@ were verified only through a browser session.
 | `restore_page` | Restore, then place: caller placement, else stored property (best effort), else space root | Ready |
 | `set_labels` | Add or remove page labels | Ready |
 
-Logging in and out stay command-line subcommands (`confluence-connector login` with a hidden prompt,
-`confluence-connector logout`), so a token never passes through an agent conversation. Comment and attachment writes are not
+Signing in and out stay command-line subcommands, named as in the Microsoft 365 connectors
+(`confluence-connector auth` with a hidden prompt, `auth --sign-out`), so a token never passes
+through an agent conversation. Comment and attachment writes are not
 in the requirements and are not proposed here.
 
 ### Foundations shared by all tools
@@ -51,8 +52,9 @@ in the requirements and are not proposed here.
   comment, macro) mapped from REST JSON and storage/`view` structure before any text is rendered.
 - REST client covering the observed contracts: paging on `start + size` (never the echoed `limit` or
   `next` link), 500-item caps, 409 version conflicts, 400 CQL errors and 500 log referrals.
-- Encrypted token storage with `msal-extensions` and the `login`, `logout`, `status` and `serve`
-  subcommands ([architecture §3.1](architecture.md#31-token-storage-decided-not-built)); remove `main.py`.
+- Encrypted token storage with `msal-extensions`; the `auth`, `auth --sign-out`, `status` and `mcp`
+  subcommands and the sibling layout ([architecture §3.1–3.2](architecture.md#31-token-storage-decided-not-built));
+  remove `server.py`, `client.py` and `main.py`.
 - Retry and error policy from the shared rules: bounded read retries, writes retried only on proven
   non-application, uncertain writes reported. Offline tests with fake responses: connection reset then
   success, read timeout retried, write timeout reported as uncertain, persistent 500 reported after
