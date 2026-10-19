@@ -259,6 +259,7 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "get_page_metadata",
                 "get_pages",
                 "download_attachments",
+                "export_pages",
             },
         )
         await context.aclose()
@@ -384,6 +385,134 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("guide.txt", str(result))
                 self.assertIn("size_bytes", str(result))
                 self.assertIn("/wiki/download/attachments/55/guide.txt", str(requests[-1].url))
+            finally:
+                await context.aclose()
+                await client.aclose()
+
+    async def test_export_pages_tool_returns_a_local_text_file(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path.endswith("/child/attachment"):
+                return httpx.Response(200, json={"results": []})
+            if request.url.path.endswith("/child/comment"):
+                return httpx.Response(200, json={"results": []})
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic export",
+                    "type": "page",
+                    "space": {"key": "SYNTH", "name": "Synthetic Space"},
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {
+                        "view": {"value": "<p>Export body</p>"},
+                        "storage": {"value": "<p>Export body</p>"},
+                    },
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://confluence.example.test/wiki/",
+            transport=httpx.MockTransport(respond),
+        )
+        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
+        server = build_server(context)
+        with TemporaryDirectory() as directory, patch(
+            "confluence_connector.config.data_dir", return_value=Path(directory)
+        ):
+            try:
+                result = await server.call_tool("export_pages", {"pages": "55"})
+                output_files = list(Path(directory).rglob("*.txt"))
+                self.assertEqual(len(output_files), 1)
+                content = output_files[0].read_text(encoding="utf-8")
+                self.assertIn("Breadcrumb: Synthetic Space › Synthetic export", content)
+                self.assertIn("Export body", content)
+                self.assertIn("text/plain; charset=utf-8", str(result))
+                self.assertEqual(
+                    {request.url.path for request in requests},
+                    {
+                        "/wiki/rest/api/content/55",
+                        "/wiki/rest/api/content/55/child/attachment",
+                        "/wiki/rest/api/content/55/child/comment",
+                    },
+                )
+            finally:
+                await context.aclose()
+                await client.aclose()
+
+    async def test_export_pages_reuses_the_attachment_list_for_downloads(self) -> None:
+        import zipfile
+        from tempfile import TemporaryDirectory
+
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path.endswith("/child/attachment"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "att-1",
+                                "title": "guide.txt",
+                                "mediaType": "text/plain",
+                                "fileSize": 8,
+                                "_links": {"download": "/download/attachments/55/guide.txt"},
+                            }
+                        ]
+                    },
+                )
+            if request.url.path.endswith("/child/comment"):
+                return httpx.Response(200, json={"results": []})
+            if request.url.path.endswith("/download/attachments/55/guide.txt"):
+                return httpx.Response(200, content=b"synthetic", headers={"content-type": "text/plain"})
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic export",
+                    "type": "page",
+                    "space": {"key": "SYNTH", "name": "Synthetic Space"},
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {
+                        "view": {"value": "<p>Export body</p>"},
+                        "storage": {"value": "<p>Export body</p>"},
+                    },
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://confluence.example.test/wiki/",
+            transport=httpx.MockTransport(respond),
+        )
+        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
+        server = build_server(context)
+        with TemporaryDirectory() as directory, patch(
+            "confluence_connector.config.data_dir", return_value=Path(directory)
+        ):
+            try:
+                await server.call_tool("export_pages", {"pages": "55", "include_attachments": True})
+                output_files = list(Path(directory).rglob("*.zip"))
+                self.assertEqual(len(output_files), 1)
+                with zipfile.ZipFile(output_files[0]) as archive:
+                    self.assertIn("Synthetic export (55) v2/guide.txt", archive.namelist())
+                    self.assertEqual(
+                        archive.read("Synthetic export (55) v2/guide.txt"), b"synthetic"
+                    )
+                    exported_text = archive.read("Synthetic export (55) v2.txt").decode("utf-8")
+                    self.assertIn("guide.txt", exported_text)
+                self.assertEqual(
+                    sum(request.url.path.endswith("/child/attachment") for request in requests), 1
+                )
+                self.assertEqual(
+                    sum(request.url.path.endswith("/download/attachments/55/guide.txt") for request in requests),
+                    1,
+                )
             finally:
                 await context.aclose()
                 await client.aclose()

@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes seven read tools and one local-file tool:
+The MCP surface currently exposes seven read tools and two local-file tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -28,8 +28,9 @@ The MCP surface currently exposes seven read tools and one local-file tool:
 | `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
 | `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
 | `download_attachments` | Verify selected attachment IDs belong to one page, then save each file locally with per-file failures |
+| `export_pages` | Write up to 500 complete pages as a single file or flat ZIP, optionally including attachment bytes and reporting incomplete items |
 
-Page exports and write tools are not implemented yet.
+Write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -61,6 +62,7 @@ Page exports and write tools are not implemented yet.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
+- `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, flat ZIP packaging and failure reports.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
@@ -196,6 +198,22 @@ streamed through the shared six-request transport limit into a per-account subfo
 `downloads` directory. Names replace Windows-invalid path characters; an existing name receives a
 numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
 Output files older than seven days are removed when the folder is next used.
+
+`export_pages` validates up to 500 references before any request, then reads two full pages at a time;
+the transport still caps total in-flight HTTP requests at six. It resolves each requested version and
+keeps the input order. Non-account page errors and attachment failures are written to
+`_export-report.txt`; authentication and account mismatches abort the export. Text files use the same
+unbudgeted `get_pages` renderer and always include the provenance header. Rich files start with that
+header in an HTML comment, preserve the storage body, and append escaped comments when comments are
+selected. Windows-invalid filename characters are replaced and duplicate page names receive suffixes.
+
+One successful page with no attachment bytes requested and no incomplete sections is written as a
+timestamped file. All other cases use a timestamped ZIP with page files at its root and attachment
+folders beside their page files. `include_attachments` defaults to false; when true, the tool lists and
+downloads all readable attachments for each page. `parse_scope.attachments` separately controls
+whether attachment names appear in text. Exports and their staging files live in an account-specific
+subfolder of `exports`; the shared local-file cleanup removes outputs older than seven days when the
+folder is next used.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

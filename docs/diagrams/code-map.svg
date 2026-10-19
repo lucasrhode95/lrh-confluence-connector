@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1080" role="img" aria-labelledby="title desc">
   <title id="title">Confluence connector code map</title>
-  <desc id="desc">A package map of the CLI, eight MCP tools, bootstrap, read and local-file services, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
+  <desc id="desc">A package map of the CLI, nine MCP tools, bootstrap, read, export and local-file services, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#60758a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
@@ -13,7 +13,7 @@
   </defs>
   <rect width="1480" height="1080" rx="26" fill="#f6f8fb"/>
   <text x="48" y="58" class="title">Package and call map</text>
-  <text x="48" y="88" class="body">Foundation, read-path and selected attachment-download modules currently implemented.</text>
+  <text x="48" y="88" class="body">Foundation, read-path, attachment-download and page-export modules currently implemented.</text>
 
   <text x="48" y="144" class="section">Entry points and composition</text>
   <rect x="48" y="165" width="255" height="140" rx="15" class="box entry"/>
@@ -27,7 +27,7 @@
   <text x="70" y="405" class="body"><tspan x="70">build_server · serve_mcp</tspan><tspan x="70" dy="20">auth_status · list_spaces</tspan><tspan x="70" dy="20">search · users · tree · metadata</tspan><tspan x="70" dy="20">get_pages · download_attachments</tspan><tspan x="70" dy="20">_logged</tspan></text>
   <rect x="375" y="345" width="280" height="170" rx="15" class="box remote"/>
   <text x="397" y="378" class="head">service/</text>
-  <text x="397" y="405" class="body"><tspan x="397">spaces.py · SpaceService</tspan><tspan x="397" dy="20">search.py · users.py</tspan><tspan x="397" dy="20">tree.py · metadata.py</tspan><tspan x="397" dy="20">pages.py · page_text.py</tspan><tspan x="397" dy="20">attachments.py · localfiles.py</tspan></text>
+  <text x="397" y="405" class="body"><tspan x="397">spaces.py · SpaceService</tspan><tspan x="397" dy="20">search.py · users.py</tspan><tspan x="397" dy="20">tree.py · metadata.py</tspan><tspan x="397" dy="20">pages.py · page_text.py</tspan><tspan x="397" dy="20">attachments.py · exports.py</tspan><tspan x="397" dy="20">localfiles.py</tspan></text>
 
   <text x="710" y="144" class="section">Remote adapters</text>
   <rect x="710" y="165" width="300" height="150" rx="15" class="box remote"/>

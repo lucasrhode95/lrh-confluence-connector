@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
   <title id="title">Confluence connector architecture</title>
-  <desc id="desc">The CLI and eight-tool MCP surface compose account-bound read and local-file services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
+  <desc id="desc">The CLI and nine-tool MCP surface compose account-bound read, export and local-file services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#61778d" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
@@ -29,7 +29,7 @@
 
   <rect x="691" y="142" width="250" height="155" rx="16" class="box remote"/>
   <text x="716" y="180" class="head">Read and file services</text>
-  <text x="716" y="207" class="body"><tspan x="716">spaces · search · users</tspan><tspan x="716" dy="22">tree · page metadata</tspan><tspan x="716" dy="22">pages · text conversion</tspan><tspan x="716" dy="22">attachments · local files</tspan></text>
+  <text x="716" y="207" class="body"><tspan x="716">spaces · search · users</tspan><tspan x="716" dy="22">tree · page metadata</tspan><tspan x="716" dy="22">pages · text conversion</tspan><tspan x="716" dy="22">attachments · exports · local files</tspan></text>
 
   <rect x="691" y="345" width="250" height="132" rx="16" class="box remote"/>
   <text x="716" y="383" class="head">ConfluenceApi</text>

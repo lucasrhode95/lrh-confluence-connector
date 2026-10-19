@@ -96,7 +96,8 @@ class AttachmentDownloads:
 
     async def download_to_directory(self, attachment: PageAttachment, directory: Path) -> SavedAttachment:
         """Download one mapped attachment into a caller-owned temporary directory."""
-        return await self._download_to_directory(attachment, directory)
+        async with self._download_limit:
+            return await self._download_to_directory(attachment, directory)
 
     async def _download_one(self, attachment: PageAttachment) -> SavedAttachment:
         async with self._download_limit:

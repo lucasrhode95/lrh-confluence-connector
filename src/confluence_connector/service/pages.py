@@ -122,12 +122,14 @@ class PageTextService:
         version: int | None,
         page_format: PageTextFormat,
         parse_scope: PageParseScope,
+        attachment_override: list[PageAttachment] | None = None,
     ) -> PageReadRecord:
         """Read one complete validated page for export, without the interactive character budget.
 
         The export service resolves and validates ``page_id`` and ``version`` before calling this
         internal operation. It reuses the same source mapping, rendering and section layout as
-        ``get_pages`` so text exports stay identical to direct reads.
+        ``get_pages`` so text exports stay identical to direct reads. An optional preloaded attachment
+        list prevents a second listing request when an export also downloads attachment bytes.
         """
         request = _PageRequest(reference=page_id, page_id=page_id, version=version)
         loaded = await self._load_page(
@@ -135,7 +137,10 @@ class PageTextService:
             page_format=page_format,
             parse_scope=parse_scope,
             forced_version=version,
+            attachment_override=attachment_override,
         )
+        if loaded.source.metadata.content_type != "page":
+            raise InvalidRequest("Exports accept Confluence pages only.")
         return _record(loaded, list(loaded.blocks), page_format=page_format)
 
     async def _resolve(
@@ -294,6 +299,7 @@ class PageTextService:
         page_format: PageTextFormat,
         parse_scope: PageParseScope,
         forced_version: int | None,
+        attachment_override: list[PageAttachment] | None = None,
     ) -> _LoadedPage:
         version = forced_version if forced_version is not None else request.version
         include_storage = page_format == "rich" or parse_scope.macros_from_storage
@@ -306,7 +312,7 @@ class PageTextService:
             )
         ]
         task_names = ["body"]
-        if parse_scope.attachments:
+        if parse_scope.attachments and attachment_override is None:
             tasks.append(self._api.list_page_attachments(request.page_id, expected_username=self._username))
             task_names.append("attachments")
         if parse_scope.comments:
@@ -319,7 +325,7 @@ class PageTextService:
         if not isinstance(source, RemotePageContent):
             raise InvalidRequest("Confluence returned an unexpected page content record.")
 
-        attachments: list[PageAttachment] = []
+        attachments: list[PageAttachment] = attachment_override or []
         remote_comments: list[RemotePageComment] = []
         notes: list[str] = []
         for name, result in zip(task_names[1:], results[1:], strict=True):
