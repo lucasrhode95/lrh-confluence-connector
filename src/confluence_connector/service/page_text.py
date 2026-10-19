@@ -807,6 +807,8 @@ class _StorageBlockParser(HTMLParser):
         self.blocks: list[str] = []
         self.stack: list[str] = []
         self.top_start: int | None = None
+        self.top_text_start: int | None = None
+        self.pending_prefix = ""
         self.position = _source_positions(source)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -831,8 +833,8 @@ class _StorageBlockParser(HTMLParser):
             self.top_start = None
 
     def handle_data(self, data: str) -> None:
-        if not self.stack and data:
-            self.blocks.append(data)
+        if not self.stack and data and self.top_text_start is None:
+            self.top_text_start = self._offset(self.getpos())
 
     def handle_entityref(self, name: str) -> None:
         self._append_reference()
@@ -858,13 +860,25 @@ class _StorageBlockParser(HTMLParser):
             self.blocks.append(self.source[self.top_start :])
             self.top_start = None
             self.stack.clear()
+        else:
+            self._flush_top_text(len(self.source))
+        if self.pending_prefix:
+            if self.blocks:
+                self.blocks[-1] += self.pending_prefix
+            else:
+                self.blocks.append(self.pending_prefix)
+            self.pending_prefix = ""
 
     def _open(self, tag: str, source_tag: str, *, self_closing: bool) -> None:
         if not self.stack:
-            self.top_start = self._offset(self.getpos())
+            start = self._offset(self.getpos())
+            self._flush_top_text(start)
+            self.top_start = start - len(self.pending_prefix)
+            self.pending_prefix = ""
         if self_closing or tag.casefold() in _VOID_TAGS:
             if not self.stack and self.top_start is not None:
-                self.blocks.append(self.source[self.top_start : self.top_start + len(source_tag)])
+                end = self._offset(self.getpos()) + len(source_tag)
+                self.blocks.append(self.source[self.top_start : end])
                 self.top_start = None
             return
         self.stack.append(tag)
@@ -876,17 +890,30 @@ class _StorageBlockParser(HTMLParser):
         if self.stack:
             return
         start = self._offset(self.getpos())
+        self._flush_top_text(start)
+        start -= len(self.pending_prefix)
+        self.pending_prefix = ""
         end = self.source.find(terminator, start)
         if end >= 0:
             self.blocks.append(self.source[start : end + len(terminator)])
 
     def _append_reference(self) -> None:
-        if self.stack:
+        if not self.stack and self.top_text_start is None:
+            self.top_text_start = self._offset(self.getpos())
+
+    def _flush_top_text(self, end: int) -> None:
+        if self.top_text_start is None:
             return
-        start = self._offset(self.getpos())
-        end = self.source.find(";", start)
-        if end >= 0:
-            self.blocks.append(self.source[start : end + 1])
+        text = self.source[self.top_text_start : end]
+        if text.isspace():
+            if self.blocks:
+                self.blocks[-1] += text
+            else:
+                self.pending_prefix += text
+        else:
+            self.blocks.append(self.pending_prefix + text)
+            self.pending_prefix = ""
+        self.top_text_start = None
 
 
 def _source_positions(source: str) -> list[int]:

@@ -149,12 +149,12 @@ class PageTextRenderingChecks(unittest.TestCase):
         source = '<p data-x="1">A &amp; B</p>\n<ac:structured-macro ac:name="code"/><p>C</p>'
         self.assertEqual(
             storage_top_level_blocks(source),
-            ['<p data-x="1">A &amp; B</p>', '\n', '<ac:structured-macro ac:name="code"/>', '<p>C</p>'],
+            ['<p data-x="1">A &amp; B</p>\n', '<ac:structured-macro ac:name="code"/>', '<p>C</p>'],
         )
 
         self.assertEqual(storage_top_level_blocks("<!--keep--><p>text</p>"), ["<!--keep-->", "<p>text</p>"])
         top_level_text = "A &amp; B &#169;"
-        self.assertEqual("".join(storage_top_level_blocks(top_level_text)), top_level_text)
+        self.assertEqual(storage_top_level_blocks(top_level_text), [top_level_text])
 
     def test_comment_html_is_plain_text_and_active_script_content_is_dropped(self) -> None:
         self.assertEqual(html_to_text("<p>First <strong>bold</strong>.</p><script>secret()</script><p>Last</p>"), "First **bold**.\n\nLast")
