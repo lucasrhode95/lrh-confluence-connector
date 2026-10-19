@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import unicodedata
-from datetime import date, datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,6 +24,7 @@ from confluence_connector.domain.models import (
 )
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
+from confluence_connector.service.cql_dates import cql_date_literal, normalize_scope_time
 from confluence_connector.service import cursors
 
 CURSOR_KIND = "search_content"
@@ -40,10 +40,17 @@ QUICKNAV_LIMIT = 20
 class ContentSearch:
     """Public search entry point; validates tool input before constructing CQL or making requests."""
 
-    def __init__(self, api: ConfluenceApi, links: PageLinkResolver, username: str) -> None:
+    def __init__(
+        self,
+        api: ConfluenceApi,
+        links: PageLinkResolver,
+        username: str,
+        cql_timezone: str | None = None,
+    ) -> None:
         self._api = api
         self._links = links
         self._username = username
+        self._cql_timezone = cql_timezone
 
     async def search_content(
         self,
@@ -77,7 +84,7 @@ class ContentSearch:
         query_terms = _title_terms(terms) if fields == "title" else terms
         if not query_terms:
             raise InvalidRequest("query must contain searchable text after punctuation handling.")
-        cql = _build_cql(query_terms, match, fields, normalized_scope)
+        cql = _build_cql(query_terms, match, fields, normalized_scope, self._cql_timezone)
         page = await self._api.search_content_page(
             cql,
             start=start,
@@ -176,10 +183,10 @@ class ContentSearch:
             values = getattr(scope, name)
             if values is not None:
                 setattr(scope, name, _scope_values(name, values))
-        scope.created_after = _scope_time("created_after", scope.created_after)
-        scope.created_before = _scope_time("created_before", scope.created_before)
-        scope.modified_after = _scope_time("modified_after", scope.modified_after)
-        scope.modified_before = _scope_time("modified_before", scope.modified_before)
+        scope.created_after = normalize_scope_time("created_after", scope.created_after)
+        scope.created_before = normalize_scope_time("created_before", scope.created_before)
+        scope.modified_after = normalize_scope_time("modified_after", scope.modified_after)
+        scope.modified_before = normalize_scope_time("modified_before", scope.modified_before)
         _check_range("created", scope.created_after, scope.created_before)
         _check_range("modified", scope.modified_after, scope.modified_before)
         if scope.parent is not None:
@@ -305,7 +312,7 @@ def _validate_resumed_scope(scope: SearchScope) -> SearchScope:
         if values is not None:
             setattr(scope, name, _scope_values(name, values))
     for name in ("created_after", "created_before", "modified_after", "modified_before"):
-        setattr(scope, name, _scope_time(name, getattr(scope, name)))
+        setattr(scope, name, normalize_scope_time(name, getattr(scope, name)))
     _check_range("created", scope.created_after, scope.created_before)
     _check_range("modified", scope.modified_after, scope.modified_before)
     for name in ("parent", "ancestor"):
@@ -315,27 +322,18 @@ def _validate_resumed_scope(scope: SearchScope) -> SearchScope:
     return scope
 
 
-def _scope_time(name: str, value: str | None) -> str | None:
-    if value is None:
-        return None
-    try:
-        if len(value) == 10:
-            date.fromisoformat(value)
-            return value
-        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise InvalidRequest(f"scope.{name} must be an ISO date or timezone-aware timestamp.") from None
-    if moment.tzinfo is None:
-        raise InvalidRequest(f"scope.{name} timestamp must include a time zone.")
-    return moment.astimezone(timezone.utc).isoformat()
-
-
 def _check_range(name: str, after: str | None, before: str | None) -> None:
     if after is not None and before is not None and after > before:
         raise InvalidRequest(f"scope.{name}_after must not be later than scope.{name}_before.")
 
 
-def _build_cql(terms: list[str], match: SearchMatch, fields: SearchFields, scope: SearchScope) -> str:
+def _build_cql(
+    terms: list[str],
+    match: SearchMatch,
+    fields: SearchFields,
+    scope: SearchScope,
+    cql_timezone: str | None = None,
+) -> str:
     search_field = "title" if fields == "title" else "siteSearch"
     escaped_terms = [_text_search_term(term) for term in terms]
     if match == "all":
@@ -362,13 +360,17 @@ def _build_cql(terms: list[str], match: SearchMatch, fields: SearchFields, scope
             "contributor IN (" + ", ".join(_cql_literal(name) for name in scope.contributor_usernames) + ")"
         )
     if scope.created_after:
-        clauses.append(f"created >= {_cql_literal(scope.created_after)}")
+        date_value = cql_date_literal("created_after", scope.created_after, "after", cql_timezone)
+        clauses.append(f"created >= {_cql_literal(date_value)}")
     if scope.created_before:
-        clauses.append(f"created <= {_cql_literal(scope.created_before)}")
+        date_value = cql_date_literal("created_before", scope.created_before, "before", cql_timezone)
+        clauses.append(f"created <= {_cql_literal(date_value)}")
     if scope.modified_after:
-        clauses.append(f"lastmodified >= {_cql_literal(scope.modified_after)}")
+        date_value = cql_date_literal("modified_after", scope.modified_after, "after", cql_timezone)
+        clauses.append(f"lastmodified >= {_cql_literal(date_value)}")
     if scope.modified_before:
-        clauses.append(f"lastmodified <= {_cql_literal(scope.modified_before)}")
+        date_value = cql_date_literal("modified_before", scope.modified_before, "before", cql_timezone)
+        clauses.append(f"lastmodified <= {_cql_literal(date_value)}")
     if scope.parent is not None:
         clauses.append(f"parent = {scope.parent}")
     if scope.ancestor is not None:

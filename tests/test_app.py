@@ -10,12 +10,19 @@ from unittest.mock import patch
 
 import httpx
 
-from confluence_connector.__main__ import EXIT_AUTH_REQUIRED, EXIT_OK, build_parser, main
+from confluence_connector.__main__ import (
+    EXIT_AUTH_REQUIRED,
+    EXIT_OK,
+    _status,
+    build_parser,
+    main,
+)
 from confluence_connector.auth.store import StoredCredential
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.errors import AccountMismatch, AuthenticationRequired
 from confluence_connector.domain.models import AuthStatus, CurrentUser
 from confluence_connector.service.spaces import SpaceService
+from confluence_connector.service.timezone_calibration import CqlTimezoneCalibration
 from confluence_connector.surfaces.mcp_main import build_server
 from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
@@ -194,6 +201,46 @@ class CommandLineChecks(unittest.TestCase):
             result = main(["status", "--check"])
         self.assertEqual(result, EXIT_AUTH_REQUIRED)
         self.assertIn("confluence-connector auth", error.getvalue())
+
+    def test_timezone_calibration_runs_only_for_status_check_and_warns_on_mismatch(self) -> None:
+        from datetime import datetime, timezone
+
+        class Context:
+            instances: list[Context] = []
+
+            def __init__(self, *_: object, **__: object) -> None:
+                self.calibrated = False
+                self.instances.append(self)
+
+            async def auth_status(self) -> AuthStatus:
+                return AuthStatus(
+                    configured=True,
+                    token_stored=True,
+                    username="sample-user",
+                    base_url="https://confluence.example.test/wiki",
+                )
+
+            async def check_auth_status(self) -> AuthStatus:
+                return await self.auth_status()
+
+            async def calibrate_cql_timezone(self) -> CqlTimezoneCalibration:
+                self.calibrated = True
+                return CqlTimezoneCalibration(
+                    offset_minutes=60,
+                    reference_utc=datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc),
+                )
+
+            async def aclose(self) -> None:
+                return None
+
+        configured = settings()
+        configured["cql_timezone"] = "UTC+00:00"
+        output = io.StringIO()
+        with patch("confluence_connector.__main__.AppContext", Context), redirect_stdout(output):
+            self.assertEqual(_status(configured, check=False), EXIT_OK)
+            self.assertEqual(_status(configured, check=True), EXIT_OK)
+        self.assertEqual([context.calibrated for context in Context.instances], [False, True])
+        self.assertIn("differs from the measured CQL offset", output.getvalue())
 
 
 class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):

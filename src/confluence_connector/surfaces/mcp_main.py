@@ -38,7 +38,10 @@ drafts, comments and attachment references; links to other products remain links
 - search_content searches page and content fields, or titles only. It accepts literal query text,
   structured scope filters, match=all/any/phrase, and a continuation cursor. Archived spaces are
   included by default. An unscoped title search may add first-page quick-navigation results, labelled
-  by source; the supplement is skipped when filters cannot be applied to that source.
+  by source; the supplement is skipped when filters cannot be applied to that source. Date-only
+  filters mean a calendar day in Confluence's timezone. ISO-8601 timestamps with offsets are accepted;
+  timestamps without offsets are treated as UTC. Timestamp filters require calibrated cql_timezone;
+  run `confluence-connector status --check` if it is unset.
 - find_users searches current people by display name. Pass username alone for an exact lookup, including
   former users; a cursor continues a display-name search.
 - get_page_tree returns ordered child pages from a page or space root, with ancestors for page roots.
@@ -85,8 +88,11 @@ def build_server(context: AppContext) -> FastMCP:
 
         For continuation, pass only the returned cursor. `match` is all, any or phrase; `fields`
         is all or title. Scope supports spaces, space type, content types, labels, creators,
-        contributors, created/modified ranges, parent/ancestor and include_archived. Quick-navigation
-        supplements apply only to unscoped title searches.
+        contributors, created/modified ranges, parent/ancestor and include_archived. Date-only values
+        mean a calendar day in Confluence's timezone. ISO-8601 timestamps with offsets are accepted;
+        timestamps without offsets are treated as UTC. Timestamp filters require cql_timezone; run
+        `confluence-connector status --check` if it is unset. Quick-navigation supplements apply only
+        to unscoped title searches.
         """
         services = await context.services()
         result = await services.search.search_content(

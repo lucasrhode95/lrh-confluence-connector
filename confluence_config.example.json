@@ -1,5 +1,6 @@
 {
   "base_url": "https://confluence.example.com",
+  "cql_timezone": null,
   "query": "example probe query",
   "form_auth_path": "rest/tsv/1.0/authenticate",
   "endpoints": {

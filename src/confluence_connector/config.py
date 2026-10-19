@@ -1,4 +1,4 @@
-"""Shared stdlib-only loader for private app and research configuration."""
+"""Private configuration loading and atomic CQL-timezone calibration updates."""
 
 from __future__ import annotations
 
@@ -8,7 +8,12 @@ from functools import lru_cache
 import os
 import re
 from pathlib import Path
+import tempfile
 from urllib.parse import urlsplit
+
+from msal_extensions import CrossPlatLock
+
+from confluence_connector.timezones import parse_cql_timezone
 
 APP_NAME = "lrh-confluence-connector"
 CLI_NAME = "confluence-connector"
@@ -48,11 +53,55 @@ def _read_config(path: Path) -> dict:
         ) from None
     except (OSError, json.JSONDecodeError):
         raise SystemExit("Cannot parse the local configuration as valid JSON.") from None
+    _validate_settings(settings)
+    return settings
+
+
+def write_cql_timezone_if_missing(value: str, path: Path | None = None) -> bool:
+    """Atomically record a measured timezone only when the private setting is currently absent.
+
+    The selected config is re-read while a cross-process lock is held, so concurrent CLI processes
+    preserve existing settings and never replace an explicit timezone. Internal callers pass a
+    calibrated, formatted fixed-offset value.
+    """
+    try:
+        parse_cql_timezone(value)
+    except ValueError:
+        raise SystemExit("The calibrated cql_timezone value is invalid.") from None
+    target = (path or _selected_path).resolve()
+    lock_path = data_dir() / "config-write.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with CrossPlatLock(str(lock_path)):
+            try:
+                settings = json.loads(target.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                raise SystemExit("Cannot update the local configuration safely.") from None
+            _validate_settings(settings)
+            if settings.get("cql_timezone") is not None:
+                _read_config.cache_clear()
+                return False
+            settings["cql_timezone"] = value
+            _atomic_write_json(target, settings)
+    except OSError:
+        raise SystemExit("Cannot update the local configuration atomically.") from None
+    _read_config.cache_clear()
+    return True
+
+
+def _validate_settings(settings: object) -> None:
+    """Validate configuration once at the file boundary before callers trust its values."""
     required = {"base_url", "query", "form_auth_path", "endpoints"}
-    if not isinstance(settings, dict) or set(settings) != required:
+    if not isinstance(settings, dict) or set(settings) not in (required, required | {"cql_timezone"}):
         raise SystemExit(
-            "Configuration must contain exactly base_url, query, form_auth_path and endpoints."
+            "Configuration must contain base_url, query, form_auth_path, endpoints and optional cql_timezone."
         )
+    cql_timezone = settings.get("cql_timezone")
+    if cql_timezone is not None:
+        try:
+            parse_cql_timezone(cql_timezone)
+        except ValueError:
+            raise SystemExit("cql_timezone must be a valid IANA name or UTC±HH:MM fixed offset.") from None
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None
     if (
@@ -106,7 +155,22 @@ def _read_config(path: Path) -> dict:
             raise SystemExit(
                 "Only content may contain one {page_id} placeholder; endpoint queries are not allowed."
             )
-    return settings
+
+
+def _atomic_write_json(path: Path, settings: dict) -> None:
+    """Replace one JSON config from a same-directory flushed temporary file."""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(settings, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def data_dir() -> Path:

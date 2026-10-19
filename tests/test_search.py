@@ -44,9 +44,9 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertIn(f"siteSearch ~ '{term}'", cql)
 
-    async def test_scope_is_quoted_and_timezone_is_normalized_to_utc(self) -> None:
+    async def test_scope_is_quoted_and_timestamps_convert_to_cql_wall_minutes(self) -> None:
         api = _SearchApi()
-        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        service = ContentSearch(api, _Links(), "sample-user", "UTC+05:30")  # type: ignore[arg-type]
         await service.search_content(
             "roadmap",
             scope={
@@ -57,8 +57,34 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         )
         cql = api.search_calls[0][0]
         self.assertIn("space IN ('ENG\\' OR type = page')", cql)
-        self.assertIn("created >= '2026-10-18T15:00:00+00:00'", cql)
+        self.assertIn("created >= '2026/10/18 20:30'", cql)
         self.assertTrue(api.search_calls[0][3])
+
+    async def test_date_only_scope_works_without_timezone_but_timestamps_do_not(self) -> None:
+        api = _SearchApi()
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        await service.search_content("roadmap", scope={"created_after": "2026-10-18"})
+        self.assertIn("created >= '2026/10/18'", api.search_calls[0][0])
+
+        with self.assertRaisesRegex(InvalidRequest, "status --check"):
+            await service.search_content(
+                "roadmap", scope={"created_after": "2026-10-18T12:00:00Z"}
+            )
+        self.assertEqual(len(api.search_calls), 1)
+
+    async def test_cursor_keeps_utc_instants_and_reformats_them_for_each_page(self) -> None:
+        api = _SearchApi(
+            pages=[_hit("1", "one"), _hit("2", "two")], page_size=1, total_size=2
+        )
+        service = ContentSearch(api, _Links(), "sample-user", "UTC+00:00")  # type: ignore[arg-type]
+        first = await service.search_content(
+            "roadmap", limit=1, scope={"modified_after": "2026-10-18T12:00:00Z"}
+        )
+        self.assertIn("lastmodified >= '2026/10/18 12:00'", api.search_calls[0][0])
+
+        service._cql_timezone = "UTC+02:00"
+        await service.search_content(cursor=first.next_cursor)
+        self.assertIn("lastmodified >= '2026/10/18 14:00'", api.search_calls[1][0])
 
     async def test_title_source_is_labelled_and_deduplicated(self) -> None:
         api = _SearchApi(

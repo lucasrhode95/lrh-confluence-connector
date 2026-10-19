@@ -171,6 +171,17 @@ without opening an editor.
 | Concurrency (2026-10-19, user-authorized, browser session) | Requests: fixture page `GET` with `expand=body.view,version` (5.4 KB). The server speaks HTTP/1.1 only; connections were reused. 6 parallel: all 200, 854 ms wall, median 582 ms (one earlier attempt failed with a browser "Failed to fetch" network error and no HTTP status). 10 parallel: all 200, 594 ms wall, median 333 ms; the browser allows 6 connections per host on HTTP/1.1, so at most 6 were truly concurrent. 50 sequential: all 200, 15.4 s, median 285 ms, p90 329 ms, max 1068 ms. Time to first byte was about 270 ms with no connection setup, so server processing, not transfer, dominates. No 429, `Retry-After` or `X-RateLimit-*` headers appeared |
 | One combined read versus split reads (2026-10-19, one page, two runs) | One `GET` expanding `body.view`, `body.storage`, `version`, `history`, `children.attachment` and `children.comment.body.view` took 3.4 s and 1.0 s. The same data as three requests (page bodies; `child/attachment?limit=500`; `child/comment?depth=all`) took 1.2 s and 1.7 s in sequence, and 0.75 s and 0.38 s in parallel. The embedded expansions are also incomplete: attachments stop at 25 (`limit` 25) and comments omit replies. Separate parallel requests are both faster and complete |
 
+**2026-10-19 — Live, browser session, read-only CQL date probes:** CQL accepted date literals in
+`yyyy/MM/dd`, `yyyy-MM-dd`, `yyyy/MM/dd HH:mm` and `yyyy-MM-dd HH:mm` forms. Seconds, an ISO `T`,
+`Z`, numeric offsets and timezone names returned HTTP 400, "Could not parse cql". On one readable
+page, a binary search of inclusive `lastmodified >=` minute cutoffs matched the REST modification
+instant at the same displayed minute; both the measured CQL offset and the account's configured
+profile offset were +00:00 at the time, so the probe cannot establish whether CQL uses UTC, profile
+timezone or server timezone. `GET /rest/api/user/current` exposed no timezone; REST timestamps use
+UTC `Z` instants. `now("-Nm")` matched at minute precision in a separate probe, but is not selected:
+absolute literals in a configured zone keep cursor windows deterministic and reproducible. No page ID,
+content or zone name is retained here.
+
 ### Bodies and macros
 
 `storage`, `view`, `export_view`, `styled_view` and `editor` are all readable. None contained base64

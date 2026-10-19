@@ -18,6 +18,10 @@ from confluence_connector.remote.transport import ConfluenceTransport
 from confluence_connector.service.metadata import PageMetadataService
 from confluence_connector.service.search import ContentSearch
 from confluence_connector.service.spaces import SpaceService
+from confluence_connector.service.timezone_calibration import (
+    CqlTimezoneCalibration,
+    calibrate_cql_timezone as _calibrate_cql_timezone,
+)
 from confluence_connector.service.tree import PageTree
 from confluence_connector.service.users import UserSearch
 
@@ -97,6 +101,13 @@ class AppContext:
             checked=True,
         )
 
+    async def calibrate_cql_timezone(self) -> CqlTimezoneCalibration:
+        """Measure CQL's timezone after the caller has verified the active stored account."""
+        credential = self.store.load()
+        if credential is None:
+            raise AuthenticationRequired("No Confluence token is stored.")
+        return await _calibrate_cql_timezone(self._api(), credential.username)
+
     async def verify_token(self, token: str) -> CurrentUser:
         """Verify a prompted candidate before the caller persists it; no credential lock is held in flight."""
         if not token.strip():
@@ -118,7 +129,7 @@ class AppContext:
             api=api,
             links=links,
             spaces=SpaceService(self.settings, self.store, api, username),
-            search=ContentSearch(api, links, username),
+            search=ContentSearch(api, links, username, self.settings.get("cql_timezone")),
             users=UserSearch(api, username),
             tree=PageTree(api, links, username),
             metadata=PageMetadataService(api, links, username),

@@ -61,11 +61,12 @@ in the personal space, including a rich-text sample page.
   configured instance during user-run acceptance.
 - `search_content` fixes the scope input names as `space_keys`, `space_type`, `content_types`,
   `labels`, `creator_usernames`, `contributor_usernames`, `created_after/before`,
-  `modified_after/before`, `parent`, `ancestor` and `include_archived`. Confirm these names and the
-  UTC timestamp boundary behavior during user-run acceptance; requirements deferred exact names to
-  implementation. It accepts up to 100 results per page, 50 values per collection filter and 255
-  characters per filter value; query text is capped at 1,000 characters. Cursors are limited to
-  16,384 characters and offsets to 1,000,000. These bounds protect request and response sizes.
+  `modified_after/before`, `parent`, `ancestor` and `include_archived`. Confirm calibration and
+  `cql_timezone` conversion on the configured instance, and whether CQL uses the profile or server
+  zone if they ever differ. Confirm conservative widening during repeated daylight-saving hours.
+  The tool accepts up to 100 results per page, 50 values per collection filter and 255 characters per
+  filter value; query text is capped at 1,000 characters. Cursors are limited to 16,384 characters
+  and offsets to 1,000,000. These bounds protect request and response sizes.
 - Quick-navigation title rows are mapped from the observed `contentNameMatches` envelope using
   `contentId/id`, `title/name`, `spaceKey` or nested `space`, and `url/href`. This route and row shape
   are browser-observed and deployment-specific; verify result coverage and returned fields on the
