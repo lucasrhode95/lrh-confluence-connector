@@ -257,6 +257,7 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "find_users",
                 "get_page_tree",
                 "get_page_metadata",
+                "get_pages",
             },
         )
         await context.aclose()
@@ -293,6 +294,48 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(requests), 1)
             self.assertEqual(requests[0].url.path, "/wiki/rest/api/search")
             self.assertEqual(requests[0].url.params["includeArchivedSpaces"], "true")
+        finally:
+            await context.aclose()
+            await client.aclose()
+
+    async def test_get_pages_tool_reads_a_synthetic_page(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path.endswith("/child/attachment"):
+                return httpx.Response(200, json={"results": []})
+            if request.url.path.endswith("/child/comment"):
+                return httpx.Response(200, json={"results": []})
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "space": {"key": "SYNTH"},
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {"view": {"value": "<p>Page body</p>"}, "storage": {"value": "<p>Page body</p>"}},
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://confluence.example.test/wiki/",
+            transport=httpx.MockTransport(respond),
+        )
+        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
+        server = build_server(context)
+        try:
+            result = await server.call_tool("get_pages", {"pages": "55"})
+            self.assertIn("Page body", str(result))
+            self.assertEqual(
+                {request.url.path for request in requests},
+                {
+                    "/wiki/rest/api/content/55",
+                    "/wiki/rest/api/content/55/child/attachment",
+                    "/wiki/rest/api/content/55/child/comment",
+                },
+            )
         finally:
             await context.aclose()
             await client.aclose()

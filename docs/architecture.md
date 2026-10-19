@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes six read-only tools:
+The MCP surface currently exposes seven read-only tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -26,8 +26,9 @@ The MCP surface currently exposes six read-only tools:
 | `find_users` | Current users by display-name query; former users by exact username |
 | `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
 | `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
+| `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
 
-Page text reads, comments, attachment downloads, exports and write tools are not implemented yet.
+Attachment downloads, exports and write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -40,12 +41,12 @@ Page text reads, comments, attachment downloads, exports and write tools are not
 - `src/confluence_connector/logs.py`: process-scoped rotating logs with credential redaction.
 - `src/confluence_connector/auth/store.py`: encrypted PAT and username persistence under
   `CrossPlatLock`.
-- `src/confluence_connector/domain/`: connector errors and typed status, space, search, user, tree and metadata results.
+- `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
   checks; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
-  quick navigation, user lookup, ordered children and page-history mapping.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and later page tools; it
+  quick navigation, user lookup, ordered children, page bodies, attachments, comments and history mapping.
+- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and page reads; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
 - `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
@@ -57,6 +58,8 @@ Page text reads, comments, attachment downloads, exports and write tools are not
 - `src/confluence_connector/service/users.py`: display-name paging and exact username lookups.
 - `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
+- `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
+- `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
@@ -137,12 +140,23 @@ Metadata accepts at most 20 references; experimental page versions are read in 2
 capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
 historical metadata reads are not implemented. Results identify truncation or per-reference failures.
 
+`get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
+the shared transport caps all requests at six in flight. `body.view` supplies resolved text, while
+`body.storage` supplies Jira, PlantUML, HTML-macro and ordered reference metadata. Text output keeps
+headings, lists, code, panels, status, expand blocks, links and pipe tables; complex table cells use
+minimal HTML. Attachment and image identity is mapped from source fields before markers are rendered.
+Comments are converted from their own `view` bodies and threaded by source ancestry. Typed references
+remain alongside text so agents do not have to parse markers. A `rich` read returns the storage body
+verbatim. Both formats use block-boundary budgets; cursors carry page ID, version and block offset and
+re-read the historical version when the current page has changed. Attachments and comments are read
+again on continuation, so those live sections can change while the page body remains pinned.
+
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title
 inside their space, and a renamed title fails clearly. Short-link redirects are followed manually and
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
-comment focus are ignored. Search scope, page trees and metadata use this resolver for page references;
-page text reading is still open work.
+comment focus are ignored. Search scope, page trees, metadata and page text reads use this resolver for
+page references.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.
