@@ -57,7 +57,15 @@ None open. Settled decisions are in [requirements](requirements.md).
 Each check needs authorization for the exact requests. Synthetic `Connector Lab` fixture pages remain
 in the personal space, including a rich-text sample page.
 
-- Confirm that `list_spaces` returns both current and archived visible spaces on the configured instance.
+### Validations
+
+- `list_spaces` requests `current` and `archived` separately. The Data Center REST reference documents
+  the `status` parameter but does not enumerate its accepted values; this filter choice is inferred
+  from the returned status names and the planned tool contract. Verify both result sets on the
+  configured instance during user-run acceptance.
+
+### Other live checks
+
 - Token lifecycle (expiry, revocation visibility) and concurrent processes once D1 is built.
 
 Resource bundles expose UI code, not successful requests. Record dated results and limitations in the
