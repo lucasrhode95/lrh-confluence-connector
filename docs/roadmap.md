@@ -88,10 +88,12 @@ in the personal space, including a rich-text sample page.
   `child/comment?depth=all&expand=body.view,history`. Verify actual attachment and comment counts, the
   comment ancestry/inline-selection fields, and the page history field (if any) that reports total
   versions. Confirm historical reads continue the selected page version after a later edit. Confirm
-  HTML-macro markers land at the right source position when the view has no macro wrapper, including
-  raw HTML without scripts. Attachment and comment lists are fetched again by a continuation, so their
-  content may change while the page body remains version-pinned. Check whether either child route can
-  exceed its 500-item request limit on the configured instance.
+  whether an authoritative source-position mapping is available for HTML macros when the view has no
+  macro wrapper. Until then, unmatched HTML macros are marked after the body; matching visible text or
+  script position is unsafe because neither establishes identity. Attachment and comment lists are
+  fetched again by a continuation, so their content may change while the page body remains
+  version-pinned. Check whether either child route can exceed its 500-item request limit on the
+  configured instance.
 - `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
   Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
   1,000,000. Verify current and former-user results during acceptance.

@@ -133,16 +133,40 @@ class PageTextRenderingChecks(unittest.TestCase):
         page_ids = {reference.page_id for reference in rendered.references if reference.kind == "page"}
         self.assertEqual(page_ids, {"91"})
 
-    def test_unwrapped_html_macro_identity_is_recovered_from_storage_source(self) -> None:
+    def test_unmatched_html_macro_does_not_claim_matching_visible_text(self) -> None:
         rendered = render_page_body(
-            "<div><p>Unique HTML output.</p></div><p>Following paragraph.</p>",
+            "<p>Unique HTML output.</p><p>Following paragraph.</p>",
             '<ac:structured-macro ac:name="html"><ac:plain-text-body>&lt;p&gt;Unique HTML output.&lt;/p&gt;</ac:plain-text-body></ac:structured-macro>',
             page_id="55",
             attachments=[],
         )
         self.assertEqual(
             [block.text for block in rendered.blocks],
-            ["[Unrendered macro: html]", "Following paragraph."],
+            ["Unique HTML output.", "Following paragraph.", "[Unrendered macro: html]"],
+        )
+
+    def test_authoritative_html_macro_wrapper_keeps_its_marker_inline(self) -> None:
+        rendered = render_page_body(
+            "<p>Before</p><div data-macro-name='html'><script>rendered output</script></div><p>After</p>",
+            '<ac:structured-macro ac:name="html"><ac:plain-text-body>source</ac:plain-text-body></ac:structured-macro>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["Before", "[Unrendered macro: html]", "After"],
+        )
+
+    def test_adjacent_identical_blocks_keep_their_order_and_multiplicity(self) -> None:
+        rendered = render_page_body(
+            "<p>Repeat</p><p>Repeat</p><ul><li>Same item</li><li>Same item</li></ul>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["Repeat", "Repeat", "• Same item", "• Same item"],
         )
 
     def test_storage_blocks_preserve_source_markup_for_rich_continuation(self) -> None:

@@ -58,7 +58,7 @@ class _RenderContext:
     attachments_by_name: dict[str, PageAttachment]
     macros_by_name: dict[str, list[_Macro]]
     macro_indexes: dict[str, int] = field(default_factory=dict)
-    pending_html_macros: list[_Macro] = field(default_factory=list)
+    unmatched_html_macros: list[_Macro] = field(default_factory=list)
 
 
 class _TreeParser(HTMLParser):
@@ -121,7 +121,7 @@ def render_page_body(
         attachments_by_id=attachment_by_id,
         attachments_by_name=attachment_by_name,
         macros_by_name=macros_by_name,
-        pending_html_macros=[macro for macro in macros if macro.name == "html"],
+        unmatched_html_macros=[macro for macro in macros if macro.name == "html"],
     )
     parser = _TreeParser()
     parser.feed(view_html)
@@ -130,10 +130,10 @@ def render_page_body(
     blocks: list[PageTextBlock] = []
     for child in parser.root.children:
         blocks.extend(_render_blocks(child, context))
-    for macro in context.pending_html_macros:
+    for macro in context.unmatched_html_macros:
         reference = _macro_reference(macro, page_id)
         blocks.append(_block("[Unrendered macro: html]", (reference,) if reference else ()))
-    blocks = _coalesce_blocks(blocks)
+    blocks = _nonempty_blocks(blocks)
     references = _unique_references(
         [*source_references, *(reference for block in blocks for reference in block.references)]
     )
@@ -167,7 +167,7 @@ def _render_blocks(value: _Node | str, context: _RenderContext) -> list[PageText
         return [PageTextBlock(text)] if text else []
     tag = value.tag or ""
     if tag == "script":
-        return _render_html_macro_or_drop(value, context)
+        return []
     if tag in {"style", "noscript", "template"}:
         return []
     if _generated_number(value):
@@ -176,10 +176,6 @@ def _render_blocks(value: _Node | str, context: _RenderContext) -> list[PageText
     if macro_name is not None:
         macro = _source_macro(macro_name, context)
         return _render_macro(value, macro_name, macro, context)
-    html_macro = _match_html_macro(value, context)
-    if html_macro is not None:
-        reference = _macro_reference(html_macro, context.page_id)
-        return [_block("[Unrendered macro: html]", (reference,) if reference else ())]
     if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
         text, refs = _inline(value.children, context)
         level = int(tag[1])
@@ -218,8 +214,8 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
     reference = _macro_reference(macro, context.page_id) if macro is not None else None
     refs = (reference,) if reference is not None else ()
     if name == "html":
-        if macro is not None and macro in context.pending_html_macros:
-            context.pending_html_macros.remove(macro)
+        if macro is not None and macro in context.unmatched_html_macros:
+            context.unmatched_html_macros.remove(macro)
         return [_block("[Unrendered macro: html]", refs)]
     if name == "jira":
         key = macro.jira_key if macro is not None else None
@@ -263,33 +259,6 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
     if not text.strip() or _looks_unrendered(text):
         return [_block(f"[Unrendered macro: {name}]", refs)]
     return [_block(text.strip(), (*refs, *child_refs))]
-
-
-def _render_html_macro_or_drop(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
-    if context.pending_html_macros:
-        macro = context.pending_html_macros.pop(0)
-        reference = _macro_reference(macro, context.page_id)
-        return [_block("[Unrendered macro: html]", (reference,) if reference else ())]
-    return []
-
-
-def _match_html_macro(node: _Node, context: _RenderContext) -> _Macro | None:
-    visible = _normalize_inline(_node_text(node)).strip().casefold()
-    if not visible:
-        return None
-    for macro in context.pending_html_macros:
-        source_text = _normalize_inline(_plain_fragment(macro.body)).strip().casefold()
-        if source_text and (visible == source_text or source_text in visible):
-            context.pending_html_macros.remove(macro)
-            return macro
-    return None
-
-
-def _plain_fragment(value: str) -> str:
-    parser = _TreeParser()
-    parser.feed(value)
-    parser.close()
-    return _node_text(parser.root) or value
 
 
 def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list[PageTextBlock]:
@@ -379,24 +348,12 @@ def _inline(
             continue
         tag = value.tag or ""
         if tag in {"script", "style", "noscript", "template", "nav"}:
-            if tag == "script":
-                marker = _render_html_macro_or_drop(value, context)
-                if marker:
-                    parts.extend(block.text for block in marker)
-                    references.extend(marker[0].references)
             continue
         macro_name = _macro_name(value)
         if macro_name is not None:
             blocks = _render_macro(value, macro_name, _source_macro(macro_name, context), context)
             parts.extend(block.text.replace("\n", " ") for block in blocks)
             references.extend(reference for block in blocks for reference in block.references)
-            continue
-        html_macro = _match_html_macro(value, context)
-        if html_macro is not None:
-            parts.append("[Unrendered macro: html]")
-            reference = _macro_reference(html_macro, context.page_id)
-            if reference is not None:
-                references.append(reference)
             continue
         if tag == "img":
             marker, refs = _image_marker(value, context)
@@ -770,16 +727,13 @@ def _block(text: str, references: tuple[PageReference, ...] | list[PageReference
     return PageTextBlock(text=text, references=tuple(_unique_references(list(references))))
 
 
-def _coalesce_blocks(blocks: list[PageTextBlock]) -> list[PageTextBlock]:
+def _nonempty_blocks(blocks: list[PageTextBlock]) -> list[PageTextBlock]:
     result: list[PageTextBlock] = []
     for block in blocks:
         text = block.text.strip()
         if not text:
             continue
-        if result and result[-1].text == text:
-            result[-1] = _block(text, (*result[-1].references, *block.references))
-        else:
-            result.append(_block(text, block.references))
+        result.append(_block(text, block.references))
     return result
 
 

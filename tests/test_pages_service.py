@@ -124,6 +124,36 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.remaining, ["56"])
         self.assertIsNone(result.next_cursor)
 
+    async def test_successful_empty_body_is_returned_as_an_empty_page_record(self) -> None:
+        api = _ReadApi(pages={"55": _page("55", 1, "", "")})
+        result = await _service(api).get_pages(
+            "55",
+            parse_scope={"header": False, "comments": False, "attachments": False, "macros_from_storage": False},
+        )
+        self.assertEqual(len(result.pages), 1)
+        self.assertEqual(result.pages[0].text, "")
+        self.assertEqual(result.remaining, [])
+        self.assertEqual(result.failures, [])
+
+    async def test_empty_page_does_not_block_an_oversized_next_page(self) -> None:
+        api = _ReadApi(
+            pages={
+                "55": _page("55", 1, "", ""),
+                "56": _page("56", 1, "", "<p>first</p><p>second</p>"),
+            }
+        )
+        result = await _service(api).get_pages(
+            ["55", "56"],
+            format="rich",
+            max_chars=5,
+            parse_scope={"header": False, "comments": False, "attachments": False, "macros_from_storage": False},
+        )
+        self.assertEqual([page.page_id for page in result.pages], ["55", "56"])
+        self.assertEqual(result.pages[0].text, "")
+        self.assertEqual(result.pages[1].text, "<p>first</p>")
+        self.assertIsNotNone(result.next_cursor)
+        self.assertEqual(result.failures, [])
+
     async def test_account_failures_propagate_from_optional_reads(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>body</p>", "")},
@@ -153,6 +183,20 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         result = await _service(api).get_pages("55")
         self.assertEqual([page.page_id for page in result.pages], ["55"])
         self.assertEqual(api.maximum_active, 3)
+
+    async def test_two_pages_load_with_six_requests_and_return_in_input_order(self) -> None:
+        api = _ConcurrentReadApi(
+            {
+                "55": _page("55", 1, "<p>first</p>", ""),
+                "56": _page("56", 1, "<p>second</p>", ""),
+            }
+        )
+        result = await _service(api).get_pages(["55", "56"])
+        self.assertEqual(api.maximum_active, 6)
+        self.assertTrue(api.second_page_completed.is_set())
+        self.assertEqual([page.page_id for page in result.pages], ["55", "56"])
+        self.assertIn("first", result.pages[0].text)
+        self.assertIn("second", result.pages[1].text)
 
     async def test_invalid_public_parameters_fail_before_page_reads(self) -> None:
         api = _ReadApi(pages={"55": _page("55", 1, "<p>body</p>", "")})
@@ -242,20 +286,33 @@ class _ReadApi:
 
 
 class _ConcurrentReadApi(_ReadApi):
-    def __init__(self, page: RemotePageContent) -> None:
-        super().__init__(pages={page.metadata.page_id: page})
+    def __init__(self, pages: RemotePageContent | dict[str, RemotePageContent]) -> None:
+        page_map = {pages.metadata.page_id: pages} if isinstance(pages, RemotePageContent) else pages
+        super().__init__(pages=page_map)
         self._all_started = asyncio.Event()
+        self.second_page_completed = asyncio.Event()
         self._active = 0
         self._started = 0
+        self._completed: dict[str, int] = {}
         self.maximum_active = 0
+        self._expected = 3 * len(page_map)
+        self._page_ids = list(page_map)
 
-    async def _start_request(self) -> None:
+    async def _start_request(self, page_id: str) -> None:
         self._active += 1
         self._started += 1
         self.maximum_active = max(self.maximum_active, self._active)
-        if self._started == 3:
+        if self._started == self._expected:
             self._all_started.set()
         await asyncio.wait_for(self._all_started.wait(), timeout=1)
+        if len(self._page_ids) > 1 and page_id == self._page_ids[0]:
+            await asyncio.sleep(0.02)
+
+    def _finish_request(self, page_id: str) -> None:
+        self._active -= 1
+        self._completed[page_id] = self._completed.get(page_id, 0) + 1
+        if len(self._page_ids) > 1 and page_id == self._page_ids[1] and self._completed[page_id] == 3:
+            self.second_page_completed.set()
 
     async def get_page_content(
         self,
@@ -265,28 +322,28 @@ class _ConcurrentReadApi(_ReadApi):
         include_storage: bool = True,
         expected_username: str,
     ) -> RemotePageContent:
-        await self._start_request()
+        await self._start_request(page_id)
         try:
             self.content_calls.append((page_id, version))
             return self.pages[page_id]
         finally:
-            self._active -= 1
+            self._finish_request(page_id)
 
     async def list_page_attachments(self, page_id: str, *, expected_username: str) -> list[PageAttachment]:
-        await self._start_request()
+        await self._start_request(page_id)
         try:
             self.optional_calls.append(("attachments", page_id))
             return []
         finally:
-            self._active -= 1
+            self._finish_request(page_id)
 
     async def list_page_comments(self, page_id: str, *, expected_username: str) -> list[RemotePageComment]:
-        await self._start_request()
+        await self._start_request(page_id)
         try:
             self.optional_calls.append(("comments", page_id))
             return []
         finally:
-            self._active -= 1
+            self._finish_request(page_id)
 
 
 if __name__ == "__main__":

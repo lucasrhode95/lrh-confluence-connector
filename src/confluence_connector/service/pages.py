@@ -164,70 +164,90 @@ class PageTextService:
         records: list[PageReadRecord] = []
         notes: list[str] = []
         used_chars = 0
-        for index, request in enumerate(requests):
-            try:
-                loaded = await self._load_page(
+        pending: dict[int, asyncio.Task[_LoadedPage]] = {}
+
+        def schedule(index: int) -> None:
+            if index >= len(requests):
+                return
+            request = requests[index]
+            pending[index] = asyncio.create_task(
+                self._load_page(
                     request,
                     page_format=page_format,
                     parse_scope=parse_scope,
                     forced_version=pinned_first_version if index == 0 else None,
                 )
-            except ConnectorError as exc:
-                _raise_account_error(exc)
-                failures.append(PageReadFailure(reference=request.reference, error=f"{type(exc).__name__}: {exc}"))
-                continue
-
-            start_offset = first_offset if index == 0 else 0
-            selected, next_offset, chars, exceeded = _take_blocks(
-                loaded.blocks,
-                start=start_offset,
-                budget=max_chars - used_chars,
-                page_format=page_format,
             )
-            if records and (next_offset is not None or exceeded):
-                return PageReadResult(
-                    pages=records,
-                    remaining=[item.reference for item in requests[index:]],
-                    failures=failures,
-                    notes=notes,
-                )
 
-            if selected:
+        schedule(0)
+        schedule(1)
+        try:
+            for index, request in enumerate(requests):
+                try:
+                    loaded = await pending.pop(index)
+                except ConnectorError as exc:
+                    _raise_account_error(exc)
+                    failures.append(PageReadFailure(reference=request.reference, error=f"{type(exc).__name__}: {exc}"))
+                    schedule(index + 2)
+                    continue
+
+                start_offset = first_offset if index == 0 else 0
+                selected, next_offset, chars, exceeded = _take_blocks(
+                    loaded.blocks,
+                    start=start_offset,
+                    budget=max_chars - used_chars,
+                    page_format=page_format,
+                )
+                if used_chars > 0 and (next_offset is not None or exceeded):
+                    return PageReadResult(
+                        pages=records,
+                        remaining=[item.reference for item in requests[index:]],
+                        failures=failures,
+                        notes=notes,
+                    )
+
                 records.append(_record(loaded, selected, page_format=page_format))
                 used_chars += chars
-            notes.extend(loaded.notes)
-            if exceeded:
-                notes.append(
-                    "An indivisible first block exceeds max_chars; it was returned whole to preserve structure."
-                )
-            if next_offset is not None:
-                remaining = requests[index + 1 :]
-                cursor = cursors.encode(
-                    CURSOR_KIND,
-                    page_id=request.page_id,
-                    reference=request.page_id,
-                    version=loaded.source.version,
-                    offset=next_offset,
-                    pending=[_request_json(item) for item in remaining],
-                    format=page_format,
-                    max_chars=max_chars,
-                    parse_scope=parse_scope.model_dump(mode="json"),
-                )
-                return PageReadResult(
-                    pages=records,
-                    remaining=[request.page_id, *(item.reference for item in remaining)],
-                    failures=failures,
-                    next_cursor=cursor,
-                    notes=notes,
-                )
-            if used_chars >= max_chars and index + 1 < len(requests):
-                return PageReadResult(
-                    pages=records,
-                    remaining=[item.reference for item in requests[index + 1 :]],
-                    failures=failures,
-                    notes=notes,
-                )
-        return PageReadResult(pages=records, failures=failures, notes=notes)
+                notes.extend(loaded.notes)
+                if exceeded:
+                    notes.append(
+                        "An indivisible first block exceeds max_chars; it was returned whole to preserve structure."
+                    )
+                if next_offset is not None:
+                    remaining = requests[index + 1 :]
+                    cursor = cursors.encode(
+                        CURSOR_KIND,
+                        page_id=request.page_id,
+                        reference=request.page_id,
+                        version=loaded.source.version,
+                        offset=next_offset,
+                        pending=[_request_json(item) for item in remaining],
+                        format=page_format,
+                        max_chars=max_chars,
+                        parse_scope=parse_scope.model_dump(mode="json"),
+                    )
+                    return PageReadResult(
+                        pages=records,
+                        remaining=[request.page_id, *(item.reference for item in remaining)],
+                        failures=failures,
+                        next_cursor=cursor,
+                        notes=notes,
+                    )
+                if used_chars >= max_chars and index + 1 < len(requests):
+                    return PageReadResult(
+                        pages=records,
+                        remaining=[item.reference for item in requests[index + 1 :]],
+                        failures=failures,
+                        notes=notes,
+                    )
+                schedule(index + 2)
+            return PageReadResult(pages=records, failures=failures, notes=notes)
+        finally:
+            unfinished = list(pending.values())
+            for task in unfinished:
+                task.cancel()
+            if unfinished:
+                await asyncio.gather(*unfinished, return_exceptions=True)
 
     async def _load_page(
         self,
