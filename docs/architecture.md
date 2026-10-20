@@ -57,8 +57,9 @@ The MCP surface exposes eight read tools, two local-file tools and nine write to
   downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
   page-write, label, trash, restore, permission and content-property routes; quick navigation, user
-  lookup, ordered children, page bodies, attachments, comments and history mapping. The UI move
-  action is isolated here, reports application-level errors and polls documented cross-space tasks.
+  lookup, ordered children, page bodies, attachments, comments and history mapping, plus the
+  fixture-only footer-comment write used by acceptance setup. The UI move action is isolated here,
+  reports application-level errors and polls documented cross-space tasks.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
@@ -82,6 +83,9 @@ The MCP surface exposes eight read tools, two local-file tools and nine write to
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
+- `research/acceptance_fixtures.py`, `research/setup_acceptance.py` and
+  `research/run_acceptance.py`: deterministic synthetic fixtures, explicit fixture setup and
+  bounded opt-in live acceptance checks. See the research toolkit instructions for their flags.
 
 The HTTP adapter owns REST route spelling and wire formats. The service owns account-bound capability
 calls. MCP declarations stay thin and do not interpret page content.
@@ -89,7 +93,9 @@ calls. MCP declarations stay thin and do not interpret page content.
 ## 3. Configuration and authentication
 
 The required private JSON contains `base_url`, `query`, `form_auth_path`, and the configured endpoint
-paths. The probe-only `query` and `form_auth_path` remain in the shared loader contract. `--config PATH`
+paths. Optional `acceptance.personal_space_key` and `acceptance.cross_space_key` settings bound the
+manual acceptance scripts to approved spaces; missing values cause dependent checks to skip. The
+probe-only `query` and `form_auth_path` remain in the shared loader contract. `--config PATH`
 takes precedence over `CONFLUENCE_CONFIG`, followed by repository-root `confluence_config.json`,
 independent of the working directory. Missing or invalid settings fail before a prompt or network call.
 Settings are cached in each process; restart after edits or a CLI calibration writes `cql_timezone`.
