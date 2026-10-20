@@ -19,9 +19,8 @@ from confluence_connector.__main__ import (
 )
 from confluence_connector.auth.store import StoredCredential
 from confluence_connector.bootstrap import AppContext
-from confluence_connector.domain.errors import AccountMismatch, AuthenticationRequired
-from confluence_connector.domain.models import AuthStatus, CurrentUser
-from confluence_connector.service.spaces import SpaceService
+from confluence_connector.domain.errors import AuthenticationRequired
+from confluence_connector.domain.models import AuthStatus
 from confluence_connector.service.timezone_calibration import CqlTimezoneCalibration
 from confluence_connector.surfaces.mcp_main import build_server
 from fakes.credential_source import FakeCredentialSource
@@ -95,24 +94,6 @@ class AppContextChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(store.credential)
         await context.aclose()
         await client.aclose()
-
-
-class SpaceServiceChecks(unittest.IsolatedAsyncioTestCase):
-    async def test_verified_status_rejects_a_different_server_account(self) -> None:
-        expected_usernames: list[str] = []
-
-        class Api:
-            async def current_user(self, *, expected_username: str) -> CurrentUser:
-                expected_usernames.append(expected_username)
-                return CurrentUser(username="different-user")
-
-        api = Api()
-        service = SpaceService(
-            settings(), FakeCredentialSource(), api, "sample-user"  # type: ignore[arg-type]
-        )
-        with self.assertRaisesRegex(AccountMismatch, "different account"):
-            await service.check_auth_status()
-        self.assertEqual(expected_usernames, ["sample-user"])
 
 
 class CommandLineChecks(unittest.TestCase):
@@ -276,7 +257,19 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         for name in ("download_attachments", "export_pages"):
             annotations = tools_by_name[name].annotations
             self.assertIsNotNone(annotations)
-            self.assertFalse(annotations.readOnlyHint)
+            self.assertTrue(annotations.readOnlyHint)
+            self.assertFalse(annotations.openWorldHint)
+            self.assertFalse(annotations.idempotentHint)
+        search_schema = tools_by_name["search_content"].model_dump(mode="json")["inputSchema"]
+        self.assertIn("Literal search text", search_schema["properties"]["query"]["description"])
+        scope_properties = search_schema["$defs"]["SearchScope"]["properties"]
+        self.assertTrue(all("description" in prop for prop in scope_properties.values()))
+        self.assertIn("no offset means UTC", scope_properties["modified_after"]["description"])
+        get_pages_schema = tools_by_name["get_pages"].model_dump(mode="json")["inputSchema"]
+        parse_scope_schema = get_pages_schema["$defs"]["PageParseScope"]["properties"]
+        self.assertTrue(all("description" in prop for prop in parse_scope_schema.values()))
+        attachment_schema = tools_by_name["download_attachments"].model_dump(mode="json")["inputSchema"]
+        self.assertEqual(attachment_schema["properties"]["attachment_ids"]["maxItems"], 500)
         label_annotations = tools_by_name["set_labels"].annotations
         self.assertIsNotNone(label_annotations)
         self.assertTrue(label_annotations.destructiveHint)

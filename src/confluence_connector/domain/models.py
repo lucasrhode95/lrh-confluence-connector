@@ -54,19 +54,45 @@ class SearchScope(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    space_keys: list[str] | None = None
-    space_type: Literal["global", "personal"] | None = None
-    content_types: list[ContentType] | None = None
-    labels: list[str] | None = None
-    creator_usernames: list[str] | None = None
-    contributor_usernames: list[str] | None = None
-    created_after: str | None = None
-    created_before: str | None = None
-    modified_after: str | None = None
-    modified_before: str | None = None
-    parent: str | None = None
-    ancestor: str | None = None
-    include_archived: bool = True
+    space_keys: list[str] | None = Field(default=None, description="Include only these Confluence space keys.")
+    space_type: Literal["global", "personal"] | None = Field(
+        default=None, description="Include global spaces or personal spaces."
+    )
+    content_types: list[ContentType] | None = Field(
+        default=None, description="Content types such as page, blogpost, comment or attachment."
+    )
+    labels: list[str] | None = Field(default=None, description="Include content with any of these labels.")
+    creator_usernames: list[str] | None = Field(
+        default=None, description="Include content created by any of these usernames."
+    )
+    contributor_usernames: list[str] | None = Field(
+        default=None, description="Include content contributed to by any of these usernames."
+    )
+    created_after: str | None = Field(
+        default=None,
+        description="Inclusive lower bound: date in Confluence's zone or ISO instant (no offset means UTC).",
+    )
+    created_before: str | None = Field(
+        default=None,
+        description="Inclusive upper bound: date in Confluence's zone or ISO instant (no offset means UTC).",
+    )
+    modified_after: str | None = Field(
+        default=None,
+        description="Inclusive lower bound: date in Confluence's zone or ISO instant (no offset means UTC).",
+    )
+    modified_before: str | None = Field(
+        default=None,
+        description="Inclusive upper bound: date in Confluence's zone or ISO instant (no offset means UTC).",
+    )
+    parent: str | None = Field(
+        default=None, description="Direct-child page ID or URL (up to 2,048 characters)."
+    )
+    ancestor: str | None = Field(
+        default=None, description="Ancestor page ID or URL (up to 2,048 characters)."
+    )
+    include_archived: bool = Field(
+        default=True, description="Include archived spaces (default true)."
+    )
 
 
 class SearchQuery(BaseModel):
@@ -242,10 +268,14 @@ class PageParseScope(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    comments: bool = True
-    attachments: bool = True
-    macros_from_storage: bool = True
-    header: bool = True
+    comments: bool = Field(
+        default=True, description="Include the threaded comment section and comment bodies."
+    )
+    attachments: bool = Field(default=True, description="Include the page's attachment list and references.")
+    macros_from_storage: bool = Field(
+        default=True, description="Read storage markup to identify macros and typed references."
+    )
+    header: bool = Field(default=True, description="Include page title, ID, URL, space and timestamps.")
 
 
 class PageReference(BaseModel):

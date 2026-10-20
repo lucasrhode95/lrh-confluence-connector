@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface exposes eight read tools, two local-file tools and nine write tools:
+The MCP surface exposes nine read tools, two local-file tools and eight write tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -62,7 +62,7 @@ The MCP surface exposes eight read tools, two local-file tools and nine write to
   reports application-level errors and polls documented cross-space tasks.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
   refuses URLs outside the configured host and context path.
-- `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
+- `src/confluence_connector/service/spaces.py`: visible-space listing for the validated account.
 - `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
   merging and self-contained search cursors.
 - `src/confluence_connector/service/cql_dates.py`: UTC scope normalization, configured-zone conversion,
