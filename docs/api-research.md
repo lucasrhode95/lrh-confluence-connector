@@ -1,424 +1,347 @@
 # Confluence API research
 
-Current deployment-specific findings that Atlassian does not document, documents ambiguously, or that
-settle an integration question. Public API reference material stays at its official source.
-Consolidated 2026-10-18; earlier evidence retains its original date.
+What Atlassian does not document about the Confluence Data Center routes this connector uses, or
+documents too vaguely to build on without testing: page caps and paging, search tokenization, CQL dates,
+how writes, moves, trash and restore really behave, and the private web routes the connector relies on.
+Documented behavior is not repeated here; the
+[Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and the
+[CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/) are the
+reference for routes, parameters and schemas.
 
-## How to read this record
+**Product scope:** [requirements](requirements.md) · **How it is built:** [architecture](architecture.md) ·
+**Probes:** [`research/`](../research/README.md)
 
-**Live** means a user-run standalone probe. **Browser** means a request observed in a browser capture.
-**Source** means a route or behavior found in saved UI code/HTML, not a verified API call.
-**Documentation** means a vendor description, not a successful deployment test.
+## Contents
 
-Evidence describes one user, credential, query and instance. Neither an empty response nor a source
-fragment proves a universal restriction or capability. Browser sessions and PATs are different
-credentials. Captures are temporary private inputs outside the repository; only useful route shapes,
-contracts and summarized findings belong here. No content mutations have been verified by these records.
+1. [Summary](#1-summary)
+2. [Instance and credentials](#2-instance-and-credentials): [instance](#21-instance),
+   [credentials](#22-credentials)
+3. [Transport](#3-transport)
+4. [Search](#4-search): [endpoints and archived spaces](#41-endpoints-and-archived-spaces),
+   [terms and punctuation](#42-terms-and-punctuation), [titles](#43-titles),
+   [dates and time zones](#44-dates-and-time-zones), [users](#45-users)
+5. [Reading pages](#5-reading-pages): [bodies and macros](#51-bodies-and-macros), [paging](#52-paging),
+   [labels](#53-labels), [attachments, comments and versions](#54-attachments-comments-and-versions)
+6. [Writes](#6-writes): [pages and versions](#61-pages-and-versions), [drafts](#62-drafts),
+   [moves](#63-moves), [trash and restore](#64-trash-and-restore),
+   [rich-text input](#65-rich-text-input)
+7. [Private routes seen but not used](#7-private-routes-seen-but-not-used)
 
-## Authentication and deployment
+**How to read it.** Every finding carries its evidence and date:
 
-**2026-10-07 — Browser/source:** saved HTML identifies Confluence Data Center **9.2.10**. AUI 9.12.11
-is a frontend asset version, not the server version.
-
-| Method | Evidence and observed result | Limit |
-|---|---|---|
-| PAT bearer | Live: HTTP 200 for current user, content search, UI search, spaces and one content ID | Token type relies on the user's PAT-creation report; bearer transport alone cannot distinguish PAT from OAuth |
-| Form session | Browser and two live runs: login and the same API reads succeed; immediate cookie replay in a fresh HTTP client succeeds | In-memory replay only; no persistence, expiry or reboot claim |
-| Anonymous | Live: HTTP 401 for current user, both searches and spaces | Tested protected reads only |
-| Basic | Probe available; no successful result recorded | Form success does not prove Basic acceptance |
-| Native OAuth | Documentation and token-accepting probe mode only | No administrator registration, token grant or native-provider API test |
-| Microsoft SAML SSO | Browser: sign-in returns to the Wiki SAML consumer and authenticated content | Does not provide an OAuth token to the local connector |
-
-### Form session contract
-
-**2026-10-07 — Browser/live:** `POST /rest/tsv/1.0/authenticate` accepts JSON keys
-`username,password,rememberMe,targetUrl,captchaId`. Query key `os_authType` was observed; shared source
-uses `os_authType=none`. A failed browser login returned 401 with `message,captchaRequired`; a
-successful one returned 200 with `next`. This is an undocumented browser endpoint, isolated to the
-interactive probe, not the connector's authentication backend.
-
-Two user-run `form --remember-me` probes reported two Secure/HttpOnly cookies, one with an expiry.
-A copied cookie jar immediately passed current-user and CQL reads in a fresh client. No credentials
-or cookies were saved; this proves neither durable reuse nor a particular lifetime.
-
-**Browser:** `GET /rest/authconfig/1.0/login-options` returned
-`results,size,start,limit,isLastPage`, with `LOGIN_FORM` and `IDP` options. This establishes a configured
-identity-provider choice, not OIDC. The SSO sequence was `/login.action` →
-`/plugins/servlet/external-login/{id}` → Microsoft SAML →
-`POST /plugins/servlet/samlconsumer` (`SAMLResponse,RelayState`) → Wiki session.
-Same-password behavior does not establish the underlying directory technology.
-
-CAPTCHA failure was observed. TOTP/recovery/enrollment code was present in UI resources but not
-verified as enabled or exercised; no enrollment or permission elevation was attempted.
-
-### Documented alternatives with unresolved applicability
-
-**2026-10-07 — Documentation comparison:** the native OAuth provider guide's bearer-content example
-and earlier versioned REST OAuth notices appeared inconsistent. Without a registered-client test,
-neither native OAuth support nor impossibility was established. This is not a selected implementation
-path; administrator assistance is unavailable for the intended deployment.
-
-Service-account availability was not established for the tested version. A hosted Teamwork Graph
-bridge was discussed but not configured or tested; it requires an administrator/cloud setup outside
-the agreed local product. Neither option is evidence of a usable credential here.
-
-References: [PAT guide](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html),
-[native OAuth provider](https://developer.atlassian.com/server/confluence/confluence-oauth2-provider-api/).
-Credential expiry, replacement, local removal versus server revocation, account binding and encrypted
-cross-process persistence have not been verified.
-
-## Standalone reads
-
-**2026-10-07 — Live, PAT and form-session probes:**
-
-| Operation | Route | Result and limit |
-|---|---|---|
-| Identity | `GET /rest/api/user/current` | 200 and an account-identifier signal; identity values not retained |
-| Content search | `GET /rest/api/content/search` | 200, one result with `limit=1` |
-| UI search | `GET /rest/api/search` | 200, one result with `limit=1` |
-| Spaces | `GET /rest/api/space` | 200, one result with `limit=1` |
-| Content | `GET /rest/api/content/{id}` | One selected result returns JSON |
-
-The content probe supplied `cql=type = page AND siteSearch ~ <escaped text>`, `limit=1`,
-`expand=space,version`. UI search added `start=0,src=next.ui.search,expand=space.icon` and
-`includeArchivedSpaces=false`. Those are probe parameters, not proof of filter semantics or archived
-coverage. Current-user success is standalone evidence, not a claim that it appeared in the captures.
-
-The sample proves credential access to these operations, not search recall, exhaustive coverage,
-paging, attachment retrieval, macros, permission completeness or writes.
-
-**2026-10-19 — Atlassian REST reference, source only:** `GET /rest/api/space` documents a `status`
-query parameter and a paged response with `totalCount`, `start`, `limit`, `size` and `results` in the
-[Data Center Space API](https://developer.atlassian.com/server/confluence/rest/v1000/api-group-space/).
-The generated reference does not enumerate accepted status values. The connector requests `current`
-and `archived` separately based on the response status names and the planned space-list contract; no
-request was made to the configured instance, so archived-space inclusion still needs acceptance
-verification there.
-
-## Search and content browser contracts
-
-**2026-10-07 — Browser:** these useful contracts were observed independently of the PAT probe.
-
-| GET route | Observed query keys | Observed response shape |
-|---|---|---|
-| `/rest/api/content/search` | `cql,cqlcontext,expand,_` | `_links,cqlQuery,limit,results,searchDuration,size,start,totalSize` |
-| `/rest/api/search` | `cql,excerpt,expand,includeArchivedSpaces,limit,src,start` | Same search envelope |
-| `/rest/experimental/search` | `cql,expand,limit,_` | Same search envelope |
-| `/rest/quicknav/1/search` | `limit,query,src,type` | `contentNameMatches,query,queryTokens,totalSize` |
-| `/rest/spacedirectory/1/search` | `filterUnauthorizedSpaces,pageSize,query,startIndex,status,type,_` | `spaces,totalSize` |
-| `/rest/inlinecomments/1.0/comments` | `containerId,_` | No object envelope asserted |
-| `/plugins/pagetree/naturalchildren.action` | `pageId,ancestors,sort,startDepth,expandCurrent` and other tree options | HTML/UI response |
-| `/plugins/macrobrowser/browse-macros.action` | `detailed` | `categories,editTitle,insertTitle,macros,title` |
-| `/plugins/editor-loader/editor.action` | Editor options including `pageId,parentPageId,spaceKey,atl_token` | Editor HTML/resources; no token values retained |
-
-Browser attachment downloads used `/download/attachments/{id}/{filename}`. Standalone PAT attachment
-access, redirects and filename handling remain unverified. Plugin reads are not automatically covered
-by successful PAT calls to standard REST routes.
-
-### Source leads for required capabilities
-
-**2026-10-07 — Source only unless stated otherwise:**
-
-- Attachment listing: `/rest/api/content/{id}/child/attachment`; upload code also references
-  `/plugins/drag-and-drop/upload.action`. No independent attachment/upload test is recorded.
-- Draft/editor work: `/rest/create-dialog/1.0/blueprints/web-items`,
-  `/rest/create-dialog/1.0/storage/quick-create`, `/rest/tinymce/1/macro/preview` and
-  `/rest/tinymce/1/drafts/discard`. Mutation methods/outcomes are unverified.
-- Moves/tree deletion: `/pages/movepage.action`, `/pages/reorderpages.action`,
-  `/plugins/tree-copy/preparing-copying.action`, `/plugins/tree-delete/preparing-delete.action`.
-  These are discovery leads, not chosen connector APIs or authorization to execute them.
-- Macro/plugin code includes multi-excerpt and numbered-heading features. Source presence does not
-  establish that a plugin is installed, enabled or callable with the integration credential.
-
-**2026-10-18 — Source:** an additional home-page resource export contains search, editor/draft,
-content-child/descendant and history route references, including `/pages/resumedraft.action` and
-`/rest/api/content/{id}/history`. This was static inspection only. It establishes no new HTTP status,
-write behavior or successful standalone endpoint. No archive/member inventory is retained.
-
-## Read-only browser-session probes
-
-**2026-10-19 — Live, browser session:** user-authorized read-only `GET` requests sent from a signed-in
-page with `fetch`, following runbook sessions 0–2b. No HAR was kept and nothing was written. One
-instance, one account; counts are rounded indicators, not limits that apply everywhere. PAT behavior on
-the same routes was not retested.
-
-### Instance profile
-
-Version 9.2.10 (`ajs-version-number`), build 9111. The macro browser lists about 100 macros from
-standard Atlassian plugins plus multi-excerpt, PlantUML, numbered headings, a Git plugin, tree view,
-image map and the HTML macro. No diagram editor such as draw.io or Gliffy appeared. The personal
-access token page loads for this account. Whether collaborative editing is enabled was not determined
-without opening an editor.
-
-### Search
-
-| Question | Result |
+| Label | Meaning |
 |---|---|
-| Page caps | `content/search` returns at most 500 without body expansion, 50 with `body.storage`. `rest/api/search` returns at most 500. `rest/api/content?type=page` returns at most 500 and took about 9 s |
-| Echoed limit | When the cap applies, both report the requested `limit`, not the applied one. `content/search` `_links.next` then advances by the requested limit (`start=1000` after 500 results), skipping results. Page on `start + size` |
-| Deep paging | `start=10000` works on both. `rest/api/search` gives no `next` link |
-| Known title (31 recent pages, one per space) | Quick navigation `/rest/quicknav/1/search` (the undocumented route behind the header search's suggestion list, first seen in browser captures 2026-10-07) ranked 30/31 first and 31/31 in its results. Quoted `siteSearch` and `title ~` each missed 6, always titles with `-/:()",`. Replacing punctuation with spaces found 9/9 with `siteSearch` and 8/9 with `title ~`. `title = "exact"` matched unless the title contained `"` |
-| Body phrase | Quoted phrases found every page whose phrase was really contiguous, mostly at rank 1. All 5 misses were probe artefacts: phrases joined across element boundaries |
-| Unquoted words | `siteSearch ~ "a b"` is an OR match (total higher than either word alone); `text ~ "a b"` behaves as AND. Unquoted `siteSearch` put the target first for 15/31 pages and in the top 10 for 24/31 |
-| Normalization | Case-insensitive. Accents are folded (Portuguese words with and without diacritics return identical totals). English stemming (`deploy`, `deployed`, `deployments` identical; `configure` ≠ `configuration`). No Portuguese plural stemming. `word*`, `de*oy` and `?` wildcards work; a leading `*` returned almost nothing. Stemming and stop words follow the instance-wide *Indexing Language* that a Confluence administrator sets ([documentation](https://confluence.atlassian.com/doc/configuring-indexing-language-150130.html)). The results fit English, the default. The setting is not visible to users, and the connector cannot change it per query |
-| Escaping title punctuation | 8 known titles missed by quoted searches were retried three ways. As written (only `\` and `"` escaped): `siteSearch` found 3/8, `title ~` found 2/8. Escaping CQL reserved characters with `\\` ([documented](https://developer.atlassian.com/cloud/confluence/cql-functions/)): 6/8 and 6/8. Replacing punctuation with spaces: 8/8 and 7/8, at rank 1 except one at rank 7. Escaping is less reliable than spaces here, consistent with a [developer forum report](https://community.developer.atlassian.com/t/cql-title-search-with-special-characters/13601) |
-| Identifiers | Hyphenated `a-b` is split; quoting it equals the phrase `"a b"`. A dotted pair of words taken from prose, `a.b`, returned nothing, while the phrase `"a b"` found it. Underscore `a_b` is one token, matched only exactly or by `a_*`. Code identifiers shaped `x_y.z`, found in code macros on 4 pages, matched only when searched whole (3/4; one matched nothing). Searching their parts (`x_y`, `z`, `"x_y z"`, `"x y"`, or `x_y AND z`) missed every time, so the whole identifier is one index token |
-| Filters | `space`, `creator`, `contributor` (username, not display name), `label`, `parent`, `ancestor`, `created`, `lastmodified` all matched as expected. `space.status` is not a CQL field. Invalid CQL returns 400 with a log referral |
-| Archived spaces | Excluded by default from both endpoints, including explicit `space = <archived key>`. Only `rest/api/search` with `includeArchivedSpaces=true` adds them (about 8% more pages); `content/search` ignores that parameter. Personal spaces are included by default |
-| Types | `page`, `blogpost`, `comment`, `attachment`, `space` and `user` are searchable. Comment text finds the comment, not its page. Attachment results carry an excerpt (indexed content), `resultParentContainer` and media type |
-| Latency | Most searches took 0.3–1 s, including pages edited within the last hour |
-| Throttling | Not load-tested. Hundreds of mostly sequential requests and one parallel write pair saw no 429 or `Retry-After`. A browser-session response carried no `X-RateLimit-*` headers, which Data Center's administrator-configured [rate limiting](https://confluence.atlassian.com/doc/improving-instance-stability-with-rate-limiting-992679004.html) would add. PAT responses were not inspected for them |
-| Concurrency (2026-10-19, user-authorized, browser session) | Requests: fixture page `GET` with `expand=body.view,version` (5.4 KB). The server speaks HTTP/1.1 only; connections were reused. 6 parallel: all 200, 854 ms wall, median 582 ms (one earlier attempt failed with a browser "Failed to fetch" network error and no HTTP status). 10 parallel: all 200, 594 ms wall, median 333 ms; the browser allows 6 connections per host on HTTP/1.1, so at most 6 were truly concurrent. 50 sequential: all 200, 15.4 s, median 285 ms, p90 329 ms, max 1068 ms. Time to first byte was about 270 ms with no connection setup, so server processing, not transfer, dominates. No 429, `Retry-After` or `X-RateLimit-*` headers appeared |
-| One combined read versus split reads (2026-10-19, one page, two runs) | One `GET` expanding `body.view`, `body.storage`, `version`, `history`, `children.attachment` and `children.comment.body.view` took 3.4 s and 1.0 s. The same data as three requests (page bodies; `child/attachment?limit=500`; `child/comment?depth=all`) took 1.2 s and 1.7 s in sequence, and 0.75 s and 0.38 s in parallel. The embedded expansions are also incomplete: attachments stop at 25 (`limit` 25) and comments omit replies. Separate parallel requests are both faster and complete |
+| **Live** | A request we sent ourselves: from a signed-in browser page with `fetch`, or from a standalone script with a personal access token (PAT). Both are named. |
+| **Browser** | Seen in a browser capture taken around a controlled action. The capture is not kept. |
+| **Source** | Present in Confluence's web JavaScript or HTML. Not proof of use. |
 
-**2026-10-19 — Live, browser session, read-only CQL date probes:** CQL accepted date literals in
-`yyyy/MM/dd`, `yyyy-MM-dd`, `yyyy/MM/dd HH:mm` and `yyyy-MM-dd HH:mm` forms. Seconds, an ISO `T`,
-`Z`, numeric offsets and timezone names returned HTTP 400, "Could not parse cql". On one readable
-page, a binary search of inclusive `lastmodified >=` minute cutoffs matched the REST modification
-instant at the same displayed minute; both the measured CQL offset and the account's configured
-profile offset were +00:00 at the time, so the probe cannot establish whether CQL uses UTC, profile
-timezone or server timezone. `GET /rest/api/user/current` exposed no timezone; REST timestamps use
-UTC `Z` instants. `now("-Nm")` matched at minute precision in a separate probe, but is not selected:
-absolute literals in a configured zone keep cursor windows deterministic and reproducible. No page ID,
-content or zone name is retained here.
+This is an anonymized record of one Confluence Data Center 9.2.10 instance and one account, not a
+capability matrix. Administrators set indexing language, rate limits, plugins and permissions; rerun
+the probes in [`research/`](../research/README.md) before relying on a finding elsewhere, and keep a
+missing permission, a bad request, an unavailable route and an empty result apart. Writes were made
+only to synthetic `Connector Lab` pages in the personal space, with the user's authorization for each
+run, and nothing was purged. No tokens, cookies, page content, names or real ids are kept here.
 
-### Bodies and macros
+## 1. Summary
 
-`storage`, `view`, `export_view`, `styled_view` and `editor` are all readable. None contained base64
-except one CSS data URI in `styled_view`. `view` keeps `data-macro-name` wrappers and attachment
-identity (`data-linked-resource-id`, `-container-id`, `-default-alias`, MIME type). `export_view` is
-rendered, but it drops the macro wrappers and attachment IDs. Large pages took 3–6 s per
-representation.
+- Every listing caps a page at 500 (50 with `body.storage`) but echoes the requested `limit`, and
+  `content/search`'s `next` link then skips results: page on the returned `start + size` (§5.2).
+- Search splits terms at hyphens and dots but keeps underscored identifiers whole; quoting a title
+  with punctuation misses, and replacing the punctuation with spaces finds it (§4.2, §4.3).
+- CQL takes dates only as zone-less `yyyy/MM/dd [HH:mm]` in an unstated zone (§4.4).
+- No route returns plain text, and `view` loses Jira keys, PlantUML source and the HTML macro's
+  identity, which only `storage` keeps (§5.1).
+- A content update with `ancestors: []` is accepted and ignored; the private `movepage.action` moves to
+  the root, reorders, reparents and moves across spaces, without a page version (§6.3).
+- Trash loses the hierarchy: Confluence always restores at the space root, and CQL never sees trashed
+  pages (§6.4).
 
-| Macro | `view` result | Storage source |
+## 2. Instance and credentials
+
+### 2.1 Instance
+
+Live (browser), 2026-10-19:
+
+- Version 9.2.10, build 9111 (`ajs-version-number`). AUI 9.12.11 is a frontend asset version.
+- Collaborative editing is off (`collaborative-content=false`, `shared-drafts=false`, empty Synchrony
+  settings), so drafts are the legacy per-user editor drafts.
+- About 100 macros from standard plugins, plus multi-excerpt, PlantUML, numbered headings, a Git
+  plugin, tree view, image map and the **HTML macro**, which is enabled. No draw.io or Gliffy.
+
+### 2.2 Credentials
+
+- **PAT, Live (script), 2026-10-07 and 2026-10-19:** a bearer PAT works for every read and write the
+  connector makes, including the private `movepage.action` with `X-Atlassian-Token: no-check` and no
+  `atl_token`. A REST `POST` with a bearer needs no `X-Atlassian-Token` header. Expiry and revocation
+  responses are untested ([roadmap](roadmap.md#token-lifecycle)).
+- **Anonymous, Live, 2026-10-07:** 401 on current user, both searches and spaces.
+- **Single sign-on, Browser, 2026-10-07:** sign-in goes `/login.action` →
+  `/plugins/servlet/external-login/{id}` → Microsoft SAML → `POST /plugins/servlet/samlconsumer` →
+  session cookie. It yields no token a local process can use.
+- **Form login, Browser and Live (probe), 2026-10-07:** the undocumented
+  `POST /rest/tsv/1.0/authenticate` takes JSON `username,password,rememberMe,targetUrl,captchaId`;
+  failure is 401 with `message,captchaRequired`, success 200 with `next`. A copied cookie jar worked
+  immediately in a fresh client; lifetime is unknown. Used only by the research probe, never by the
+  connector.
+- Native OAuth needs an administrator-registered client and was not tested.
+
+## 3. Transport
+
+Live, 2026-10-19:
+
+- The server speaks HTTP/1.1 only; connections are reused.
+- No 429, `Retry-After` or `X-RateLimit-*` header appeared in hundreds of mostly sequential requests,
+  six and ten in parallel (browser), or 50 reads at ten in parallel (PAT). Data Center adds those
+  headers only when an administrator enables
+  [rate limiting](https://confluence.atlassian.com/doc/improving-instance-stability-with-rate-limiting-992679004.html).
+- Server time dominates: about 270 ms to first byte, median about 280 ms per page read. Six parallel
+  reads took 0.85 s in total; 50 sequential took 15.4 s.
+- One `GET` expanding `body.view`, `body.storage`, `version`, `history`, `children.attachment` and
+  `children.comment.body.view` took 1.0–3.4 s; the same data as three parallel requests (bodies,
+  `child/attachment`, `child/comment?depth=all`) took 0.4–0.75 s. The embedded expansions are also
+  incomplete: `children.*` stops at 25, and comments omit replies.
+
+## 4. Search
+
+### 4.1 Endpoints and archived spaces
+
+Live (browser and PAT), 2026-10-19:
+
+- `GET /rest/api/space` documents a `status` parameter without listing its values. `current` and
+  `archived` are the status names spaces carry, so the connector asks for each.
+- Both `content/search` and `rest/api/search` leave archived spaces out, even for an explicit
+  `space = <archived key>`. Only `rest/api/search` with `includeArchivedSpaces=true` adds them (about
+  8% more pages here); `content/search` ignores the parameter. Personal spaces are included.
+- `space.status` is not a CQL field. Invalid CQL returns 400 with a log referral.
+- `page`, `blogpost`, `comment`, `attachment`, `space` and `user` results are all searchable. A
+  comment hit is the comment, not its page. Attachment hits carry an excerpt of the indexed file
+  content and `resultParentContainer`.
+- Pages edited within the hour are found; most searches take 0.3–1 s.
+
+### 4.2 Terms and punctuation
+
+Live (browser), 2026-10-19 and 2026-10-20:
+
+- `siteSearch ~ "a b"` is an OR of the words (its total exceeds either word alone); `text ~ "a b"` is
+  an AND.
+- A hyphen splits a term: `ci-cd` matched 2,160 pages and `"ci-cd"` 482 (2026-10-20). A dotted pair of
+  prose words, `a.b`, matched nothing, while the phrase `"a b"` found the page.
+- An underscore joins: `a_b` is one token, matched exactly or by `a_*`. A code identifier shaped
+  `x_y.z` matched only when searched whole; every search for its parts missed.
+- Case-insensitive, accent-folding, English stemming (`deploy`, `deployed`, `deployments` match each
+  other; `configure` and `configuration` do not), no Portuguese plurals. The administrator's
+  [indexing language](https://confluence.atlassian.com/doc/configuring-indexing-language-150130.html)
+  decides this and is not visible to users.
+- `word*`, `de*oy` and `?` work; a leading `*` returns almost nothing. Escaped wildcards stay literal.
+
+### 4.3 Titles
+
+Live (browser), 2026-10-19, 31 recent pages, one per space:
+
+- Quoted `siteSearch` and `title ~` each missed 6 titles, always ones containing `-/:()",`.
+- For 8 such titles: written as is (only `\` and `"` escaped) found 3 and 2; escaping CQL reserved
+  characters with `\\`, as the [CQL documentation](https://developer.atlassian.com/cloud/confluence/cql-functions/)
+  suggests, found 6 and 6; replacing punctuation with spaces found 8 and 7, at rank 1 except one at
+  rank 7. A [developer forum report](https://community.developer.atlassian.com/t/cql-title-search-with-special-characters/13601)
+  describes the same.
+- `title = "exact"` matches unless the title contains `"`.
+- The private quick-navigation route behind the header search, `GET /rest/quicknav/1/search`
+  (`query`, `limit`, `type`; answers `contentNameMatches`, rows with `id`/`contentId`, `title`/`name`,
+  `spaceKey` or `space`, and `href`/`url`), ranked 30 of 31 titles first and returned all 31. It
+  accepts no filters, and `type=user` returns 500.
+
+### 4.4 Dates and time zones
+
+Live (browser), 2026-10-19:
+
+- CQL accepts `yyyy/MM/dd`, `yyyy-MM-dd`, `yyyy/MM/dd HH:mm` and `yyyy-MM-dd HH:mm`. Seconds, a `T`,
+  `Z`, numeric offsets and zone names return 400 "Could not parse cql". The documentation does not say
+  which zone a literal is read in.
+- A binary search of `lastmodified >=` minute cutoffs on one page matched its REST modification
+  instant at the same minute. The account's profile zone and the measured offset were both `+00:00`,
+  so this cannot tell UTC, profile zone and server zone apart
+  ([roadmap](roadmap.md#cql-time-zone)). REST timestamps are UTC `Z` instants, and
+  `/rest/api/user/current` exposes no zone.
+- A date-only upper bound includes the whole day (2026-10-20). `now("-Nm")` works at minute precision.
+
+### 4.5 Users
+
+Live (browser), 2026-10-19:
+
+- `rest/api/search` with `type = user AND user.fullname ~ "name"` finds current users;
+  `rest/api/search/user` returns 404.
+- Former users: 24 of 26 authors of the oldest pages were missing from user search, show their
+  username as display name, and are not matched by `creator.fullname ~`. `GET /rest/api/user?username=`
+  still returns them, and `creator = "username"` still finds their pages.
+- `creator` and `contributor` take a username, not a display name.
+
+## 5. Reading pages
+
+### 5.1 Bodies and macros
+
+Live (browser), 2026-10-19:
+
+- `storage`, `view`, `export_view`, `styled_view` and `editor` are readable. `view` keeps
+  `data-macro-name` wrappers and attachment identity (`data-linked-resource-id`, `-container-id`,
+  `-default-alias`, media type); `export_view` drops both.
+- No route returns plain text. `POST /rest/api/contentbody/convert/{to}` returns 500 for `wiki` and
+  `plain` and 404 for `text`, `atlas_doc_format` and `anonymous_export_view`.
+
+| Macro | In `view` | Kept only in `storage` |
 |---|---|---|
-| `include`, `excerpt-include` | Included text resolved inline | `ri:page` reference |
-| `expand` | Full body present with a hidden class | Rich-text body |
-| `code` | Code text plus a `language` parameter | Plain-text body |
-| `plantuml` | Client-side script; no server-rendered image | PlantUML source text |
-| `view-file` | Embedded-file link with attachment ID and filename | `ri:attachment` |
-| `jira` | "Unable to render" warning, also in the UI page HTML | `key`, `server`, `serverId`, `columns` |
-| `html` | No `data-macro-name` wrapper found | Unresolved |
+| `include`, `excerpt-include` | Included text, resolved inline | The `ri:page` reference |
+| `expand` | Full body, hidden by a class | |
+| `code` | Text and a `language` parameter | |
+| `plantuml` | A client-side script, no image | The PlantUML source |
+| `jira` | An "Unable to render" warning | `key`, `server`, `serverId`, `columns` |
+| `html` | Its raw output, scripts included, with **no wrapper** | That it is the HTML macro |
 
-Inline-comment anchors appear in storage (`ac:inline-comment-marker`) and in rendered output.
+Inline-comment anchors appear as `ac:inline-comment-marker` in storage and in the rendered output.
+Of 200 pages edited since 2025, 19 use `ac:layout` columns; of 105 with headings, 16 have headings
+inside layout cells and 9 inside macro bodies.
 
-**2026-10-19 — Live, browser session, fixture page:** no server route returns plain text.
+### 5.2 Paging
 
-| Route | Result |
+Live (browser and PAT), 2026-10-19 and 2026-10-20:
+
+- `content/search`, `rest/api/search` and `rest/api/content` return at most 500 per page, and
+  `content/search` with `body.storage` at most 50. Every one reports the **requested** `limit`, not
+  the applied one, and `content/search`'s `_links.next` then advances by the requested limit
+  (`start=1000` after 500 results), skipping 500. `rest/api/search` gives no `next` link.
+- `start=10000` works on both searches.
+- `child/page` returned all 205 children at `limit=500`, but only 200 with `expand=position`.
+  `children.page` as an expansion reports 25. `descendant/page` returns 500 for every page and limit
+  tried; CQL `ancestor = {id}` works.
+- `child/page` and `space/{key}/content/page?depth=root` send `_links.next` only while more results
+  exist, with `start` equal to `start + size`; a short page without one was final in every case
+  (2026-10-20). All 115 visible global spaces returned their root listing in one request at 500, and
+  `/rest/api/space` returned all 115 at 500.
+
+### 5.3 Labels
+
+Live (browser), 2026-10-20: the `metadata.labels` expansion is a paged envelope (`results`, `start`,
+`limit`, `size`, `_links`) of 200. `GET /rest/api/content/{id}/label` caps `limit` at 200, reports the
+applied limit (unlike the searches) and pages with `_links.next`. The largest label set among 100
+sampled pages was 6.
+
+### 5.4 Attachments, comments and versions
+
+Live (browser and PAT), 2026-10-19:
+
+- `child/attachment` returned all 38 attachments at `limit=500`. Downloads use
+  `/download/attachments/{container}/{filename}?version=…&api=v2`: 200, no redirect, the attachment's
+  own media type and size, for a browser session and a PAT. `/rest/api/content/{id}/download` is 404.
+- `child/comment` returns top-level comments only; `depth=all` adds replies, which carry comment
+  ancestors. `extensions.location` is `footer` or `inline`; inline comments carry `originalSelection`
+  and `markerRef`; resolution is `open`, `resolved` or `dangling`.
+- `/rest/api/content/{id}/version` is 404. The experimental `/rest/experimental/content/{id}/version`
+  lists versions (200 per page, `next` link), and `?status=historical&version=N` reads old bodies,
+  including version 1 of a page at version 738.
+
+## 6. Writes
+
+Live (browser), 2026-10-19 unless dated otherwise, on synthetic personal-space pages; the PAT
+repeated create, update, label, parent change, trash and the move action.
+
+### 6.1 Pages and versions
+
+- Update needs `version.number` = current + 1; a stale or skipped number is 409 "Version must be
+  incremented". Of two parallel writers on one version, one gets 200 and the other 409.
+- `minorEdit: true` was sent but later reported as `false`.
+- A rename keeps the ID; the `/x/` short link follows the page, while the old `/display/{space}/{title}`
+  URL is 404.
+- A second attachment with the same filename is 400; a new version goes to
+  `POST …/child/attachment/{attachmentId}/data`. Uploads do not change the page version.
+- Creating an inline comment through REST (`extensions.location: inline`) is 400 "Could not create
+  content with type comment"; the UI uses the inline-comments plugin.
+
+### 6.2 Drafts
+
+- `POST` with `status: draft` creates a new-page draft, readable only with `?status=draft` and absent
+  from search and child listings. `GET /rest/api/content?type=page&status=draft` lists the user's
+  drafts, across spaces or per `spaceKey`; CQL with `contentStatuses: ["draft"]` does not.
+- A draft cannot be updated without publishing: `PUT …?status=draft` with `status: draft` is 400.
+- Publishing is `PUT /rest/api/content/{draftId}` with no query, `status: current`, version 1, `space`
+  and `ancestors`: 200, same ID. The same body to `…?status=draft` is 400 without `space` and 404 with
+  it.
+- `DELETE /rest/api/content/{id}?status=draft` is permanent: the draft is then in neither the draft
+  list, the trash nor the Drafts page.
+- Unpublished edits of a published page go through the private `POST /rest/tinymce/1/drafts`; they are
+  listed on the Drafts page but cannot be read through REST. Not used (§7).
+
+### 6.3 Moves
+
+- `PUT /rest/api/content/{id}/move/{position}/{target}` is 404 on 9.2.10, and the copy routes
+  `…/copy` and `…/pagehierarchy/copy` are 404 too.
+- A content update with new `ancestors` changes the parent and **creates a page version**; children,
+  attachments and comments follow.
+- **`ancestors: []` is ignored** (2026-10-20): 200, but the page keeps its parent, does not appear among
+  the root pages and gets no new version.
+- The UI's move dialog posts `POST /pages/movepage.action` (Source and Live) with `pageId`, the target
+  `spaceKey`, `mode` (`LEGACY` or `ASYNC`) and one of: `position` `above`, `below` or `append` with
+  `targetId`; `targetTitle` with `append`; or `position=topLevel`. It answers JSON with
+  `validationErrors`, `actionErrors` and `errorMessage` on failure, and `ASYNC` adds `longTaskId`.
+  None of its moves creates a page version.
+  - `above` and `below` reorder siblings (2026-10-19).
+  - `topLevel` moves the page to the space root, first among the root pages (2026-10-20).
+  - `above` with a target under another parent reparents and positions in one call; `append` with a
+    parent as target makes the page its last child (2026-10-20).
+  - Across spaces with `ASYNC`, `GET /rest/api/longtask/{id}` reported `successful: true`, "Page move
+    complete.", after about 0.3 s. ID, version, children, attachments, comments and labels were kept,
+    and the move back worked the same way.
+
+### 6.4 Trash and restore
+
+- `DELETE /rest/api/content/{id}` is 204; the page is then 404 unless read with `?status=trashed`. A
+  second `DELETE` is 404: it does not purge. **The trashed page's child becomes a top-level page**,
+  not a child of the grandparent.
+- Restore is `PUT /rest/api/content/{id}?status=trashed` with `status: current` and the next version
+  number: 200, version unchanged. **The page returns at the space root**, and so does a child whose
+  parent was trashed and restored. The UI's own *Restore* (`/pages/restoretrashitem.action`) does the
+  same after a REST delete and after the UI's *Delete Page*.
+- `GET /rest/api/content?type=page&status=trashed` lists the trash per `spaceKey` or across every
+  visible space, including spaces the user does not administer; `type=blogpost` works,
+  `type=attachment` is 500. Rows show no ancestors and only the last edit, not who deleted or when.
+- CQL never returns trashed pages, even with `contentStatuses: ["trashed"]`, apart from a few seconds
+  of index lag right after the trash (2026-10-20). The same title lookup with `status=trashed`
+  (`?type=page&spaceKey=…&title=…&status=trashed`) finds a trashed page; without `status` it does not
+  (2026-10-20).
+- A content property (`POST /rest/api/content/{id}/property`) adds no page version. While the page is
+  trashed, reading it is 404 (with or without `?status=trashed`) and listing or expanding properties is
+  500; after restore it is back unchanged. A property is therefore a way to carry the old placement
+  across the trash.
+- `expand=operations` on a page lists the user's operations including restrictions: `delete` is there
+  in the personal space and missing in a space where the user cannot delete. On a space it returns an
+  empty list. `GET /rest/api/space/{key}?expand=permissions` lists permissions only in a space the user
+  administers and is 500 elsewhere. `/rest/api/content/{id}/permission/check` is 404.
+
+### 6.5 Rich-text input
+
+25 snippets of typical AI-generated HTML and storage tags, checked with `contentbody/convert` and
+saved where safe:
+
+| Input | Result |
 |---|---|
-| `POST /rest/api/contentbody/convert/{to}` (documented) from storage | `view`, `export_view`, `styled_view` and `editor` return HTML. `wiki` and `plain` return 500; `text`, `atlas_doc_format` and `anonymous_export_view` return 404 |
-| Same route, wiki markup → storage | 200 |
-| *Export to Word*, `/exportword?pageId=` (undocumented) | 200 `application/vnd.ms-word`, an HTML document inside a MIME wrapper; includes code and expand text and images |
-| *Export to PDF*, `/spaces/flyingpdf/pdfpageexport.action?pageId=` (`GET`) | 403 HTML |
-| *View Source*, `/plugins/viewsource/viewpagesrc.action?pageId=` | HTML page showing the editor format (`wysiwyg-macro` placeholders), the same as `body.editor` |
-| *View Storage Format*, `/plugins/viewstorage/viewpagestorage.action?pageId=` | `text/plain` storage XHTML |
-
-**2026-10-19 — Live, browser session, rich-text writes:** 25 snippets of typical AI-generated HTML and
-Confluence storage tags were checked with `contentbody/convert` (storage → view). The safe ones were
-saved together as `Connector Lab Rich` in the personal space.
-
-| Input | Saved storage and rendering |
-|---|---|
-| Headings, `strong/em/u/s/sup/sub`, inline `<code>`, nested lists, `<blockquote>`, tables with `<thead>`, `colspan` and `text-align`, task lists | Kept unchanged |
-| `<br/>`, `<hr/>` (XHTML) | Kept, as `<br />` and `<hr />` |
-| `<br>`, `<hr>` (HTML5 void) and unclosed tags | Save rejected with 400 "Error parsing xhtml" giving row and column. `convert` instead returned 200 with a `fatal-render-error` block |
-| Named and numeric entities (`&nbsp;`, `&mdash;`, `&#8212;`) | Accepted; stored as characters |
-| Code macro (`language`, `title`, `linenumbers`) | Kept; renders as a titled panel with line numbers and highlighting |
-| `<pre><code class="language-…">` and plain `<pre>` | Kept, but render as bare monospace text without a panel, highlighting or language |
-| Inline `<code>` | Monospace font only; no background or padding on this instance's theme |
-| Info/note/warning/tip, expand, status, table of contents, emoticon, user mention, page link by title | Kept. Every macro gains `ac:schema-version` and a stored `ac:macro-id`, which `view` does not expose |
-| Inline `style` on `span` and `div` | Kept, with values normalized |
+| Headings, inline styles, nested lists, `blockquote`, tables with `thead`, `colspan` and alignment, task lists, entities | Stored unchanged (entities as characters) |
+| `<br>`, `<hr>` (HTML5 void) or an unclosed tag | Save is 400 "Error parsing xhtml" with row and column, while `convert` returns 200 with a `fatal-render-error` block |
+| `<pre><code class="language-…">`, plain `<pre>` | Stored, but rendered as bare monospace: no panel, highlighting or language |
+| Code, panel, expand, status, table-of-contents, emoticon, mention and page-link macros | Stored; every macro gains `ac:schema-version` and a stored `ac:macro-id` that `view` does not show |
 | `<details>`, `<summary>`, `<mark>`, `<kbd>` | Tags stripped, text kept |
-| `<script>`, `<style>`, `onclick`, `javascript:` links, HTML macro | Passed through `convert` to `view` unchanged. Not saved to any page; whether page display sanitizes them was not tested |
+| `<script>`, `<style>`, `onclick`, `javascript:` links, the HTML macro | Passed through `convert` unchanged; not saved |
 
-**2026-10-19 — Live, browser session, storage structure** (200 pages edited since 2025; pages whose
-storage failed a quick XML parse were skipped): average storage 19 KB. 19 pages use `ac:layout`
-columns and 12 carry inline-comment markers. Of 105 parsed pages with headings, 74 have all headings
-at the top level, 16 have headings inside layout cells and 9 inside macro bodies (panels, expand).
+## 7. Private routes seen but not used
 
-Macro rendering can be delegated to the server (`view`, or `convert` for any storage body), but text
-extraction from HTML stays with the connector.
+Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a request was sent.
 
-### Trees, attachments, comments, versions
-
-- `child/page` returned all 205 children with `limit=500`; one call with `expand=position` stopped at
-  200. An embedded `children.page` expansion reports only 25.
-- `descendant/page` returned HTTP 500 for every page and limit tried. CQL `ancestor = {id}` works.
-  `/plugins/pagetree/naturalchildren.action` returns every child as HTML.
-- `child/attachment` returned all 38 with `limit=500`, including `fileSize`, `mediaType` and the
-  download link `/download/attachments/{container}/{filename}?version=…&api=v2`. A browser download
-  returned 200 with no redirect and `inline` disposition. `/rest/api/content/{id}/download` returned 404.
-- `child/comment` returns top-level comments only. `depth=all` adds replies, which have comment
-  ancestors. `extensions.location` is `footer` or `inline`. Inline comments carry `originalSelection`
-  and `markerRef`. Resolution status takes the values `open`, `resolved` and `dangling`.
-  `/rest/inlinecomments/1.0/comments` adds author and permission fields.
-- `/rest/api/content/{id}/version` returned 404; `/rest/experimental/content/{id}/version` lists
-  versions (200 per page, `next` link). `?status=historical&version=N` reads old bodies, including
-  version 1 of a page at version 738.
-
-### Follow-up reads
-
-**2026-10-19 — Live, browser session:** the edit page reports `collaborative-content=false`,
-`shared-drafts=false`, empty Synchrony settings and `draft-save-interval=30000`. Collaborative editing is
-off; drafts use the legacy per-user editor drafts. The HTML macro is enabled: its raw HTML, including
-scripts, is injected into `view` verbatim with no `data-macro-name` wrapper, so only storage identifies
-it. Search by a deactivated contributor was not tested.
-
-## Authorized writes in a personal space
-
-**2026-10-19 — Live, browser session:** user-authorized writes to synthetic `Connector Lab` pages in the
-account's personal space, using documented REST unless marked undocumented. Requests were sent from
-the signed-in page with `X-Atlassian-Token: no-check`. Nothing was purged and no other content was
-touched.
-
-| Operation | Request | Result |
-|---|---|---|
-| Create page | `POST /rest/api/content` with `space`, `ancestors`, storage body | 200, version 1 |
-| Label | `POST /rest/api/content/{id}/label` | 200 |
-| Upload attachment | `POST …/child/attachment` (multipart) | 200; page version unchanged. Same filename again: 400. New attachment version: `POST …/child/attachment/{attachmentId}/data` |
-| Update page | `PUT /rest/api/content/{id}` with `version.number = current + 1` | 200. Stale or skipped numbers: 409 "Version must be incremented". Two parallel writers on the same version: one 200, one 409. `minorEdit: true` was sent but versions later reported `minorEdit: false` |
-| New draft | `POST` with `status: draft` | 200. Readable only with `?status=draft`; absent from search and child listings |
-| Update draft | `PUT …?status=draft` with `status: draft` | 400 "Updating a draft without publishing is not possible" |
-| Publish draft | `PUT /rest/api/content/{draftId}` (no query) with `status: current`, `version 1`, `space`, `ancestors` | 200, same ID. `PUT …?status=draft` with `status: current` returned 400 without `space`, 404 with it |
-| Unpublished edit of a published page | Undocumented `POST /rest/tinymce/1/drafts` (`draftId`, `pageId`, `parentPageId`, `type`, `title`, `spaceKey`, `content`, `pageVersion`), found in editor JavaScript | 200 with `draftId,time,pageId`. Published body unchanged. Listed in `/users/viewmydrafts.action`, not readable by `GET /rest/api/content/{id}?status=draft` |
-| Discard that edit | Undocumented `DELETE /rest/tinymce/1/drafts/discard` (`draftId`, `pageId`, `type`, `spaceKey`) | 200; removed from the drafts list |
-| Footer comment and reply | `POST` with `type: comment`, `container`, reply `ancestors` | 200 |
-| Inline comment | `POST` with `extensions.location: inline` | 400 "Could not create content with type comment". The UI uses the inline-comments plugin |
-| Move | `PUT /rest/api/content/{id}/move/{position}/{target}` | 404: not available on 9.2.10 |
-| Move | `PUT /rest/api/content/{id}` with new `ancestors` | 200; creates a page version. Children, attachments and comments follow |
-| Reorder siblings | Undocumented `POST /pages/movepage.action?pageId&position=above&targetId&atl_token` | 200 JSON `commandDelegate`; explicit positions set; no page version |
-| Rename | `PUT` with new title | Same ID. The tiny link redirects to the page; the old `/display/{space}/{title}` URL returned 404 |
-| Trash | `DELETE /rest/api/content/{id}` | 204. `GET` 404; `?status=trashed` 200. A second `DELETE` returned 404, so it does not purge. The trashed page's child became a top-level page in the space, not a child of the grandparent |
-
-**2026-10-19 — Source (move dialog JavaScript) and live:** the UI's move dialog offers a *New space*
-field when the user may move the page and its children between spaces. It submits
-`POST /pages/movepage.action` (`dataType: json`) with `pageId`, the target `spaceKey`, `mode`
-(`ASYNC` or `LEGACY`), and one of: `position` (`above`, `below` or `append`) with `targetId`;
-`targetTitle` with `position=append`; or `position=topLevel` for the space root. `ASYNC` returns
-`longTaskId` and `page`, which the UI polls until the task finishes, plus `validationErrors`,
-`actionErrors` and `errorMessage` on failure.
-
-**2026-10-19 — Live, user-authorized cross-space move:** the `Connector Lab Sample` page (one child,
-two attachments, one comment, one label) was moved under a user-chosen page in another space with
-`position=append`, `targetId`, `spaceKey` and `mode=ASYNC`. The response carried `longTaskId`;
-`GET /rest/api/longtask/{id}` (documented) reported `successful: true` and "Page move complete." after
-about 0.3 s. The page kept its ID and version (no new version). Its child moved with it, and
-attachments (still downloadable), comment and label were intact. The page was moved straight back the
-same way, with the same results, and no longer appears under the target page. The documented copy routes `POST /rest/api/content/{id}/copy` and `…/pagehierarchy/copy` return 404 on
-9.2.10.
-
-Fixture text in the page body, comment text, attachment content, image alt text, and text inside
-`code` and `expand` macros were all found by search within seconds. A renamed page was found by its
-new title shortly afterwards. Remaining in the personal space: `Connector Lab`, `Connector Lab
-Destination`, `Connector Lab Sample` (with child, attachments and comments) and `Connector Lab Draft`,
-plus two trashed disposable pages. Not tested: restore and purge from trash, hierarchy deletion,
-cross-space moves, inline-comment creation, and any write with a PAT.
-
-### PAT on the same read routes
-
-**2026-10-19 — Live, PAT:** a user-run standalone stdlib script with a bearer PAT, entered at a hidden
-prompt, sent read-only `GET`s to the routes above. Results matched the browser session: current user
-(`known`), the 500 cap with the requested `limit` echoed, `view`/`storage`/`export_view` bodies, the
-`includeArchivedSpaces` difference, quick navigation, `child/attachment`, `child/comment?depth=all`,
-the inline-comments plugin, the experimental version list, historical version 1, the page-tree action
-and the macro browser all returned 200. `descendant/page` again returned 500.
-
-In that first run, an attachment download link picked from a search result (redirects followed)
-returned 200 `text/html` with no `Content-Disposition`. The final URL and body were not inspected,
-and the result was not reproduced in the follow-up below.
-
-### PAT writes, downloads and concurrency
-
-**2026-10-19 — Live, PAT, user-run `httpx` script on fixtures:**
-
-- **Download:** the fixture's text attachment link returned 200 with no redirect, the attachment's own
-  media type and exactly the listed size, with or without the query string. PAT downloads from
-  `/download/attachments/…` work.
-- **Writes:** create, update, label, parent change through `ancestors`, and trash all succeeded with
-  the bearer token. A REST `POST` needed no `X-Atlassian-Token` header. `POST /pages/movepage.action`
-  with `X-Atlassian-Token: no-check` and no `atl_token` returned the JSON long task, which completed
-  successfully.
-- **Concurrency:** 30 reads at 6 in parallel took 3.4 s and 50 reads at 10 in parallel took 2.9 s,
-  all 200, median about 280 ms. The slowest request in each run (about 2.8 s) fell in the first wave.
-  No 429, `Retry-After` or `X-RateLimit-*` headers appeared.
-
-## Users, drafts and trash
-
-**2026-10-19 — Live, browser session:**
-
-- **User lookup:** `rest/api/search` with `type = user AND user.fullname ~ "name"` (also `title ~` and
-  `siteSearch ~`) finds current users. `/rest/prototype/1/search/user.json` works too, but is a
-  prototype route. `rest/api/search/user` returns 404, and quick navigation with `type=user` returns
-  500. CQL `creator.fullname ~` and `contributor.fullname ~` match current users by name, giving the
-  same totals as `creator = username`.
-- **Former users:** 24 of 26 authors of the oldest pages were absent from user search. Their display
-  names show only their username, and `creator.fullname ~` and `contributor.fullname ~` return
-  nothing for them. `GET /rest/api/user?key=` still returns them as `known`, and `creator = "username"`
-  still finds their pages.
-- **Draft listing:** `GET /rest/api/content?type=page&status=draft`, across all spaces or one
-  `spaceKey`, lists the user's new-page drafts. CQL with `cqlcontext` `contentStatuses: ["draft"]` did
-  not include the draft. With the user's explicit approval, `DELETE /rest/api/content/{id}?status=draft`
-  deleted a synthetic draft (204). It was then absent from `?status=draft`, `?status=trashed`, the
-  draft listing and the Drafts page: deletion is permanent and bypasses the trash.
-- **Trash:** `GET /rest/api/content?spaceKey=…&status=trashed` lists the space trash.
-  `PUT /rest/api/content/{id}?status=trashed` with `status: current` and the next version number
-  restores a page (200, version unchanged). A restored page has no ancestors: it returns at the space
-  root, not under its former parent. A child whose parent was trashed and later restored also stays
-  at the root. Trashing loses the hierarchy; restoring does not bring it back.
-- **Content properties across trash:** `POST /rest/api/content/{id}/property` (documented) stored a
-  JSON value without creating a page version. While the page was trashed, the property returned 404
-  (with or without `?status=trashed`), and listing or expanding properties returned 500. After
-  restore it was readable again, unchanged. Re-parenting the restored page from the stored value then
-  worked. A property set before trashing can therefore carry a page's original placement to
-  `restore_page`.
-- **Native restore location:** a page under a parent was restored through the trash page's own
-  *Restore* (`/pages/restoretrashitem.action`, confirmation form) twice: once after a REST delete and
-  once after the UI's *Delete Page* (`/pages/removepage.action`). Both times it returned at the space
-  root with no ancestors. Confluence never restores the original parent.
-- **Listing the trash:** `GET /rest/api/content?type=page&status=trashed` works per `spaceKey` and
-  without one (paged, every trash the user can see), including spaces where the user is not an admin.
-  `type=blogpost` works; `type=attachment` returns 500. CQL search excludes trashed content even with
-  `cqlcontext` `contentStatuses: ["trashed"]`. Trashed pages show no ancestors and only their last
-  edit (`version.when` and `version.by`), not when or by whom they were deleted.
-- **Permissions:** `GET /rest/api/content/{id}?expand=operations` lists the current user's operations
-  on that page, including restrictions: `read`, `update` and `delete` on a personal-space page; only
-  `read` and `update` on a page in a space where the user cannot delete. `expand=operations` on a space
-  returned an empty list. `GET /rest/api/space/{key}?expand=permissions` returned the permission list,
-  including the user's `administer:space`, only in the user's own space; in a space the user does not
-  administer it returned 500. The UI delete dialog states that recovery goes through the space
-  administrator, and the UI trash page showed a permission message in the non-administered space.
-  `/rest/api/content/{id}/permission/check` returns 404.
-
-## Review-finding checks
-
-**2026-10-20 — Live, browser session, user-authorized:** read-only paging and label checks, plus
-seven disposable `Connector Lab Verify` pages in the personal space, all trashed afterwards (none
-purged).
-
-- **Paging continuation:** `child/page` (with and without `expand=position`) and
-  `space/{key}/content/page?depth=root` include `_links.next` only when more results exist, and its
-  `start` is `start + size`. A short page (`size < limit`) with no `next` link was final in every
-  case. 115 visible global spaces each returned their whole root listing in one request at
-  `limit=500`; `/rest/api/space` returned all 115 at `limit=500`.
-- **Labels:** the `metadata.labels` expansion is a paged envelope (`results`, `start`, `limit`, `size`,
-  `_links`) with `limit` 200. `GET /rest/api/content/{id}/label` caps `limit` at 200, reports the
-  applied limit (not the requested 1,000), and pages with `_links.next`. The largest label set among
-  100 sampled pages was 6.
-- **Root move through REST:** `PUT /rest/api/content/{id}` with `ancestors: []` and the next version
-  returned 200 but changed nothing: the page kept its parent, stayed out of the root listing and did
-  not get a new version.
-- **Root move through the move action:** `POST /pages/movepage.action` with `position=topLevel`
-  (`mode=LEGACY`) moved the page to the space root in one call, first among the root pages, without a
-  new version.
-- **Same-space reparenting through the move action:** `position=above` with a `targetId` under another
-  parent moved the page under that parent, directly before the target, in one call; `position=append`
-  with the old parent as `targetId` moved it back as the last child. Neither created a page version.
-- **Trashed pages by title:** `GET /rest/api/content?type=page&spaceKey=…&title=…&status=trashed`
-  found the trashed page (`status: trashed`); the same request without `status` returned nothing.
-  CQL still matched the page immediately after the trash, and stopped within seconds.
-
-Official schemas and CQL behavior remain at the
-[Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and
-[CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/).
-Relative frontend SDK fragments can target another host; do not infer Wiki APIs from route-shaped
-strings alone. Next investigations are tracked in [roadmap](roadmap.md), not duplicated here as a plan.
+| Route | What it is |
+|---|---|
+| `/rest/spacedirectory/1/search` | Space directory search (`query`, `status`, `type`, paging); answers `spaces,totalSize` |
+| `/rest/inlinecomments/1.0/comments?containerId=` | Inline comments with author and permission fields |
+| `/plugins/pagetree/naturalchildren.action` | Every child page as HTML |
+| `/plugins/macrobrowser/browse-macros.action` | The installed macro list |
+| `POST /rest/tinymce/1/drafts`, `DELETE …/drafts/discard` | Unpublished edits of a published page (200; not readable through REST) |
+| `/exportword?pageId=` | Word export: an HTML document inside a MIME wrapper |
+| `/spaces/flyingpdf/pdfpageexport.action?pageId=` | PDF export: 403 for this account |
+| `/plugins/viewstorage/viewpagestorage.action?pageId=` | Storage as `text/plain`, the same as `body.storage` |
+| `/rest/prototype/1/search/user.json` | Prototype user search |
+| `/pages/reorderpages.action`, tree-copy and tree-delete actions | Source only |
