@@ -55,8 +55,9 @@ Consequences of short-lived processes:
 
 Surface → service → remote, as in the diagram. The import rules:
 
-- [`surfaces/`](../src/confluence_connector/surfaces/) imports [`bootstrap.py`](../src/confluence_connector/bootstrap.py)
-  and [`domain/`](../src/confluence_connector/domain/) only. It never calls `remote/`.
+- [`surfaces/`](../src/confluence_connector/surfaces/) imports [`bootstrap.py`](../src/confluence_connector/bootstrap.py),
+  [`domain/`](../src/confluence_connector/domain/) and the product names in
+  [`config.py`](../src/confluence_connector/config.py) only. It never calls `remote/`.
 - [`service/`](../src/confluence_connector/service/) imports `remote/` adapters, `domain/` and the
   shared helpers. It never sees Confluence JSON.
 - [`remote/`](../src/confluence_connector/remote/) returns `domain/` models. The transport reads the
@@ -189,7 +190,8 @@ outputs.
 - `load_config` selects the file (`--config`, `CONFLUENCE_CONFIG`, repository root), refuses missing or
   unknown keys before any prompt or request, and caches the result per process.
 - [`logs.py`](../src/confluence_connector/logs.py) is the same module as in the `lrh-*` Microsoft 365
-  connectors: one daily-rotated file per process, kept seven days, with a filter that redacts bearer
+  connectors: one daily-rotated file per `mcp` process (the one-shot `auth` and `status` commands
+  print to the terminal and write no log), kept seven days, with a filter that redacts bearer
   tokens and secrets. `httpx` and `httpcore`, which log URLs, are held at WARNING.
 
 ## 6. Capability routing
@@ -227,7 +229,7 @@ the adapter. The service and surface stay unchanged.
   `CONFLUENCE_CONNECTOR_HOME`. It holds:
   - `downloads/<account>/`: attachments saved by `download_attachments`;
   - `exports/<account>/`: export files and their staging folders;
-  - `logs/<command>-<start time>-<process id>.log`: one file per process, rotated at midnight and kept
+  - `logs/mcp-<start time>-<process id>.log`: one file per MCP process, rotated at midnight and kept
     seven days. `CONFLUENCE_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
 
   - `token-cache.bin`: the encrypted token record (§5.1).
