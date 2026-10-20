@@ -197,6 +197,38 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["> [Deployment] Panel text [Status: Approved]"],
         )
 
+    def test_storage_macro_cdata_bodies_are_preserved(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="plantuml"></div><div data-macro-name="code"></div>',
+            '<ac:structured-macro ac:name="plantuml"><ac:plain-text-body><![CDATA['
+            '@startuml\nA -> B\n@enduml]]></ac:plain-text-body></ac:structured-macro>'
+            '<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">python</ac:parameter>'
+            '<ac:plain-text-body><![CDATA[if value < 2:\n    print(value)]]></ac:plain-text-body>'
+            '</ac:structured-macro>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            [
+                "[Diagram: plantuml]\n```plantuml\n@startuml\nA -> B\n@enduml\n```",
+                "```python\nif value < 2:\n    print(value)\n```",
+            ],
+        )
+
+    def test_panel_renders_child_blocks_and_list_markers(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="info"><p>First paragraph.</p><p>Second paragraph.</p>'
+            '<ul><li>Alpha</li><li>Beta</li></ul></div>',
+            '<ac:structured-macro ac:name="info"/>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["> [Info] First paragraph.\n>\n> Second paragraph.\n>\n> • Alpha\n> • Beta"],
+        )
+
     def test_ordered_lists_honor_start_and_item_value_attributes(self) -> None:
         rendered = render_page_body(
             '<ol start="4"><li>Fourth</li><li value="9">Ninth</li><li>Tenth</li></ol>'

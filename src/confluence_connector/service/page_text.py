@@ -88,6 +88,10 @@ class _TreeParser(HTMLParser):
         if data:
             self.stack[-1].children.append(data)
 
+    def unknown_decl(self, data: str) -> None:
+        if data.startswith("CDATA["):
+            self.stack[-1].children.append(data[len("CDATA[") :])
+
     def _start(
         self, tag: str, attrs: list[tuple[str, str | None]], *, self_closing: bool
     ) -> None:
@@ -260,16 +264,74 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
         language = macro.parameters.get("language", "") if macro is not None else ""
         return [_block(f"```{language.strip()}\n{text.rstrip()}\n```", (*refs, *child_refs))]
     if name in {"info", "note", "warning", "tip", "panel"}:
-        text, child_refs = _inline(node.children, context)
         heading = name.capitalize()
         if name == "panel" and macro is not None:
             heading = macro.parameters.get("title", "Panel") or "Panel"
-        content = f"[{heading}] {text.strip()}".rstrip()
-        return [_block("\n".join(f"> {line}" for line in content.splitlines()), (*refs, *child_refs))]
+        content, child_refs = _quoted_macro_content(node.children, context, heading)
+        return [_block(content, (*refs, *child_refs))]
     text, child_refs = _inline(node.children, context)
     if not text.strip() or _looks_unrendered(text):
         return [_block(f"[Unrendered macro: {name}]", refs)]
     return [_block(text.strip(), (*refs, *child_refs))]
+
+
+def _quoted_macro_content(
+    children: list[_Node | str], context: _RenderContext, heading: str
+) -> tuple[str, tuple[PageReference, ...]]:
+    groups: list[str] = []
+    references: list[PageReference] = []
+    inline_values: list[_Node | str] = []
+
+    def flush_inline() -> None:
+        if not inline_values:
+            return
+        text, inline_references = _inline(inline_values, context)
+        if text.strip():
+            groups.append(text.strip())
+        references.extend(inline_references)
+        inline_values.clear()
+
+    for child in children:
+        if isinstance(child, str) and not child.strip():
+            continue
+        if not _is_block_content(child):
+            inline_values.append(child)
+            continue
+        flush_inline()
+        child_blocks = _render_blocks(child, context)
+        if child_blocks:
+            separator = "\n" if isinstance(child, _Node) and child.tag in {"ul", "ol", "table"} else "\n\n"
+            groups.append(separator.join(block.text for block in child_blocks).strip())
+            references.extend(reference for block in child_blocks for reference in block.references)
+    flush_inline()
+
+    content = f"[{heading}]"
+    if groups:
+        content += " " + groups[0]
+        if len(groups) > 1:
+            content += "\n\n" + "\n\n".join(group for group in groups[1:])
+    quoted = "\n".join(f"> {line}" if line else ">" for line in content.splitlines())
+    return quoted, _unique_references(references)
+
+
+def _is_block_content(value: _Node | str) -> bool:
+    if not isinstance(value, _Node):
+        return False
+    macro_name = _macro_name(value)
+    if macro_name is not None:
+        return macro_name in {
+            "code",
+            "expand",
+            "excerpt-include",
+            "include",
+            "info",
+            "note",
+            "panel",
+            "plantuml",
+            "tip",
+            "warning",
+        }
+    return value.tag in {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ol", "p", "pre", "table", "ul"}
 
 
 def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list[PageTextBlock]:
