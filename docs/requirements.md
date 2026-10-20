@@ -61,6 +61,7 @@ Attachment filenames and server-provided alt text are desirable searchable conte
   work without timezone calibration. ISO-8601 timestamps with offsets are instants; timestamps
   without an offset mean UTC. Convert timestamp bounds to timezone-less CQL minutes in the configured
   `cql_timezone`, flooring `*_after` and ceiling `*_before` so the minute boundary stays inclusive.
+  Validate mixed date and timestamp ranges against the date's full local calendar day.
   Cursors retain the original UTC instants and reconvert them on every page; result timestamps remain
   the UTC values returned by REST. If the timezone is unset, reject timestamp bounds with instructions
   to run `confluence-connector status --check` rather than guessing.

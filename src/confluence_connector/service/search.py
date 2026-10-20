@@ -24,7 +24,11 @@ from confluence_connector.domain.models import (
 )
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
-from confluence_connector.service.cql_dates import cql_date_literal, normalize_scope_time
+from confluence_connector.service.cql_dates import (
+    cql_date_literal,
+    date_range_is_inverted,
+    normalize_scope_time,
+)
 from confluence_connector.service import cursors
 
 CURSOR_KIND = "search_content"
@@ -187,8 +191,8 @@ class ContentSearch:
         scope.created_before = normalize_scope_time("created_before", scope.created_before)
         scope.modified_after = normalize_scope_time("modified_after", scope.modified_after)
         scope.modified_before = normalize_scope_time("modified_before", scope.modified_before)
-        _check_range("created", scope.created_after, scope.created_before)
-        _check_range("modified", scope.modified_after, scope.modified_before)
+        _check_range("created", scope.created_after, scope.created_before, self._cql_timezone)
+        _check_range("modified", scope.modified_after, scope.modified_before, self._cql_timezone)
         if scope.parent is not None:
             scope.parent = (await self._links.resolve(scope.parent, expected_username=self._username)).page_id
         if scope.ancestor is not None:
@@ -212,7 +216,7 @@ class ContentSearch:
         seen_ids = _cursor_ids(state.get("seen_quicknav_ids"))
         if not terms:
             raise InvalidRequest("The search cursor contains no searchable text.")
-        scope = _validate_resumed_scope(scope)
+        scope = _validate_resumed_scope(scope, self._cql_timezone)
         return query, match, fields, scope, limit, start, seen_ids
 
 
@@ -298,7 +302,7 @@ def _scope_values(name: str, values: list[str]) -> list[str]:
     return normalized
 
 
-def _validate_resumed_scope(scope: SearchScope) -> SearchScope:
+def _validate_resumed_scope(scope: SearchScope, cql_timezone: str | None) -> SearchScope:
     """Reapply scalar and collection validation to untrusted, self-contained cursor state."""
     scope = scope.model_copy(deep=True)
     for name in (
@@ -313,8 +317,8 @@ def _validate_resumed_scope(scope: SearchScope) -> SearchScope:
             setattr(scope, name, _scope_values(name, values))
     for name in ("created_after", "created_before", "modified_after", "modified_before"):
         setattr(scope, name, normalize_scope_time(name, getattr(scope, name)))
-    _check_range("created", scope.created_after, scope.created_before)
-    _check_range("modified", scope.modified_after, scope.modified_before)
+    _check_range("created", scope.created_after, scope.created_before, cql_timezone)
+    _check_range("modified", scope.modified_after, scope.modified_before, cql_timezone)
     for name in ("parent", "ancestor"):
         value = getattr(scope, name)
         if value is not None and (not value.isdecimal() or len(value) > 255):
@@ -322,8 +326,8 @@ def _validate_resumed_scope(scope: SearchScope) -> SearchScope:
     return scope
 
 
-def _check_range(name: str, after: str | None, before: str | None) -> None:
-    if after is not None and before is not None and after > before:
+def _check_range(name: str, after: str | None, before: str | None, cql_timezone: str | None) -> None:
+    if date_range_is_inverted(after, before, cql_timezone):
         raise InvalidRequest(f"scope.{name}_after must not be later than scope.{name}_before.")
 
 

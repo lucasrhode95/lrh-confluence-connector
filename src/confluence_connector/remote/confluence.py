@@ -210,10 +210,10 @@ class ConfluenceApi:
         )
 
     async def get_user(self, username: str, *, expected_username: str) -> PersonSummary:
-        """Read a user by exact key, including former users absent from name search."""
+        """Read a user by exact username, including former users absent from name search."""
         payload = await self._transport.get_json(
             "rest/api/user",
-            params={"key": username},
+            params={"username": username},
             expected_username=expected_username,
         )
         user = _person(payload)
@@ -350,7 +350,7 @@ class ConfluenceApi:
         route = f"rest/api/space/{quote(space_key, safe='')}/content/page"
         payload = await self._transport.get_json(
             route,
-            params={"start": str(start), "limit": str(CHILD_PAGE_SIZE)},
+            params={"start": str(start), "limit": str(CHILD_PAGE_SIZE), "depth": "root"},
             expected_username=expected_username,
         )
         return _content_search_page(

@@ -126,15 +126,17 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIn("type = user", seen[0].url.params["cql"])
         self.assertIn("user.fullname ~ 'Sample User'", seen[0].url.params["cql"])
         self.assertEqual(page.users[0].username, "sample-user")
-        self.assertEqual(seen[1].url.params["key"], "former-user")
+        self.assertEqual(seen[1].url.params["username"], "former-user")
         self.assertEqual(user.username, "former-user")
 
     async def test_space_root_route_and_version_paging_use_actual_size(self) -> None:
         starts: list[int] = []
         routes: list[str] = []
+        params: list[dict[str, str]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             routes.append(request.url.path)
+            params.append(dict(request.url.params))
             if request.url.path.endswith("/content/page"):
                 return httpx.Response(
                     200,
@@ -163,6 +165,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([version.number for version in versions], [1, 2, 3])
         self.assertFalse(truncated)
         self.assertEqual(routes[0], "/wiki/rest/api/space/SYNTH/content/page")
+        self.assertEqual(params[0]["depth"], "root")
 
     async def test_page_tree_uses_actual_child_size_and_ignores_next_url(self) -> None:
         starts: list[int] = []

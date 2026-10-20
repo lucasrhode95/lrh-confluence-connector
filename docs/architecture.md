@@ -128,14 +128,16 @@ total suggests otherwise.
 Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
 `contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
 `include_archived` (true by default). Date-only values pass through as `yyyy/MM/dd` and mean that
-calendar day in Confluence's timezone. Timestamps with offsets are normalized to UTC; timestamps
+calendar day in Confluence's timezone; mixed date and timestamp bounds are ordered against that whole
+local day. Timestamps with offsets are normalized to UTC; timestamps
 without offsets are treated as UTC. Timestamp bounds require `cql_timezone`, convert to timezone-less
 `yyyy/MM/dd HH:mm`, and round lower bounds down and upper bounds up to preserve inclusive minutes.
 Repeated daylight-saving hours are conservatively widened because CQL literals cannot identify a
 fold; a rounded minute in a spring-forward gap moves to the next valid minute. Cursors store the
 original UTC instants and reconvert them on every page. If the setting is missing, date-only search
-continues to work and timestamp filters return an actionable `InvalidRequest`. Page/space trees keep
-the server's child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
+continues to work and timestamp filters return an actionable `InvalidRequest`. Space-root tree reads
+request `depth=root`, then child reads follow each page's direct-child route. Trees keep the server's
+child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
 Metadata accepts at most 20 references; experimental page versions are read in 200-item pages and
 capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
 historical metadata reads are not implemented. Results identify truncation or per-reference failures.

@@ -95,7 +95,8 @@ def build_server(context: AppContext) -> FastMCP:
         For continuation, pass only the returned cursor. `match` is all, any or phrase; `fields`
         is all or title. Scope supports spaces, space type, content types, labels, creators,
         contributors, created/modified ranges, parent/ancestor and include_archived. Date-only values
-        mean a calendar day in Confluence's timezone. ISO-8601 timestamps with offsets are accepted;
+        mean a calendar day in Confluence's timezone, and mixed bounds are checked against that full
+        day. ISO-8601 timestamps with offsets are accepted;
         timestamps without offsets are treated as UTC. Timestamp filters require cql_timezone; run
         `confluence-connector status --check` if it is unset. Quick-navigation supplements apply only
         to unscoped title searches.

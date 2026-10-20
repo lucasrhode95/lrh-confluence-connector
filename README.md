@@ -65,8 +65,9 @@ unavailable, the command fails without a plaintext fallback. To clear the local 
 `uv run confluence-connector auth --sign-out`; this does not revoke the token on the server.
 
 `search_content` accepts date-only values as calendar days in Confluence's timezone and ISO-8601
-timestamps as instants. Timestamps without offsets mean UTC; timestamp filters require a calibrated
-`cql_timezone` setting.
+timestamps as instants. Mixed date and timestamp bounds are checked against the full local calendar
+day. Timestamps without offsets mean UTC; timestamp filters require a calibrated `cql_timezone`
+setting.
 
 Configuration precedence is `--config PATH`, `CONFLUENCE_CONFIG`, then the repository-root
 `confluence_config.json`, independent of the working directory. Every command supports `--config`.

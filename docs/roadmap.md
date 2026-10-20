@@ -71,9 +71,9 @@ in the personal space, including a rich-text sample page.
   does not accept those filters. Merged first-page hits stay within the caller's result limit, preserving
   CQL order; only returned quick-navigation IDs affect continuation filtering. Search terms escape
   text-query syntax separately from CQL string quoting; verify metacharacter behavior on the configured
-  instance. User lookup continues to use the CQL search and exact `/rest/api/user?key=` lookup for former
+  instance. User lookup continues to use the CQL search and exact `/rest/api/user?username=` lookup for former
   users; quick navigation with `type=user` is known to fail.
-- `get_page_tree` uses `rest/api/space/{spaceKey}/content/page` for space-root pages and
+- `get_page_tree` uses `rest/api/space/{spaceKey}/content/page?depth=root` for space-root pages and
   `rest/api/content/{id}/child/page` for descendants. Verify space-root response order and paging on
   the configured instance. Page depth is 1–5 (default 3), counting the selected page as level 1;
   for a space root, top-level pages are level 1. A result is capped at 1,000 pages; the cap is
