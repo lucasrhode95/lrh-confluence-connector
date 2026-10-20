@@ -25,11 +25,18 @@ KEEP_SECONDS = 7 * 24 * 3600
 
 def kept_dir(name: str) -> Path:
     """Return the ``name`` folder under the data directory, removing expired files."""
-    directory = config.data_dir() / name
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = private_dir(config.data_dir() / name)
     with _cleanup_lock(directory) as held:
         if held:
             _remove_expired(directory, time.time() - KEEP_SECONDS)
+    return directory
+
+
+def private_dir(directory: Path) -> Path:
+    """Create an output directory that only its owner can access on POSIX systems."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        directory.chmod(0o700)
     return directory
 
 
@@ -40,7 +47,8 @@ def claim(directory: Path, filename: str) -> Path:
     while True:
         target = directory / (filename if counter == 1 else f"{stem} ({counter}){suffix}")
         try:
-            target.open("xb").close()
+            descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(descriptor)
             return target
         except FileExistsError:
             counter += 1

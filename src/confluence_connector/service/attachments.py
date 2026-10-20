@@ -109,7 +109,7 @@ class AttachmentDownloads:
         try:
             target = localfiles.claim(directory, filename)
         except FileNotFoundError:
-            directory.mkdir(parents=True, exist_ok=True)
+            localfiles.private_dir(directory)
             target = localfiles.claim(directory, filename)
         try:
             with target.open("wb") as stream:
@@ -132,9 +132,7 @@ class AttachmentDownloads:
     def _download_directory(self) -> Path:
         """Use the shared downloads folder while keeping files separated after an account switch."""
         fingerprint = hashlib.sha256(self._username.casefold().encode("utf-8")).hexdigest()[:16]
-        directory = localfiles.kept_dir("downloads") / fingerprint
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory
+        return localfiles.private_dir(localfiles.kept_dir("downloads") / fingerprint)
 
 
 def _attachment_ids(value: object) -> list[str]:

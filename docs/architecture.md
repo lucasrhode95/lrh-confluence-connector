@@ -63,7 +63,7 @@ Write tools are not implemented yet.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
 - `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, flat ZIP packaging and failure reports.
-- `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup and collision-safe file claims.
+- `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
@@ -198,6 +198,7 @@ streamed through the shared six-request transport limit into a per-account subfo
 `downloads` directory. Names replace Windows-invalid path characters; an existing name receives a
 numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
 Output files older than seven days are removed when the folder is next used.
+On POSIX systems, output directories are owner-only and claimed files use owner read/write permissions.
 
 `export_pages` validates up to 500 references before any request, then reads two full pages at a time;
 the transport still caps total in-flight HTTP requests at six. It resolves each requested version and

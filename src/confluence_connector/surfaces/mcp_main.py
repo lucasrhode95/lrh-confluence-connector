@@ -1,4 +1,4 @@
-"""MCP tools: thin, read-only wrappers over Confluence services."""
+"""MCP tools: thin wrappers over Confluence read operations and local-file outputs."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
 LOCAL_FILE = ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\

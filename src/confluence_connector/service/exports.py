@@ -388,9 +388,7 @@ class PageExports:
         fingerprint = hashlib.sha256(
             self._username.casefold().encode("utf-8")
         ).hexdigest()[:16]
-        directory = localfiles.kept_dir("exports") / fingerprint
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory
+        return localfiles.private_dir(localfiles.kept_dir("exports") / fingerprint)
 
 
 def _page_content(

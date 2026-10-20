@@ -262,6 +262,11 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "export_pages",
             },
         )
+        tools_by_name = {tool.name: tool for tool in tools}
+        for name in ("download_attachments", "export_pages"):
+            annotations = tools_by_name[name].annotations
+            self.assertIsNotNone(annotations)
+            self.assertFalse(annotations.readOnlyHint)
         await context.aclose()
 
     async def test_search_tool_runs_through_the_account_bound_mcp_service(self) -> None:

@@ -170,6 +170,8 @@ attachment deduplication is not required.
 - Output goes to the per-user exports folder, one timestamped file per export; the tool returns the
   path. A failed page or attachment produces a ZIP with `_export-report.txt`; account/authentication
   failures abort the call.
+- Local download and export tools are marked as environment-mutating, and their output folders and
+  files are owner-only on POSIX systems.
 
 **Decided 2026-10-19 (D4), limits and parse scope:**
 
