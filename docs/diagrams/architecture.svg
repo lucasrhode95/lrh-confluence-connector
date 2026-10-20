@@ -187,7 +187,7 @@
   <text class="detail" x="1940" y="1244" style="font-size:18px"><tspan class="code">child/…</tspan> · <tspan class="code">label</tspan> · <tspan class="code">property</tspan> · <tspan class="code">longtask</tspan></text>
   <text class="detail" x="1940" y="1272" style="font-size:18px"><tspan class="code">/download/attachments/…</tspan> · experimental versions</text>
 
-  <rect x="1920" y="1300" width="580" height="96" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1920" y="1300" width="580" height="112" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1938" y="1312" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1954" y="1331" text-anchor="middle">P</text>
   <text class="section-title" x="1980" y="1333">Private web routes</text>

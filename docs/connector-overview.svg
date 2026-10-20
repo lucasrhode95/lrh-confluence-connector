@@ -70,7 +70,7 @@
     <rect x="1076" y="285" width="360" height="132" rx="24" class="card"/>
     <use href="#confluence-mark" x="1098" y="319" width="64" height="64" aria-hidden="true"/>
     <text x="1182" y="341" class="cardtitle">Confluence</text>
-    <text x="1182" y="367" font-size="14" class="small">Data Center pages and attachments</text>
+    <text x="1182" y="367" font-size="14" class="small">Data Center pages and files</text>
   </g>
 
   <text x="750" y="546" class="subtitle" text-anchor="middle" font-size="14">For local agentic clients with stdio MCP support. ChatGPT web can connect through OpenAI's Secure MCP Tunnel; other hosted chats are not supported.</text>
