@@ -5,7 +5,8 @@
 Local MCP connector for one user's Confluence Data Center account. The current release provides
 encrypted token setup, account status, space listing, content search, user lookup, page trees and page
 metadata, budgeted page-text reads, selected attachment downloads and batch page exports. The
-remaining product scope is in the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
+current page and draft write tools are implemented locally; page moves, trash operations and live
+acceptance remain open in the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
 |---|---|
@@ -39,8 +40,21 @@ remaining product scope is in the [requirements](docs/requirements.md) and [road
   timestamped file; multi-page, incomplete or attachment-inclusive exports are ZIPs. Attachment bytes
   are excluded by default, and `_export-report.txt` records page or attachment failures. Large exports
   may take minutes. The provenance header is always included.
+- `create_page` creates a current page or new-page draft under one parent or at a space root. It
+  accepts rich HTML/storage or escaped text, checks for a duplicate current title, and reports if a
+  requested first/before/after position could not be confirmed.
+- `update_page` replaces the whole body and requires `expected_version`. It refuses stale versions
+  and refuses to detach inline comments unless `allow_comment_loss` is true; removed macros and
+  attachment references appear in warnings.
+- `list_drafts` lists the signed-in user's new-page drafts with continuation cursors.
+- `publish_draft` publishes a new-page draft without changing its page ID.
+- `delete_draft` permanently deletes a new-page draft and bypasses the trash.
+- `set_labels` adds/removes global labels, compensates confirmed changes in reverse order after a
+  definitive failure, and reports partial results or failed reversals. It does not compensate an
+  uncertain outcome or account change.
 
-Page and draft changes remain open work.
+Page writes change Confluence content. Live acceptance uses disposable synthetic pages and remains
+manual; no write probes run as routine checks.
 Authentication is separate from Microsoft 365 sign-in.
 
 ## Setup
