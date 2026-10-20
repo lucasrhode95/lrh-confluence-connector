@@ -74,6 +74,17 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.title_checks, [])
         self.assertEqual(self.api.create_calls, [])
 
+    async def test_create_refuses_excessive_rich_markup_nesting_before_remote_calls(self) -> None:
+        depth = 129
+        body = "<div>" * depth + "content" + "</div>" * depth
+
+        with self.assertRaisesRegex(InvalidRequest, "nested more than 128 elements"):
+            await self.service.create_page("New", body, space_key="SYNTH")
+
+        self.assertEqual(self.api.metadata_calls, [])
+        self.assertEqual(self.api.title_checks, [])
+        self.assertEqual(self.api.create_calls, [])
+
     async def test_first_position_uses_a_same_space_sibling_after_creation(self) -> None:
         result = await self.service.create_page(
             "New first", "body", format="text", parent_id="100", position="first"

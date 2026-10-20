@@ -20,6 +20,7 @@ _URL_ATTRIBUTES = frozenset(
 )
 _LANGUAGE_CLASS = re.compile(r"(?:^|\s)language-([a-zA-Z0-9_+#.-]+)(?:\s|$)")
 _JAVASCRIPT_SCHEME = re.compile(r"^javascript\s*:", re.IGNORECASE)
+MAX_RICH_MARKUP_DEPTH = 128
 
 
 @dataclass
@@ -37,9 +38,10 @@ class _MarkupNode:
 class _MarkupParser(HTMLParser):
     """Record source spans so ordinary user markup remains byte-for-byte intact."""
 
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, *, maximum_depth: int | None = None) -> None:
         super().__init__(convert_charrefs=False)
         self.source = source
+        self.maximum_depth = maximum_depth
         self.line_starts = [0]
         self.line_starts.extend(index + 1 for index, char in enumerate(source) if char == "\n")
         self.root = _MarkupNode("", {}, 0, 0, len(source), len(source), False)
@@ -48,8 +50,14 @@ class _MarkupParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         raw = self.get_starttag_text() or ""
         start = self._offset()
+        tag_name = tag.casefold()
+        if tag_name not in _VOID_TAGS and self.maximum_depth is not None:
+            if len(self.stack) - 1 >= self.maximum_depth:
+                raise InvalidRequest(
+                    f"Rich page markup cannot be nested more than {self.maximum_depth} elements."
+                )
         node = _MarkupNode(
-            tag.casefold(),
+            tag_name,
             {name.casefold(): value for name, value in attrs},
             start,
             start + len(raw),
@@ -124,7 +132,7 @@ def to_storage(body: str, page_format: str) -> str:
     if page_format != "rich":
         raise InvalidRequest("format must be `rich` or `text`.")
     _check_active_content(body)
-    parser = _MarkupParser(body)
+    parser = _MarkupParser(body, maximum_depth=MAX_RICH_MARKUP_DEPTH)
     parser.feed(body)
     parser.close()
     parser.finish()
@@ -144,7 +152,7 @@ def _plain_text_to_storage(body: str) -> str:
 def _check_active_content(source: str) -> None:
     class _SafetyParser(_MarkupParser):
         def __init__(self, value: str) -> None:
-            super().__init__(value)
+            super().__init__(value, maximum_depth=MAX_RICH_MARKUP_DEPTH)
             self.violation: str | None = None
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:

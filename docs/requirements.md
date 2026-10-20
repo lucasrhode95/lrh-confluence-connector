@@ -256,6 +256,8 @@ whether it was deleted through REST or the UI, and restoring needs space-admin r
   `<iframe>`, `<object>`, `<embed>`, `on*` attributes, `javascript:` URLs or the HTML macro. Confluence
   passed these through in testing. Any other markup Confluence cannot parse returns its 400 message
   with row and column; the connector does not repair it further.
+- `rich` input is limited to 128 nested non-void elements and is rejected before remote requests when
+  it exceeds that depth, keeping markup conversion below Python's recursion limit.
 - The write tools' descriptions carry a short storage reference (code macro, panels, expand, status,
   table of contents, task list, page and attachment links, images, mentions) so agents can use the
   full range of Confluence formatting.
