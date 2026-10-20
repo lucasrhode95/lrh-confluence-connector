@@ -550,10 +550,13 @@ async def _check_downloads_and_exports(
     download = await services.attachments.download_attachments(pages.root, selected)
     if len(download.files) != 2 or download.failures:
         raise AssertionError("selected attachment download did not complete")
-    downloaded = {item.filename: Path(item.path).read_bytes() for item in download.files}
-    if fixture.text_filename not in downloaded or fixture.attachment_marker.encode() not in downloaded[fixture.text_filename]:
+    source_ids = {item.filename: item.attachment_id for item in attachments}
+    downloaded = {item.attachment_id: Path(item.path).read_bytes() for item in download.files}
+    text_bytes = downloaded.get(source_ids[fixture.text_filename], b"")
+    image_bytes = downloaded.get(source_ids[fixture.image_filename], b"")
+    if fixture.attachment_marker.encode() not in text_bytes:
         raise AssertionError("downloaded text attachment omitted its synthetic marker")
-    if fixture.image_filename not in downloaded or not downloaded[fixture.image_filename].startswith(b"\x89PNG\r\n\x1a\n"):
+    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         raise AssertionError("downloaded image attachment was not the synthetic PNG")
     single = await services.exports.export_pages(pages.root, format="text")
     if Path(single.path).suffix != ".txt" or not Path(single.path).is_file():

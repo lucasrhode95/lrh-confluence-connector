@@ -21,6 +21,14 @@ requests were made. Broader refactoring, implementation of the decided move rout
 
 ### Bugs
 
+#### Repeated acceptance downloads mistake collision-safe names for missing content (P2)
+
+- **Seen live, 2026-10-20:** the first download check passed; later runs failed when local filenames
+  gained collision suffixes. The check keyed bytes by local filename instead of source identity.
+- **Implemented, awaiting review:** match saved files to expected attachments by `attachment_id`,
+  preserving source filename lookup from the API metadata. A synthetic regression uses renamed files.
+
+
 #### Restore placement trusts a sparse success response (P2)
 
 - **Seen live, 2026-10-20:** restore succeeds but returns no expanded space or version. Placement
