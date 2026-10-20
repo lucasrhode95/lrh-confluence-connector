@@ -404,6 +404,20 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comments[0].selected_text, "selected words")
         self.assertEqual(comments[0].author.display_name, "Sample User")  # type: ignore[union-attr]
 
+    async def test_page_comments_reject_missing_or_malformed_requested_view_bodies(self) -> None:
+        for body in ({}, {"view": {"value": None}}, {"view": {"value": 5}}):
+            with self.subTest(body=body):
+                def handler(_: httpx.Request) -> httpx.Response:
+                    return httpx.Response(
+                        200,
+                        json={"results": [{"id": "comment-7", "body": body}]},
+                    )
+
+                with self.assertRaisesRegex(Upstream, "expanded view body"):
+                    await self.make_api(handler).list_page_comments(
+                        "55", expected_username="sample-user"
+                    )
+
     async def test_malformed_echoed_size_is_an_upstream_error(self) -> None:
         def handler(_: httpx.Request) -> httpx.Response:
             return httpx.Response(

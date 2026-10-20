@@ -455,6 +455,10 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["[Included from: Shared]", "Included issue", "[Jira: OPS-9]"],
         )
         self.assertEqual(rendered.blocks[-1].references[0].key, "OPS-9")
+        include_reference = next(
+            reference for reference in rendered.references if reference.kind == "page"
+        )
+        self.assertEqual((include_reference.page_id, include_reference.owner_page_id), ("91", "55"))
 
     def test_explicit_line_breaks_survive_rendering_and_comment_conversion(self) -> None:
         rendered = render_page_body(

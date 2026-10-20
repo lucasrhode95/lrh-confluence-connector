@@ -156,7 +156,9 @@ rows remain separate budget blocks and use single newlines to preserve Markdown 
 table fallbacks emit one minimal-HTML block per outer row, preserving block boundaries in cells and
 image, macro and link markers with their typed references. Attachment and image identity is mapped from
 source fields before markers are rendered. Page-typed linked-resource anchors bypass attachment mapping;
-their source page IDs and visible labels are retained by the link mapper.
+their source page IDs and visible labels are retained by the link mapper, with the current page as owner.
+Include and excerpt-include references also retain the current page as owner. Comment reads request
+`body.view`, and the adapter treats a missing or malformed requested value as an upstream error.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
 Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
@@ -169,8 +171,9 @@ budgets. Cursors carry page ID, version and a stable next-block anchor and re-re
 version when the current page has changed; the adapter requires the returned source version to exactly
 confirm a requested historical version. Body anchors use the pinned block order, while attachment and
 comment anchors use their source IDs. If a live section removes the next anchored item, continuation
-returns an actionable restart error. Generic containers and blockquotes keep inline runs together and
-split them only around block-level children. Local root-relative links are normalized to the configured
+returns an actionable restart error. Text continuation keeps the separator preceding its first block so
+joining fragments reproduces the original text. Generic containers and blockquotes keep inline runs
+together and split them only around block-level children. Local root-relative links are normalized to the configured
 context path before they are emitted. Attachments and comments are read again on continuation, so those
 live sections can change while the page body remains pinned; stable item anchors prevent insertions before
 a continuation point from shifting the cursor.

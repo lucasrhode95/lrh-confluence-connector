@@ -686,17 +686,19 @@ def _page_attachment(value: Any, *, base_url: str) -> PageAttachment | None:
 
 
 def _page_comment(value: Any) -> RemotePageComment | None:
-    """Map comment body and provenance from the comment response, not rendered page text."""
+    """Map the requested expanded comment view and provenance from source fields."""
     if not isinstance(value, dict):
         return None
     comment_id = _identifier(value.get("id"))
     if comment_id is None:
         return None
     body = value.get("body")
-    body = body if isinstance(body, dict) else {}
+    if not isinstance(body, dict):
+        raise Upstream("Confluence returned a comment without its expanded view body.")
     view = body.get("view")
-    view = view if isinstance(view, dict) else {}
-    view_body = view.get("value") if isinstance(view.get("value"), str) else ""
+    if not isinstance(view, dict) or not isinstance(view.get("value"), str):
+        raise Upstream("Confluence returned a comment without a valid expanded view body.")
+    view_body = view["value"]
     history = value.get("history")
     history = history if isinstance(history, dict) else {}
     extensions = value.get("extensions")

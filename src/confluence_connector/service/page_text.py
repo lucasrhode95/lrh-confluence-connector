@@ -734,7 +734,14 @@ def _storage_references(
             identifier = node.attrs.get("ri:content-id") or node.attrs.get("ri:page-id")
             title = node.attrs.get("ri:content-title")
             if identifier or title:
-                references.append(PageReference(kind="page", page_id=identifier, title=title))
+                references.append(
+                    PageReference(
+                        kind="page",
+                        page_id=identifier,
+                        title=title,
+                        owner_page_id=page_id,
+                    )
+                )
         elif node.tag == "ri:attachment":
             filename = node.attrs.get("ri:filename")
             identifier = node.attrs.get("ri:content-id")
@@ -763,7 +770,12 @@ def _macro_reference(macro: _Macro | None, page_id: str) -> PageReference | None
     if macro is None:
         return None
     if macro.name in {"include", "excerpt-include"}:
-        return PageReference(kind="page", page_id=macro.page_id, title=macro.page_title)
+        return PageReference(
+            kind="page",
+            page_id=macro.page_id,
+            title=macro.page_title,
+            owner_page_id=page_id,
+        )
     if macro.name == "jira" and macro.jira_key:
         return PageReference(kind="jira", key=macro.jira_key, macro_name=macro.name)
     if macro.name in {"plantuml", "html"}:

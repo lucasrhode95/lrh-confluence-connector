@@ -110,10 +110,11 @@ source-provided descriptions. Markers let an agent request a particular attachme
 - Ordered lists preserve their source `start` and item `value` numbers.
 - Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
 - Local root-relative page links include the configured Confluence context path in text and references.
-- Page-typed links keep their visible label and page ID in typed references, including when Confluence
-  supplies the page ID through linked-resource attributes.
+- Page links and include references keep their target page ID and current source page ID in typed
+  references; page-typed linked-resource anchors also keep their visible label.
 - When the request includes `body.storage`, the response must contain a string storage value; a missing
   requested value is an upstream error rather than an empty body.
+- Comment reads request `body.view`; a missing or malformed requested view body is an upstream error.
 - Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, unordered items use `• item`,
   and ordered items retain their numbering. Images and macros in cells use their normal markers.
   Merged cells repeat their value into each covered cell, with a `[Table: merged cells repeated]`
@@ -172,7 +173,8 @@ attachment deduplication is not required.
   cursor carries page ID, version and a stable next-block anchor; continuation reads that same
   version through a historical read if the page changed. Mutable attachment and comment sections
   resume by item identity. If the anchored item was removed, the connector asks the caller to restart
-  the read. Nothing is kept in process memory between calls.
+  the read. Text continuation fragments retain the separator before their first block, so joining
+  fragments preserves the original page text. Nothing is kept in process memory between calls.
 - Comment blocks use the same character budget in text and rich reads. Rich page text remains the
   unchanged storage body; structured comment records appear only when their block is selected, so
   full comment bodies are not repeated on earlier pages or continuations.

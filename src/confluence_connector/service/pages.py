@@ -190,11 +190,13 @@ class PageTextService:
                     continue
 
                 start_offset = _block_offset(loaded.blocks, first_anchor) if index == 0 and first_anchor else 0
+                continuing_page = first_anchor is not None and index == 0
                 selected, next_offset, chars, exceeded = _take_blocks(
                     loaded.blocks,
                     start=start_offset,
                     budget=max_chars - used_chars,
                     page_format=page_format,
+                    include_first_separator=continuing_page,
                 )
                 if used_chars > 0 and (next_offset is not None or exceeded):
                     return PageReadResult(
@@ -204,7 +206,14 @@ class PageTextService:
                         notes=notes,
                     )
 
-                records.append(_record(loaded, selected, page_format=page_format))
+                records.append(
+                    _record(
+                        loaded,
+                        selected,
+                        page_format=page_format,
+                        preserve_first_separator=continuing_page,
+                    )
+                )
                 used_chars += chars
                 notes.extend(loaded.notes)
                 if exceeded:
@@ -513,6 +522,7 @@ def _record(
     blocks: list[PageTextBlock],
     *,
     page_format: PageTextFormat,
+    preserve_first_separator: bool = False,
 ) -> PageReadRecord:
     selected_comment_ids = {
         reference.comment_id
@@ -528,7 +538,7 @@ def _record(
         )
     else:
         text = "".join(
-            (block.separator_before if index else "") + block.text
+            (block.separator_before if index or preserve_first_separator else "") + block.text
             for index, block in enumerate(blocks)
         )
     metadata = loaded.source.metadata
@@ -551,18 +561,24 @@ def _record(
 
 
 def _take_blocks(
-    blocks: tuple[PageTextBlock, ...], *, start: int, budget: int, page_format: PageTextFormat
+    blocks: tuple[PageTextBlock, ...],
+    *,
+    start: int,
+    budget: int,
+    page_format: PageTextFormat,
+    include_first_separator: bool = False,
 ) -> tuple[list[PageTextBlock], int | None, int, bool]:
     selected: list[PageTextBlock] = []
     used = 0
     for index in range(start, len(blocks)):
         block = blocks[index]
         separator = "" if page_format == "rich" else block.separator_before
-        addition = len(block.text) + (len(separator) if selected else 0)
+        has_separator = bool(selected) or (include_first_separator and index == start)
+        addition = len(block.text) + (len(separator) if has_separator else 0)
         if used + addition > budget:
             if not selected:
                 selected.append(block)
-                used += len(block.text)
+                used += addition
                 return selected, index + 1 if index + 1 < len(blocks) else None, used, True
             return selected, index, used, False
         selected.append(block)

@@ -95,7 +95,7 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         api = _ReadApi(pages={"55": old_page}, versions={("55", 7): old_page})
         first = await _service(api).get_pages(
             "55",
-            max_chars=8,
+            max_chars=10,
             parse_scope={"header": False, "comments": False, "attachments": False, "macros_from_storage": False},
         )
         self.assertEqual(first.pages[0].text, "old one")
@@ -105,7 +105,8 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
 
         api.pages["55"] = _page("55", 8, "<p>new current content</p>", "")
         second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, "old two")
+        self.assertEqual(second.pages[0].text, "\n\nold two")
+        self.assertEqual(first.pages[0].text + second.pages[0].text, "old one\n\nold two")
         self.assertEqual(second.pages[0].version, 7)
         self.assertNotIn("new current content", second.pages[0].text)
         self.assertEqual(api.content_calls[-1], ("55", 7))
@@ -130,7 +131,8 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.pages[0].text, first_row)
         self.assertIsNotNone(first.next_cursor)
         second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, second_row)
+        self.assertEqual(second.pages[0].text, "\n" + second_row)
+        self.assertEqual(first.pages[0].text + second.pages[0].text, first_row + "\n" + second_row)
 
     async def test_pipe_table_rows_remain_adjacent_in_page_text(self) -> None:
         api = _ReadApi(
@@ -173,10 +175,14 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.pages[0].text, "> [Panel] First paragraph.")
         self.assertIsNotNone(first.next_cursor)
         second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, "> Second paragraph.")
+        self.assertEqual(second.pages[0].text, "\n>\n> Second paragraph.")
         self.assertIsNotNone(second.next_cursor)
         third = await _service(api).get_pages(cursor=second.next_cursor)
-        self.assertEqual(third.pages[0].text, "> • Third block.")
+        self.assertEqual(third.pages[0].text, "\n>\n> • Third block.")
+        self.assertEqual(
+            first.pages[0].text + second.pages[0].text + third.pages[0].text,
+            "> [Panel] First paragraph.\n>\n> Second paragraph.\n>\n> • Third block.",
+        )
 
     async def test_attachment_cursor_resumes_at_stable_item_after_insertions(self) -> None:
         api = _ReadApi(
@@ -202,7 +208,11 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
             PageAttachment(attachment_id="att-new", filename="inserted.txt", media_type="text/plain"),
         )
         continued = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(continued.pages[0].text, "- second.txt (text/plain, 2 bytes)")
+        self.assertEqual(continued.pages[0].text, "\n\n- second.txt (text/plain, 2 bytes)")
+        self.assertEqual(
+            first.pages[0].text + continued.pages[0].text,
+            first_text + "\n\n- second.txt (text/plain, 2 bytes)",
+        )
         self.assertNotIn("inserted.txt", continued.pages[0].text)
 
     async def test_structured_comments_follow_the_selected_text_blocks(self) -> None:
@@ -222,7 +232,7 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(first.next_cursor)
 
         second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, "## Comments")
+        self.assertEqual(second.pages[0].text, "\n\n## Comments")
         self.assertEqual(second.pages[0].comments, [])
         self.assertIsNotNone(second.next_cursor)
 
