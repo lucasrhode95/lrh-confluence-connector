@@ -182,6 +182,16 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(InvalidRequest, "Pass only cursor"):
             await self.service.list_trash(space_key="SYNTH", cursor=first.next_cursor)
 
+    async def test_trash_listing_accepts_a_personal_space_key_prefix(self) -> None:
+        self.api.trash_page_response = RemoteTrashPage(
+            pages=[], start=0, size=0, total_size=0, has_more=False
+        )
+
+        result = await self.service.list_trash(space_key="~sample-user")
+
+        self.assertEqual(result.pages, [])
+        self.assertEqual(self.api.trash_requests, [("~sample-user", 0, 50)])
+
     async def test_restore_returns_to_root_when_caller_positioning_is_refused(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")
         self.api.pages["30"] = _page("30", "Target")

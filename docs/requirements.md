@@ -338,8 +338,9 @@ find-and-replace modes. Confluence-specific safeguards:
   reverse order; `added` and `removed` report changes still applied, `compensated` reports restored
   states, `rollback_failures` reports failed reversals, and `failures`/`not_attempted` report the
   requested sequence. It does not compensate when authentication changes or an outcome is uncertain.
-- Titles are limited to 255 printable characters, labels and space keys to 255 ASCII letters, digits,
-  underscores or hyphens, and write bodies to 2,000,000 characters. These limits bound tool inputs;
+- Titles are limited to 255 printable characters, labels to 255 ASCII letters, digits, underscores
+  or hyphens, and space keys to 255 such characters with an optional leading `~` for a personal
+  space. Write bodies are limited to 2,000,000 characters. These limits bound tool inputs;
   verify that they fit the configured instance's expected content during acceptance.
 
 ## 7. Authentication and concurrent use
@@ -374,6 +375,11 @@ calibration uses the verified stored account and read-only CQL searches. An unse
 a fixed measured offset. An existing value is compared only by `status --check`, which warns on a
 mismatch and leaves the setting unchanged. Users should replace an automatically written fixed offset
 with an IANA name if daylight-saving changes apply.
+
+The optional private `acceptance` object may contain `personal_space_key` and `cross_space_key`.
+Fixture setup requires a visible personal space; cross-space checks require a second, distinct,
+visible space. Missing settings skip only the dependent acceptance checks. The connector never
+chooses a space implicitly for fixture writes.
 
 ## 8. Reliability and acceptance
 
@@ -414,19 +420,22 @@ concurrent use and exports.
 **Decided 2026-10-19, acceptance:** test functionality against synthetic fixtures with known facts,
 never against real wiki content or its ranking.
 
-- A setup script under `research/`, run only on request, creates or refreshes a `Connector Lab
-  Acceptance` tree in the personal space. It covers unique markers, a punctuated title, a code
+- A setup script under `research/` creates or refreshes a `Connector Lab Acceptance` tree in the
+  personal space. It covers unique markers, a punctuated title, a code
   identifier, accented words, every macro type, merged and nested tables, an inline image and an
   attachment, a footer comment with a reply, a label, ordered children with a grandchild and several
   versions. An inline comment is added by hand, because only the UI creates one. A second approved
-  space for cross-space moves is a private setting. Missing manual steps or settings make the
-  dependent checks report `skipped`.
+  space for cross-space moves is the private `acceptance.cross_space_key` setting. The personal
+  space is `acceptance.personal_space_key`. Setup writes only with `--apply`; the live runner sends
+  requests only with `--run-live`, and it runs Confluence writes only with `--allow-writes`. Missing
+  manual steps or settings make only the dependent checks report `skipped`.
 - Checks cover search modes and scope filters (tolerating indexing delay), cursor paging, link and
   version resolution, reading output per D3/D4, tree order, metadata, export layout per D8, and every
   write path including conflicts, refusals, the loss check, cross-space moves and the three
   `delete_page` modes.
-- The same checks run offline against synthetic fake responses before every commit, and live only
-  when explicitly authorized, reporting pass, fail or skipped with timings and no page content.
+- Every live check has offline synthetic coverage across the acceptance, service, remote and
+  transport test modules. Run those checks before every commit. The live runner reports pass, fail
+  or skipped with timings and no page content; it runs only after explicit operator opt-in.
 - Ready for daily use means the offline suite passes and every live check passes or is skipped for a
   stated reason.
 
