@@ -151,19 +151,28 @@ attachment deduplication is not required.
 
 **Decided 2026-10-19 (D8), export layout:**
 
-- One page with no attachments selected is written as a single file; anything else as one `.zip`.
+- One page with no attachment bytes requested and no failures is written as a single file; anything
+  else as one `.zip`. Setting `include_attachments: true` produces a ZIP even when the page has no
+  attachments.
 - Each page is one file at the ZIP root named `<Title> (<page id>) v<version>`, with characters
-  Windows does not allow replaced and long titles shortened. Pages stay flat, with no tree folders.
-  Each file's header carries the ancestor breadcrumb (`Space › Parent › Page`).
-- Attachments, when the scope includes them, go in a folder with the page file's name minus its
-  extension.
-- `text` exports are `.txt` files with exactly the `get_pages` text output, without a character limit.
+  Windows does not allow replaced and long titles shortened. Names fit within 180 characters and
+  240 filesystem bytes or UTF-16 code units. Pages stay flat, with no tree folders.
+  Each file's header carries the ancestor breadcrumb (`Space › Parent › Page`); exports always include
+  this provenance header even when `parse_scope.header` is false.
+- Attachment bytes are excluded by default. With `include_attachments: true`, all listed attachments
+  go in a folder with the page file's name minus its extension. `parse_scope.attachments` controls the
+  attachment list in page text independently of whether bytes are included.
+- `text` exports are `.txt` files with the same unbudgeted `get_pages` text rendering, with the
+  provenance header enabled, and without a character limit.
   `rich` exports are `.html` files with the storage body unchanged, a metadata comment at the top with
-  the same header facts, and the comments in a final section.
+  the same header facts, and selected comments in a final section.
 - `_export-report.txt` at the root, present only when something failed or was skipped, lists each
   page or attachment and the reason.
-- Output goes to the per-user output folder used by the other connectors, one timestamped file per
-  export; the tool returns the path.
+- Output goes to the per-user exports folder, one timestamped file per export; the tool returns the
+  path. A failed page or attachment produces a ZIP with `_export-report.txt`; account/authentication
+  failures abort the call.
+- Local download and export tools are marked as environment-mutating, and their output folders and
+  files are owner-only on POSIX systems.
 
 **Decided 2026-10-19 (D4), limits and parse scope:**
 

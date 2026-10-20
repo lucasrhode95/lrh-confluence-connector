@@ -4,8 +4,8 @@
 
 Local MCP connector for one user's Confluence Data Center account. The current release provides
 encrypted token setup, account status, space listing, content search, user lookup, page trees and page
-metadata, and budgeted page-text reads. The remaining product scope is in
-the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
+metadata, budgeted page-text reads, selected attachment downloads and batch page exports. The
+remaining product scope is in the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
 |---|---|
@@ -33,8 +33,14 @@ the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
   storage markup. Text reads include typed references, attachment lists, and threaded comments by
   default; attachments are not downloaded. A character budget packs whole pages and uses a
   version-pinned cursor when the first page needs continuation.
+- `download_attachments` saves selected attachment IDs from one page to the local downloads folder.
+  It verifies each ID belongs to that page and returns a path or per-attachment failure.
+- `export_pages` writes up to 500 pages in full as text or rich HTML. One clean page can be a single
+  timestamped file; multi-page, incomplete or attachment-inclusive exports are ZIPs. Attachment bytes
+  are excluded by default, and `_export-report.txt` records page or attachment failures. Large exports
+  may take minutes. The provenance header is always included.
 
-Exports, attachment retrieval, and page or draft changes remain open work.
+Page and draft changes remain open work.
 Authentication is separate from Microsoft 365 sign-in.
 
 ## Setup

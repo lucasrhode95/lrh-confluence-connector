@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes seven read-only tools:
+The MCP surface currently exposes seven read tools and two local-file tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -27,8 +27,10 @@ The MCP surface currently exposes seven read-only tools:
 | `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
 | `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
 | `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
+| `download_attachments` | Verify selected attachment IDs belong to one page, then save each file locally with per-file failures |
+| `export_pages` | Write up to 500 complete pages as a single file or flat ZIP, optionally including attachment bytes and reporting incomplete items |
 
-Attachment downloads, exports and write tools are not implemented yet.
+Write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -43,7 +45,7 @@ Attachment downloads, exports and write tools are not implemented yet.
   `CrossPlatLock`.
 - `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
-  checks; it never logs request URLs or payloads.
+  checks, plus bounded streaming downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
   quick navigation, user lookup, ordered children, page bodies, attachments, comments and history mapping.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and page reads; it
@@ -59,6 +61,9 @@ Attachment downloads, exports and write tools are not implemented yet.
 - `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
+- `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
+- `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
+- `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
@@ -186,6 +191,32 @@ inside their space, and a renamed title fails clearly. Short-link redirects are 
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
 comment focus are ignored. Search scope, page trees, metadata and page text reads use this resolver for
 page references.
+
+`download_attachments` accepts one page reference and up to 500 attachment IDs. The service lists that
+page's attachments before downloading, so an ID cannot select a file from another page. Files are
+streamed through the shared six-request transport limit into a per-account subfolder under the local
+`downloads` directory. Names replace Windows-invalid path characters; an existing name receives a
+numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
+Output files older than seven days are removed when the folder is next used.
+On POSIX systems, output directories are owner-only and claimed files use owner read/write permissions.
+
+`export_pages` validates up to 500 references before any request, then reads two full pages at a time;
+the transport still caps total in-flight HTTP requests at six. It resolves each requested version and
+keeps the input order. Non-account page errors and attachment failures are written to
+`_export-report.txt`; authentication and account mismatches abort the export. Text files use the same
+unbudgeted `get_pages` renderer and always include the provenance header. Rich files start with that
+header in an HTML comment, preserve the storage body, and append escaped comments when comments are
+selected. Windows-invalid filename characters are replaced and duplicate page names receive suffixes.
+
+One successful page with no attachment bytes requested and no incomplete sections is written as a
+timestamped file. All other cases use a timestamped ZIP with page files at its root and attachment
+folders beside their page files. `include_attachments` defaults to false; when true, the tool lists and
+downloads all readable attachments for each page. `parse_scope.attachments` separately controls
+whether attachment names appear in text. Exports and their staging files live in an account-specific
+subfolder of `exports`; the shared local-file cleanup removes outputs older than seven days when the
+folder is next used. After staging a page body and its selected attachments, the service retains only
+page ID, title and version for archive naming so memory does not grow with the number of pages.
+Export names fit within 180 characters and 240 filesystem bytes or UTF-16 code units.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

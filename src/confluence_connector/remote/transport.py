@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from collections.abc import Awaitable, Callable
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import urljoin
 
 import httpx
@@ -85,6 +85,76 @@ class ConfluenceTransport:
             "GET", path, params=params, token_override=token_override, expected_username=expected_username
         )
         return _json_payload(response)
+
+    async def download_to(
+        self,
+        path: str,
+        destination: BinaryIO,
+        *,
+        params: Mapping[str, str] | None = None,
+        expected_username: str,
+    ) -> tuple[str | None, int]:
+        """Stream one selected attachment to a caller-owned file with the read retry policy.
+
+        The caller supplies a seekable temporary or exclusively claimed file and removes it if this
+        operation fails. A partial response is truncated before a safe GET retry.
+        """
+        _validate_route(path)
+        for attempt in range(MAX_ATTEMPTS):
+            token = self._credential(None, expected_username)
+            request = self._client.build_request(
+                "GET",
+                path,
+                params=params,
+                headers={"Accept": "*/*", "Authorization": f"Bearer {token}"},
+            )
+            response: httpx.Response | None = None
+            retry_delay: float | None = None
+            try:
+                async with self._limit:
+                    response = await self._client.send(request, stream=True)
+                    if response.status_code in READ_RETRY_STATUSES and attempt + 1 < MAX_ATTEMPTS:
+                        retry_delay = _retry_delay(response.headers, attempt)
+                    elif response.status_code in REDIRECT_STATUSES:
+                        await response.aclose()
+                        response = None
+                        raise AuthenticationRequired(
+                            "Confluence redirected the attachment request; the stored token was not accepted."
+                        )
+                    elif not 200 <= response.status_code < 300:
+                        response = await _read_response(response)
+                    else:
+                        content_type = response.headers.get("content-type")
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            destination.write(chunk)
+                            size += len(chunk)
+                        await response.aclose()
+                        response = None
+                        self._assert_account(expected_username)
+                        return content_type, size
+            except httpx.RequestError as exc:
+                _clear_destination(destination)
+                if attempt + 1 < MAX_ATTEMPTS:
+                    _log.warning(
+                        "Confluence attachment download failed; attempt=%d error=%s",
+                        attempt + 1,
+                        type(exc).__name__,
+                    )
+                    await self._sleep(_backoff(attempt))
+                    continue
+                raise Upstream(f"Could not complete the Confluence attachment download ({type(exc).__name__}).") from None
+            finally:
+                if response is not None and not response.is_closed:
+                    await response.aclose()
+            if retry_delay is not None:
+                _clear_destination(destination)
+                await self._sleep(retry_delay)
+                continue
+            if response is None:
+                raise Upstream("The Confluence attachment request did not return a response.")
+            _raise_status(response.status_code, response.content, method="GET")
+        raise Upstream("The Confluence attachment download failed after the allowed attempts.")
 
     async def send_json(
         self,
@@ -217,6 +287,12 @@ async def _read_response(response: httpx.Response) -> httpx.Response:
     extensions = response.extensions
     await response.aclose()
     return httpx.Response(status, headers=headers, content=bytes(chunks), request=request, extensions=extensions)
+
+
+def _clear_destination(destination: BinaryIO) -> None:
+    """Discard an incomplete streaming attempt before retrying the safe GET."""
+    destination.seek(0)
+    destination.truncate()
 
 
 def _json_payload(response: httpx.Response) -> dict[str, Any]:
