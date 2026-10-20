@@ -40,6 +40,19 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 From whole-project reviews of `e67b60d` by Codex and Claude, plus the unresolved review threads on
 PRs #5–#9 that are still open in the code.
+
+Nine review threads stay open until their fix lands. Resolve each one in the commit's PR, with a
+one-line reply naming the fixing commit:
+
+- PR #6, page text item: [Jira without a key](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881306),
+  [image filenames](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881317),
+  [`data-page-id`](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881324),
+  [fence-like code lines](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881330).
+- PR #7: [trashed display URLs](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234259),
+  [`move_up` parent recheck](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234270).
+- PR #8: [HTML-macro fixture](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507219),
+  [`_pass` callable](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507237),
+  [re-trash scratch pages](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507255).
 Group related items into design fixes rather than one patch each.
 
 **Bugs**, highest first:
