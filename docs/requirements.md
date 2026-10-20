@@ -110,6 +110,10 @@ source-provided descriptions. Markers let an agent request a particular attachme
 - Ordered lists preserve their source `start` and item `value` numbers.
 - Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
 - Local root-relative page links include the configured Confluence context path in text and references.
+- Page-typed links keep their visible label and page ID in typed references, including when Confluence
+  supplies the page ID through linked-resource attributes.
+- When the request includes `body.storage`, the response must contain a string storage value; a missing
+  requested value is an upstream error rather than an empty body.
 - Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, unordered items use `• item`,
   and ordered items retain their numbering. Images and macros in cells use their normal markers.
   Merged cells repeat their value into each covered cell, with a `[Table: merged cells repeated]`

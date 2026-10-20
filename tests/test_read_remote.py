@@ -327,6 +327,22 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content.view_body, "<p>Rendered body</p>")
         self.assertEqual(content.storage_body, "")
 
+    async def test_page_content_rejects_missing_requested_storage_body(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {"view": {"value": "<p>Rendered body</p>"}},
+                },
+            )
+
+        with self.assertRaisesRegex(Upstream, "valid requested storage body"):
+            await self.make_api(handler).get_page_content("55", expected_username="sample-user")
+
     async def test_page_children_map_attachment_identity_and_comment_source_fields(self) -> None:
         observed: list[httpx.Request] = []
 

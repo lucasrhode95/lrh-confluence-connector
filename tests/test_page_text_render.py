@@ -229,6 +229,39 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertEqual(len(page_references), 1)
         self.assertEqual(page_references[0].page_id, "123")
 
+    def test_page_resource_anchor_keeps_its_label_and_page_reference(self) -> None:
+        rendered = render_page_body(
+            '<p><a data-linked-resource-id="123" data-linked-resource-type="page" '
+            'href="/spaces/SYNTH/pages/Target">Target page</a></p>',
+            "",
+            page_id="55",
+            base_url="https://confluence.example.test/wiki",
+            attachments=[],
+        )
+
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["[Target page](/wiki/spaces/SYNTH/pages/Target)"],
+        )
+        self.assertEqual(
+            [(reference.kind, reference.page_id) for reference in rendered.references],
+            [("page", "123")],
+        )
+
+    def test_expand_macro_groups_direct_inline_children(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="expand">Hello <strong>world</strong>!'
+            "<p>Next paragraph.</p></div>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["[Expand: untitled]", "Hello **world**!", "Next paragraph."],
+        )
+
     def test_unmatched_html_macro_does_not_claim_matching_visible_text(self) -> None:
         rendered = render_page_body(
             "<p>Unique HTML output.</p><p>Following paragraph.</p>",

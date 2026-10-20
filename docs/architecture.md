@@ -145,15 +145,18 @@ historical metadata reads are not implemented. Results identify truncation or pe
 `get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
 the shared transport caps all requests at six in flight. `body.view` supplies resolved text, while
 `body.storage` supplies Jira, PlantUML, HTML-macro and ordered reference metadata. The storage parser
-preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. Text
-output keeps headings, ordered-list numbering from `start` and `value`, unordered lists, code, panels,
-status, expand blocks, links and pipe tables; panel children are rendered as blocks before quoting so
+preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. When
+storage expansion is requested, the adapter requires a string `body.storage.value`; a missing or
+malformed requested value is an upstream error. Text output keeps headings, ordered-list numbering from
+`start` and `value`, unordered lists, code, panels, status, expand blocks, links and pipe tables; expand
+and panel content keep inline runs together and split around block children, with panel children quoted so
 paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
 indent continuation lines, including nested-list indentation through whitespace cleanup. Pipe-table
 rows remain separate budget blocks and use single newlines to preserve Markdown table syntax. Complex
 table fallbacks emit one minimal-HTML block per outer row, preserving block boundaries in cells and
 image, macro and link markers with their typed references. Attachment and image identity is mapped from
-source fields before markers are rendered.
+source fields before markers are rendered. Page-typed linked-resource anchors bypass attachment mapping;
+their source page IDs and visible labels are retained by the link mapper.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
 Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit

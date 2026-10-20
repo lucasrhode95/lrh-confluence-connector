@@ -287,7 +287,7 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
         return [_block(f"[Status: {value}]" if value else "[Status]", (*refs, *child_refs))]
     if name == "expand":
         title = macro.parameters.get("title", "") if macro is not None else ""
-        children = [block for child in node.children for block in _render_blocks(child, context)]
+        children = _render_container_content(node.children, context)
         marker = _block(f"[Expand: {title or 'untitled'}]", refs)
         return [marker, *children]
     if name == "code":
@@ -592,14 +592,26 @@ def _inline(
             parts.append("<br>" if cell_mode else "\n")
             continue
         if tag == "a":
-            attachment_id = value.attrs.get("data-linked-resource-id") or value.attrs.get("data-attachment-id")
-            if attachment_id:
+            linked_resource_id = value.attrs.get("data-linked-resource-id")
+            explicit_attachment_id = value.attrs.get("data-attachment-id")
+            attachment_id = explicit_attachment_id or linked_resource_id
+            resource_type = (value.attrs.get("data-linked-resource-type") or "").casefold()
+            attachment = context.attachments_by_id.get(attachment_id or "")
+            is_attachment = (
+                attachment_id is not None
+                and resource_type != "page"
+                and (
+                    explicit_attachment_id is not None
+                    or resource_type == "attachment"
+                    or attachment is not None
+                )
+            )
+            if is_attachment:
                 filename = (
                     value.attrs.get("data-linked-resource-default-alias")
                     or value.attrs.get("data-linked-resource-filename")
                     or "unknown"
                 )
-                attachment = context.attachments_by_id.get(attachment_id)
                 if attachment is not None:
                     filename = attachment.filename
                 parts.append(f"[File: {filename}]")
@@ -806,6 +818,8 @@ def _link_reference(node: _Node, page_id: str, base_url: str | None) -> PageRefe
     if href and normalized_href is None:
         return None
     target = node.attrs.get("data-content-id") or node.attrs.get("data-page-id")
+    if target is None and (node.attrs.get("data-linked-resource-type") or "").casefold() == "page":
+        target = node.attrs.get("data-linked-resource-id")
     if target is None:
         parsed_href = urlsplit(href)
         match = _PAGE_PATH.search(parsed_href.path)

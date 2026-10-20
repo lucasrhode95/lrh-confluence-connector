@@ -252,7 +252,12 @@ class ConfluenceApi:
         payload = await self._transport.get_json(
             self._content_route(page_id), params=params, expected_username=expected_username
         )
-        return _page_content(payload, base_url=str(self._settings["base_url"]), requested_version=version)
+        return _page_content(
+            payload,
+            base_url=str(self._settings["base_url"]),
+            requested_version=version,
+            include_storage=include_storage,
+        )
 
     async def list_page_attachments(
         self, page_id: str, *, expected_username: str
@@ -614,9 +619,13 @@ def _page_version(value: Any) -> PageVersion:
 
 
 def _page_content(
-    payload: dict[str, Any], *, base_url: str, requested_version: int | None
+    payload: dict[str, Any],
+    *,
+    base_url: str,
+    requested_version: int | None,
+    include_storage: bool,
 ) -> RemotePageContent:
-    """Map expanded page source fields before any body rendering takes place."""
+    """Map requested page expansions before body rendering; ``include_storage`` mirrors the request."""
     metadata = _page_metadata(payload, base_url=base_url)
     version = metadata.version
     if requested_version is not None and version is None:
@@ -633,8 +642,14 @@ def _page_content(
     storage = storage if isinstance(storage, dict) else {}
     view_value = view.get("value")
     storage_value = storage.get("value")
-    if not isinstance(view_value, str) or (storage_value is not None and not isinstance(storage_value, str)):
-        raise Upstream("Confluence returned page content without an expanded view or a valid storage body.")
+    if (
+        not isinstance(view_value, str)
+        or (include_storage and not isinstance(storage_value, str))
+        or (storage_value is not None and not isinstance(storage_value, str))
+    ):
+        raise Upstream(
+            "Confluence returned page content without an expanded view or a valid requested storage body."
+        )
     history = payload.get("history")
     history = history if isinstance(history, dict) else {}
     total_versions = _optional_nonnegative_int(
