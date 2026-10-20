@@ -1,4 +1,4 @@
-"""MCP tools: thin, read-only wrappers over Confluence services."""
+"""MCP tools: thin wrappers over Confluence read operations and local-file outputs."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
+    AttachmentDownloadResult,
+    PageExportResult,
     PageParseScope,
     PageTextFormat,
     SearchFields,
@@ -27,6 +29,9 @@ log = logging.getLogger(__name__)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+LOCAL_FILE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\
@@ -55,6 +60,12 @@ drafts, comments and attachment references; links to other products remain links
   typed attachment references and, by default, attachment and threaded comment sections; they never
   download attachment content. Use the returned cursor alone to continue an oversized page at its
   original version. Page-read timestamps remain the UTC values returned by REST.
+- download_attachments saves selected attachment IDs from one page into the local downloads folder.
+  Attachment IDs come from get_pages references or the page's attachment list; the tool verifies each
+  ID belongs to the selected page and returns a path or per-attachment failure.
+- export_pages writes full text or rich exports for up to 500 pages into the local exports folder.
+  Attachment bytes are excluded by default; large exports may take minutes and incomplete items are
+  listed in the ZIP report.
 - Authenticate or remove the local token with `confluence-connector auth` or
   `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
 - Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
@@ -186,6 +197,43 @@ def build_server(context: AppContext) -> FastMCP:
             max_chars=max_chars,
             parse_scope=parse_scope,
             cursor=cursor,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=LOCAL_FILE)
+    @_logged
+    async def download_attachments(page: str, attachment_ids: list[str]) -> dict[str, Any]:
+        """Save selected attachment IDs from one page into the local downloads folder.
+
+        Pass page as a numeric ID or same-instance URL, and attachment_ids from a typed reference or
+        the page's attachment list. The tool verifies ownership on that page. Up to 500 IDs may be
+        selected; successful files return local paths and failures are listed per attachment.
+        """
+        services = await context.services()
+        result: AttachmentDownloadResult = await services.attachments.download_attachments(page, attachment_ids)
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=LOCAL_FILE)
+    @_logged
+    async def export_pages(
+        pages: list[str] | str,
+        format: PageTextFormat | None = None,
+        parse_scope: PageParseScope | None = None,
+        include_attachments: bool = False,
+    ) -> dict[str, Any]:
+        """Export up to 500 pages in full as a local file or ZIP archive.
+
+        Text is the default; rich includes unchanged storage markup and selected comments at the end.
+        The provenance header is always included. Attachment bytes are excluded unless
+        include_attachments is true. Page and attachment failures appear in _export-report.txt.
+        Large exports may take minutes.
+        """
+        services = await context.services()
+        result: PageExportResult = await services.exports.export_pages(
+            pages,
+            format=format,
+            parse_scope=parse_scope,
+            include_attachments=include_attachments,
         )
         return result.model_dump(mode="json")
 

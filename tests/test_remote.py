@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import unittest
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from io import BytesIO
 from unittest.mock import AsyncMock
 
 import httpx
@@ -17,11 +18,24 @@ from confluence_connector.domain.errors import (
     UncertainWrite,
     Upstream,
 )
+from confluence_connector.domain.models import PageAttachment
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
 from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
+
+
+class _PartialReadTimeout(httpx.AsyncByteStream):
+    def __init__(self, request: httpx.Request) -> None:
+        self._request = request
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b"partial"
+        raise httpx.ReadTimeout("synthetic stream timeout", request=self._request)
+
+    async def aclose(self) -> None:
+        return None
 
 
 class RemoteChecks(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +53,76 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         transport = ConfluenceTransport(settings(), credentials or FakeCredentialSource(), client=client, sleep=sleep or AsyncMock())
         self.addAsyncCleanup(client.aclose)
         return client, transport
+
+    async def test_attachment_download_streams_binary_and_keeps_source_query(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(200, content=b"binary\x00attachment", headers={"content-type": "application/octet-stream"})
+
+        _, transport = self.make_client(handler)
+        api = ConfluenceApi(settings(), transport)
+        attachment = PageAttachment(
+            attachment_id="att-7",
+            filename="guide.bin",
+            download_url=(
+                "https://confluence.example.test/wiki/download/attachments/55/guide.bin"
+                "?version=2&api=v2"
+            ),
+        )
+        destination = BytesIO()
+        content_type, size = await api.download_attachment(
+            attachment,
+            destination,
+            expected_username="sample-user",
+        )
+        self.assertEqual(destination.getvalue(), b"binary\x00attachment")
+        self.assertEqual((content_type, size), ("application/octet-stream", 17))
+        self.assertEqual(str(observed[0].url), "https://confluence.example.test/wiki/download/attachments/55/guide.bin?version=2&api=v2")
+        self.assertEqual(observed[0].headers["Authorization"], "Bearer synthetic-pat")
+
+    async def test_attachment_download_rejects_an_external_source_link(self) -> None:
+        attempts = 0
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return httpx.Response(200, content=b"unexpected")
+
+        _, transport = self.make_client(handler)
+        api = ConfluenceApi(settings(), transport)
+        attachment = PageAttachment(
+            attachment_id="att-7",
+            filename="guide.bin",
+            download_url="https://outside.example.test/download/guide.bin",
+        )
+        with self.assertRaisesRegex(Upstream, "unsafe attachment download link"):
+            await api.download_attachment(attachment, BytesIO(), expected_username="sample-user")
+        self.assertEqual(attempts, 0)
+
+    async def test_attachment_download_retries_read_timeout_without_partial_bytes(self) -> None:
+        attempts = 0
+        sleep = AsyncMock()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return httpx.Response(200, stream=_PartialReadTimeout(request))
+            return httpx.Response(200, content=b"complete")
+
+        _, transport = self.make_client(handler, sleep=sleep)
+        destination = BytesIO()
+        content_type, size = await transport.download_to(
+            "download/attachments/55/guide.bin",
+            destination,
+            expected_username="sample-user",
+        )
+        self.assertEqual(destination.getvalue(), b"complete")
+        self.assertEqual((content_type, size), (None, 8))
+        self.assertEqual(attempts, 2)
+        sleep.assert_awaited_once()
 
     async def test_read_retries_connection_reset_then_succeeds(self) -> None:
         attempts = 0
