@@ -13,11 +13,13 @@ from confluence_connector.domain.errors import (
     Conflict,
     ConnectorError,
     InvalidRequest,
+    UncertainWrite,
     Upstream,
 )
 from confluence_connector.domain.models import (
     DraftDeletionResult,
     DraftListResult,
+    LabelChangeCompensation,
     LabelChangeFailure,
     LabelChangeResult,
     PageMetadata,
@@ -312,6 +314,7 @@ class PageWrites:
             else:
                 operations.append(("remove", label))
         result = LabelChangeResult(page_id=metadata.page_id, unchanged=unchanged)
+        completed: list[tuple[str, str]] = []
         for index, (action, label) in enumerate(operations):
             try:
                 if action == "add":
@@ -324,6 +327,7 @@ class PageWrites:
                         metadata.page_id, label, expected_username=self._username
                     )
                     result.removed.append(label)
+                completed.append((action, label))
             except ConnectorError as exc:
                 result.failures.append(
                     LabelChangeFailure(action=action, label=label, error=f"{type(exc).__name__}: {exc}")
@@ -336,8 +340,43 @@ class PageWrites:
                     )
                     for next_action, next_label in operations[index + 1 :]
                 )
+                if _safe_to_compensate(exc):
+                    await self._compensate_labels(metadata.page_id, completed, result)
                 break
         return result
+
+    async def _compensate_labels(
+        self,
+        page_id: str,
+        completed: list[tuple[str, str]],
+        result: LabelChangeResult,
+    ) -> None:
+        """Undo confirmed label changes in reverse order when the failure outcome is known."""
+        for action, label in reversed(completed):
+            inverse = "remove" if action == "add" else "add"
+            try:
+                if inverse == "add":
+                    await self._api.add_page_label(
+                        page_id, label, expected_username=self._username
+                    )
+                else:
+                    await self._api.remove_page_label(
+                        page_id, label, expected_username=self._username
+                    )
+            except ConnectorError as exc:
+                result.rollback_failures.append(
+                    LabelChangeFailure(
+                        action=inverse,
+                        label=label,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+                if not _safe_to_compensate(exc):
+                    break
+            else:
+                changed = result.added if action == "add" else result.removed
+                changed.remove(label)
+                result.compensated.append(LabelChangeCompensation(action=action, label=label))
 
     async def _create_placement(
         self,
@@ -550,3 +589,8 @@ def _require_current_page(metadata: PageMetadata) -> None:
 def _raise_account_error(error: ConnectorError) -> None:
     if isinstance(error, (AccountMismatch, AuthenticationRequired)):
         raise error
+
+
+def _safe_to_compensate(error: ConnectorError) -> bool:
+    """Avoid inverse writes when auth changed or the failed operation may have applied."""
+    return not isinstance(error, (AccountMismatch, AuthenticationRequired, UncertainWrite))

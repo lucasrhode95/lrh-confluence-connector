@@ -110,6 +110,7 @@ in the personal space, including a rich-text sample page.
   should include hidden draft titles, and whether the 2,000,000-character body cap and draft-page
   bounds fit expected use. Verify application-level move failures appear as placement warnings, and
   account changes during multi-step writes preserve confirmed partial results without further writes.
+  Verify reverse compensation after definitive label failures and no compensation after uncertain outcomes.
 
 ### Other live checks
 

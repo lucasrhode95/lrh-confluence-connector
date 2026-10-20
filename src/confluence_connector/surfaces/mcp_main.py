@@ -46,6 +46,9 @@ REPLACE_PAGE = ToolAnnotations(
 PERMANENT_DELETE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
 )
+LABEL_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
 
 INSTRUCTIONS = """\
 Confluence Data Center access for the signed-in local account. Confluence owns its pages, spaces,
@@ -354,17 +357,18 @@ def build_server(context: AppContext) -> FastMCP:
         result: DraftDeletionResult = await services.writes.delete_draft(draft)
         return result.model_dump(mode="json")
 
-    @mcp.tool(annotations=WRITE)
+    @mcp.tool(annotations=LABEL_WRITE)
     @_logged
     async def set_labels(
         page: str,
         add: list[str] | None = None,
         remove: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Add or remove global labels on one published page.
+        """Add or remove global labels on one published page; removals are destructive.
 
-        If a later change fails, the result lists completed changes, the failed label and any
-        changes not attempted.
+        If a later change fails definitively, confirmed changes are compensated in reverse order when
+        safe. The result lists final changes, compensations, rollback failures, and unattempted labels.
+        Uncertain outcomes or account changes stop further writes without compensation.
         """
         services = await context.services()
         result: LabelChangeResult = await services.writes.set_labels(

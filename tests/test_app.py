@@ -273,6 +273,9 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
             annotations = tools_by_name[name].annotations
             self.assertIsNotNone(annotations)
             self.assertFalse(annotations.readOnlyHint)
+        label_annotations = tools_by_name["set_labels"].annotations
+        self.assertIsNotNone(label_annotations)
+        self.assertTrue(label_annotations.destructiveHint)
         await context.aclose()
 
     async def test_search_tool_runs_through_the_account_bound_mcp_service(self) -> None:

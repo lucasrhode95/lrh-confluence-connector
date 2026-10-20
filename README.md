@@ -49,7 +49,9 @@ acceptance remain open in the [requirements](docs/requirements.md) and [roadmap]
 - `list_drafts` lists the signed-in user's new-page drafts with continuation cursors.
 - `publish_draft` publishes a new-page draft without changing its page ID.
 - `delete_draft` permanently deletes a new-page draft and bypasses the trash.
-- `set_labels` adds/removes global labels and reports partial results if one change fails.
+- `set_labels` adds/removes global labels, compensates confirmed changes in reverse order after a
+  definitive failure, and reports partial results or failed reversals. It does not compensate an
+  uncertain outcome or account change.
 
 Page writes change Confluence content. Live acceptance uses disposable synthetic pages and remains
 manual; no write probes run as routine checks.

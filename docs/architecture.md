@@ -34,7 +34,7 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
 | `list_drafts` | List the signed-in user's new-page drafts with bounded paging and cursors |
 | `publish_draft` | Publish a new-page draft under the same page ID |
 | `delete_draft` | Permanently delete a new-page draft, bypassing the trash |
-| `set_labels` | Add or remove global labels with explicit partial-failure results |
+| `set_labels` | Add or remove global labels with reverse compensation and explicit partial-failure results |
 
 ## 2. Modules and boundaries
 
@@ -53,7 +53,8 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
   downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
   page-write and label routes; quick navigation, user lookup, ordered children, page bodies,
-  attachments, comments and history mapping. The legacy move action is isolated here.
+  attachments, comments and history mapping. The legacy move action is isolated here and reports
+  application-level errors returned in successful HTTP responses.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
@@ -69,7 +70,7 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
 - `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
-- `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors and partial results.
+- `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors, partial results and safe label compensation.
 - `src/confluence_connector/service/write_markup.py`: text escaping, safe rich-body conversions, active-content refusal and source-reference loss detection.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
@@ -228,8 +229,10 @@ the result reports truncation if drafts remain. Publishing verifies a new-page
 draft and sends its complete storage body, space and parent with version 1, retaining the ID.
 `delete_draft` verifies draft status before using `DELETE ?status=draft`; this is permanent and
 bypasses the trash. `set_labels` reads the current labels, skips already-satisfied changes, and
-sends one request per change. It stops on the first failure and returns completed, failed and
-unattempted labels.
+sends one request per change. On a definitive failure, confirmed changes are reversed in reverse
+order. Successful reversals move into `compensated`; changes still applied remain in `added` or
+`removed`, and failed reversals appear in `rollback_failures`. Uncertain write outcomes and account
+changes stop compensation so the service never issues an inverse write against an unknown state.
 
 `export_pages` validates up to 500 references before any request, then reads two full pages at a time;
 the transport still caps total in-flight HTTP requests at six. It resolves each requested version and

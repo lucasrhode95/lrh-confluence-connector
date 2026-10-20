@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from confluence_connector.domain.errors import AccountMismatch, Conflict, InvalidRequest, NotFound, Upstream
+from confluence_connector.domain.errors import (
+    AccountMismatch,
+    Conflict,
+    InvalidRequest,
+    NotFound,
+    UncertainWrite,
+    Upstream,
+)
 from confluence_connector.domain.models import (
     ContentSearchHit,
     PageMetadata,
@@ -225,24 +232,69 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
 
     async def test_set_labels_reports_completed_failed_and_unattempted_operations(self) -> None:
         self.api.pages["55"].metadata.labels = ["old", "another"]
-        self.api.label_remove_error = Upstream("synthetic failure")
+        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
 
         result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
 
-        self.assertEqual(result.added, ["new"])
+        self.assertEqual(result.added, [])
         self.assertEqual(result.removed, [])
         self.assertEqual(result.failures[0].label, "old")
         self.assertEqual(result.not_attempted[0].label, "another")
+        self.assertEqual([(item.action, item.label) for item in result.compensated], [("add", "new")])
+        self.assertEqual(result.rollback_failures, [])
+        self.assertEqual(self.api.label_calls[-1], ("remove", "55", "new"))
+
+    async def test_label_compensation_runs_in_reverse_order(self) -> None:
+        self.api.pages["55"].metadata.labels = ["old"]
+        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
+
+        result = await self.service.set_labels(
+            "55", add=["new", "another"], remove=["old"]
+        )
+
+        self.assertEqual(result.added, [])
+        self.assertEqual([item.label for item in result.compensated], ["another", "new"])
+        self.assertEqual(
+            self.api.label_calls[-2:],
+            [("remove", "55", "another"), ("remove", "55", "new")],
+        )
+
+    async def test_failed_label_compensation_keeps_the_applied_change_visible(self) -> None:
+        self.api.pages["55"].metadata.labels = ["old"]
+        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
+        self.api.label_errors[("remove", "new")] = Upstream("synthetic rollback failure")
+
+        result = await self.service.set_labels("55", add=["new"], remove=["old"])
+
+        self.assertEqual(result.added, ["new"])
+        self.assertEqual(result.compensated, [])
+        self.assertEqual(
+            [(item.action, item.label) for item in result.rollback_failures],
+            [("remove", "new")],
+        )
 
     async def test_account_change_during_label_updates_preserves_partial_result(self) -> None:
         self.api.pages["55"].metadata.labels = ["old", "another"]
-        self.api.label_remove_error = AccountMismatch("The active account changed.")
+        self.api.label_errors[("remove", "old")] = AccountMismatch("The active account changed.")
 
         result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
 
         self.assertEqual(result.added, ["new"])
         self.assertEqual(result.failures[0].label, "old")
         self.assertEqual(result.not_attempted[0].label, "another")
+        self.assertEqual(result.compensated, [])
+        self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
+
+    async def test_uncertain_label_failure_does_not_attempt_compensation(self) -> None:
+        self.api.pages["55"].metadata.labels = ["old"]
+        self.api.label_errors[("remove", "old")] = UncertainWrite("Synthetic uncertain outcome.")
+
+        result = await self.service.set_labels("55", add=["new"], remove=["old"])
+
+        self.assertEqual(result.added, ["new"])
+        self.assertEqual(result.compensated, [])
+        self.assertEqual(result.rollback_failures, [])
+        self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
 
     async def test_set_labels_skips_noops_and_rejects_overlap(self) -> None:
         result = await self.service.set_labels("55", add=["old"], remove=["missing"])
@@ -325,7 +377,7 @@ class _WriteApi:
         self.position_calls: list[tuple[str, str, str, str]] = []
         self.position_error: Exception | None = None
         self.label_calls: list[tuple[str, str, str]] = []
-        self.label_remove_error: Exception | None = None
+        self.label_errors: dict[tuple[str, str], Exception] = {}
         self.draft_calls: list[tuple[str | None, int, int]] = []
         self.draft_rows = [
             DraftSummary(page_id="301", title="Draft 301", space_key="SYNTH"),
@@ -410,11 +462,13 @@ class _WriteApi:
 
     async def add_page_label(self, page_id: str, label: str, *, expected_username: str) -> None:
         self.label_calls.append(("add", page_id, label))
+        if error := self.label_errors.get(("add", label)):
+            raise error
 
     async def remove_page_label(self, page_id: str, label: str, *, expected_username: str) -> None:
         self.label_calls.append(("remove", page_id, label))
-        if self.label_remove_error is not None:
-            raise self.label_remove_error
+        if error := self.label_errors.get(("remove", label)):
+            raise error
 
 
 if __name__ == "__main__":
