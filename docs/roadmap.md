@@ -97,17 +97,25 @@ minor.
   ([research §4.2](api-research.md#42-terms-and-punctuation)).
 - **Fix:** quote terms with inner punctuation in `match: "all"` and `"any"`
   ([`service/search.py`](../src/confluence_connector/service/search.py)).
+- **Implemented — awaiting review (2026-10-20):** Wrapped inner-punctuation terms in text-query
+  quotes for `all` and `any`, retaining separate Lucene and CQL escaping. Tests cover both modes and
+  metacharacters; the existing title normalization contract is unchanged.
 
 #### External links can take an attachment's identity (P2)
 
-- **Seen:** a page links `https://files.example.org/report.pdf`, and the page also has an attachment
+- **Seen:** a page links `https://files.example.org/download/attachments/100/report.pdf`, and the page also has an attachment
   `report.pdf`; `get_pages` returns a `[File: report.pdf]` reference carrying the local attachment ID.
-- **Expected:** the external link stays a link; only links to the page's own attachments become
-  attachment references.
+- **Expected:** the external link stays a link. Attachment identities and owner pages come from
+  verified source metadata, including references to attachments of other pages.
 - **Cause:** attachment classification and filename matching run before the link's origin is
   checked; attachments of included pages are ambiguous the same way.
 - **Fix:** validate origin and owner page first
   ([`service/page_text.py`](../src/confluence_connector/service/page_text.py)).
+- **Implemented — awaiting review (2026-10-20):** Checked instance origin before attachment
+  classification. Local filename lookup requires the source owner to be the current page and cannot
+  override an explicit attachment ID. Included content does not inherit local ownership; source
+  container IDs and download paths retain foreign owners and URLs. Synthetic tests use colliding
+  filenames across hosts/pages.
 
 #### Page text loses identity in four edge cases (P2)
 
@@ -125,6 +133,11 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Fence-like code lines.** Seen: a code line starting with ```` ``` ```` or `~~~` splits one code block
   into two budget blocks. Fix: split blocks on the parsed structure, not on fence text.
   [Thread](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881330).
+- **Implemented — awaiting review (2026-10-20):** Preserved rendered Jira text when no storage key
+  exists; read image filename and page-ID attributes. Code fences are sized from parsed code
+  contents, and budget splitting recognizes matching delimiters rather than toggling on any
+  fence-like line. Golden output and focused regressions cover these cases, including embedded
+  backticks and tildes.
 
 #### Calibration measures an edit as an offset (P2)
 

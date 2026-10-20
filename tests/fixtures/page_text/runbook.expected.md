@@ -49,7 +49,7 @@ Alice -> Bob : deploy
 
 Page the on-call engineer.
 
-[Unrendered macro: jira]
+Unable to render Jira issues macro, execution error.
 
 Diagram: [Image: flow.png — release flow]
 
