@@ -174,9 +174,10 @@ def build_server(context: AppContext) -> FastMCP:
 
         Text is the default. Rich returns storage body markup unchanged. The default parse_scope
         includes header, storage macro identities, attachment lists and threaded comments. max_chars
-        defaults to 40000 and is capped at 400000. Whole pages are packed first; an oversized first
-        page is returned at block boundaries with a version-pinned cursor. Pass only that cursor to
-        continue. Attachments are listed, never downloaded.
+        defaults to 40000 and is capped at 400000. Comment bodies share the block budget, including
+        in rich format, and structured comment records accompany selected blocks only. Whole pages
+        are packed first; an oversized first page is returned at block boundaries with a version-pinned
+        cursor. Pass only that cursor to continue. Attachments are listed, never downloaded.
         """
         services = await context.services()
         result = await services.pages.get_pages(

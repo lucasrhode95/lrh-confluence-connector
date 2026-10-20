@@ -133,6 +133,18 @@ class PageTextRenderingChecks(unittest.TestCase):
         page_ids = {reference.page_id for reference in rendered.references if reference.kind == "page"}
         self.assertEqual(page_ids, {"91"})
 
+    def test_context_relative_page_links_keep_the_configured_context_path(self) -> None:
+        rendered = render_page_body(
+            '<p><a href="/spaces/SYNTH/pages/84/Target?source=body#details">Target</a></p>',
+            "",
+            page_id="55",
+            base_url="https://confluence.example.test/wiki",
+            attachments=[],
+        )
+        target = "/wiki/spaces/SYNTH/pages/84/Target?source=body#details"
+        self.assertEqual(rendered.blocks[0].text, f"[Target]({target})")
+        self.assertEqual(rendered.references[0].url, target)
+
     def test_unmatched_html_macro_does_not_claim_matching_visible_text(self) -> None:
         rendered = render_page_body(
             "<p>Unique HTML output.</p><p>Following paragraph.</p>",
@@ -171,21 +183,18 @@ class PageTextRenderingChecks(unittest.TestCase):
 
     def test_nested_macro_fields_stay_with_their_source_macro(self) -> None:
         rendered = render_page_body(
-            '<div data-macro-name="include"><div data-macro-name="include"></div></div>',
-            '<ac:structured-macro ac:name="include"><ri:page ri:content-id="91" '
-            'ri:content-title="Outer page"/><ac:rich-text-body><ac:structured-macro '
-            'ac:name="include"><ri:page ri:content-id="92" ri:content-title="Nested page"/>'
-            '</ac:structured-macro></ac:rich-text-body></ac:structured-macro>',
+            '<div data-macro-name="panel">Panel text '
+            '<span data-macro-name="status">Approved</span></div>',
+            '<ac:structured-macro ac:name="panel"><ac:parameter ac:name="title">Deployment</ac:parameter>'
+            '<ac:rich-text-body><p>Panel text</p><ac:structured-macro ac:name="status">'
+            '<ac:parameter ac:name="title">Approved</ac:parameter></ac:structured-macro>'
+            '</ac:rich-text-body></ac:structured-macro>',
             page_id="55",
             attachments=[],
         )
         self.assertEqual(
             [block.text for block in rendered.blocks],
-            ["[Included from: Outer page]", "[Included from: Nested page]"],
-        )
-        self.assertEqual(
-            [block.references[0].page_id for block in rendered.blocks],
-            ["91", "92"],
+            ["> [Deployment] Panel text [Status: Approved]"],
         )
 
     def test_ordered_lists_honor_start_and_item_value_attributes(self) -> None:
@@ -200,6 +209,35 @@ class PageTextRenderingChecks(unittest.TestCase):
             [block.text for block in rendered.blocks],
             ["4. Fourth", "9. Ninth", "10. Tenth", "-2. Negative"],
         )
+
+    def test_macros_inside_resolved_includes_do_not_consume_local_metadata(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="include"><div data-macro-name="jira">Included issue</div></div>'
+            '<div data-macro-name="jira">Local issue</div>',
+            '<ac:structured-macro ac:name="include"><ri:page ri:content-id="91" '
+            'ri:content-title="Shared"/></ac:structured-macro><ac:structured-macro ac:name="jira">'
+            '<ac:parameter ac:name="key">OPS-9</ac:parameter></ac:structured-macro>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["[Included from: Shared]", "Included issue", "[Jira: OPS-9]"],
+        )
+        self.assertEqual(rendered.blocks[-1].references[0].key, "OPS-9")
+
+    def test_explicit_line_breaks_survive_rendering_and_comment_conversion(self) -> None:
+        rendered = render_page_body(
+            "<p>First<br>Second</p><div data-macro-name='panel'>Top<br>Bottom</div>",
+            '<ac:structured-macro ac:name="panel"/>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["First\nSecond", "> [Panel] Top\n> Bottom"],
+        )
+        self.assertEqual(html_to_text("<p>First<br>Second</p>"), "First\nSecond")
 
     def test_storage_blocks_preserve_source_markup_for_rich_continuation(self) -> None:
         source = '<p data-x="1">A &amp; B</p>\n<ac:structured-macro ac:name="code"/><p>C</p>'

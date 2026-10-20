@@ -110,6 +110,51 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("new current content", second.pages[0].text)
         self.assertEqual(api.content_calls[-1], ("55", 7))
 
+    async def test_structured_comments_follow_the_selected_text_blocks(self) -> None:
+        api = _ReadApi(
+            pages={"55": _page("55", 1, "<p>Body</p>", "")},
+            comments={
+                "55": [RemotePageComment(comment_id="comment-1", body_view="<p>Long comment body</p>")]
+            },
+        )
+        first = await _service(api).get_pages(
+            "55",
+            max_chars=4,
+            parse_scope={"header": False, "attachments": False},
+        )
+        self.assertEqual(first.pages[0].text, "Body")
+        self.assertEqual(first.pages[0].comments, [])
+        self.assertIsNotNone(first.next_cursor)
+
+        second = await _service(api).get_pages(cursor=first.next_cursor)
+        self.assertEqual(second.pages[0].text, "## Comments")
+        self.assertEqual(second.pages[0].comments, [])
+        self.assertIsNotNone(second.next_cursor)
+
+        third = await _service(api).get_pages(cursor=second.next_cursor)
+        self.assertEqual(len(third.pages[0].comments), 1)
+        self.assertEqual(third.pages[0].comments[0].body, "Long comment body")
+
+    async def test_rich_cursor_budgets_comments_without_changing_storage_text(self) -> None:
+        storage = "<p>Stored</p>"
+        api = _ReadApi(
+            pages={"55": _page("55", 1, "<p>view</p>", storage)},
+            comments={"55": [RemotePageComment(comment_id="comment-1", body_view="<p>Comment</p>")]},
+        )
+        first = await _service(api).get_pages(
+            "55",
+            format="rich",
+            max_chars=len(storage),
+            parse_scope={"header": False, "attachments": False},
+        )
+        self.assertEqual(first.pages[0].text, storage)
+        self.assertEqual(first.pages[0].comments, [])
+        self.assertIsNotNone(first.next_cursor)
+
+        second = await _service(api).get_pages(cursor=first.next_cursor)
+        self.assertEqual(second.pages[0].text, "")
+        self.assertEqual(second.pages[0].comments[0].body, "Comment")
+
     async def test_whole_pages_fit_before_remaining_pages_are_reported(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>first</p>", ""), "56": _page("56", 1, "<p>second</p>", "")}

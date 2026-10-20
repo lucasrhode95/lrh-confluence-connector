@@ -150,10 +150,14 @@ expand blocks, links and pipe tables; complex table cells use minimal HTML. Atta
 identity is mapped from source fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
+Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
+HTML line breaks remain line breaks. Comment bodies share the page budget in both formats, while rich
+page text stays unchanged and structured comments accompany only selected comment blocks.
 Comments are converted from their own `view` bodies and threaded by source ancestry. Typed references
 remain alongside text so agents do not have to parse markers. A `rich` read returns the storage body
-verbatim. Both formats use block-boundary budgets; cursors carry page ID, version and block offset and
-re-read the historical version when the current page has changed. Attachments and comments are read
+verbatim. Both formats use block-boundary budgets. Cursors carry page ID, version and block offset and
+re-read the historical version when the current page has changed. Local root-relative links are
+normalized to the configured context path before they are emitted. Attachments and comments are read
 again on continuation, so those live sections can change while the page body remains pinned.
 
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,

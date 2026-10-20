@@ -107,6 +107,8 @@ source-provided descriptions. Markers let an agent request a particular attachme
   blocks (`> [Info] …`), `[Expand: title]`, `[Status: text]`, `@Display Name`, and links with page IDs
   kept in the references. Tables of contents and generated heading numbering are dropped.
 - Ordered lists preserve their source `start` and item `value` numbers.
+- Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
+- Local root-relative page links include the configured Confluence context path in text and references.
 - Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, list items become `• item`,
   and images and macros in cells use their normal markers. Merged cells repeat their value into each
   covered cell, with a `[Table: merged cells repeated]` note. Only tables with nested tables or code
@@ -163,6 +165,9 @@ attachment deduplication is not required.
 - A page larger than the budget is cut at a block boundary (paragraph, list item, table row). Its
   cursor carries page ID, version and offset; continuation reads that same version, through a
   historical read if the page changed. Nothing is kept in process memory between calls.
+- Comment blocks use the same character budget in text and rich reads. Rich page text remains the
+  unchanged storage body; structured comment records appear only when their block is selected, so
+  full comment bodies are not repeated on earlier pages or continuations.
 - The parse scope is an object. Defaults: `comments` (footer and inline, resolved included),
   `attachments` (list only), `macros_from_storage` and `header`, all on.
 - Pages in one call are fetched with bounded concurrency (6, per the transport defaults).

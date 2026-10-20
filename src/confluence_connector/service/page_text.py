@@ -14,6 +14,7 @@ _VOID_TAGS = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 )
 _WHITESPACE = re.compile(r"[\t\r\n\f\v ]+")
+_HORIZONTAL_WHITESPACE = re.compile(r"[\t\r\f\v ]+")
 _INTEGER_ATTRIBUTE = re.compile(r"[+-]?\d+\Z")
 _PAGE_PATH = re.compile(r"/spaces/[^/]+/pages/(\d+)(?:/|$)")
 
@@ -60,6 +61,7 @@ class _RenderContext:
     macros_by_name: dict[str, list[_Macro]]
     macro_indexes: dict[str, int] = field(default_factory=dict)
     unmatched_html_macros: list[_Macro] = field(default_factory=list)
+    suppressed_macro_source_depth: int = 0
 
 
 class _TreeParser(HTMLParser):
@@ -220,8 +222,12 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
         return [_block("[Unrendered macro: html]", refs)]
     if name == "jira":
         key = macro.jira_key if macro is not None else None
-        label = f"[Jira: {key}]" if key else "[Unrendered macro: jira]"
-        return [_block(label, refs)]
+        if key:
+            return [_block(f"[Jira: {key}]", refs)]
+        text, child_refs = _inline(node.children, context)
+        if text.strip():
+            return [_block(text.strip(), child_refs)]
+        return [_block("[Unrendered macro: jira]", refs)]
     if name == "plantuml":
         source = macro.body.strip() if macro is not None else ""
         label = f"[Diagram: plantuml]\n```plantuml\n{source}\n```" if source else "[Diagram: plantuml]"
@@ -229,7 +235,11 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
     if name in {"include", "excerpt-include"}:
         title = macro.page_title if macro is not None else None
         marker = _block(f"[Included from: {title or 'unknown page'}]", refs)
-        children = [block for child in node.children for block in _render_blocks(child, context)]
+        context.suppressed_macro_source_depth += 1
+        try:
+            children = [block for child in node.children for block in _render_blocks(child, context)]
+        finally:
+            context.suppressed_macro_source_depth -= 1
         return [marker, *children]
     if name == "toc" or name in {"numberedheadings", "numbered-headings"}:
         return []
@@ -408,7 +418,8 @@ def _inline(
                 references.append(link_reference)
             href = value.attrs.get("href")
             if href and text.strip():
-                parts.append(f"[{text.strip()}]({href})")
+                target = _same_instance_href(href, context.base_url) or href
+                parts.append(f"[{text.strip()}]({target})")
             else:
                 parts.append(text)
             continue
@@ -445,7 +456,7 @@ def _inline(
             parts.append(text)
     value = "".join(parts)
     if not preserve_whitespace:
-        value = _WHITESPACE.sub(" ", value).replace(" \n", "\n").replace("\n ", "\n")
+        value = _HORIZONTAL_WHITESPACE.sub(" ", value).replace(" \n", "\n").replace("\n ", "\n")
     return value, _unique_references(references)
 
 
@@ -541,6 +552,8 @@ def _macro_reference(macro: _Macro | None, page_id: str) -> PageReference | None
 
 
 def _source_macro(name: str, context: _RenderContext) -> _Macro | None:
+    if context.suppressed_macro_source_depth:
+        return None
     values = context.macros_by_name.get(name.casefold(), [])
     index = context.macro_indexes.get(name.casefold(), 0)
     context.macro_indexes[name.casefold()] = index + 1
@@ -579,26 +592,37 @@ def _image_marker(node: _Node, context: _RenderContext) -> tuple[str, tuple[Page
 
 def _link_reference(node: _Node, page_id: str, base_url: str | None) -> PageReference | None:
     href = node.attrs.get("href") or ""
-    if href and not _same_instance_href(href, base_url):
+    normalized_href = _same_instance_href(href, base_url) if href else None
+    if href and normalized_href is None:
         return None
     target = node.attrs.get("data-content-id") or node.attrs.get("data-page-id")
     if target is None:
         match = _PAGE_PATH.search(urlsplit(href).path)
         target = match.group(1) if match else None
     if target and target.isdecimal():
-        return PageReference(kind="page", page_id=target, owner_page_id=page_id, url=href or None)
+        return PageReference(kind="page", page_id=target, owner_page_id=page_id, url=normalized_href)
     return None
 
 
-def _same_instance_href(href: str, base_url: str | None) -> bool:
-    """Accept a linked page path only under the configured Confluence origin and context path."""
+def _same_instance_href(href: str, base_url: str | None) -> str | None:
+    """Return an accepted link with the configured Confluence context path, or ``None``."""
     if base_url is None:
         parsed = urlsplit(href)
-        return not parsed.scheme and not parsed.netloc
+        return href if not parsed.scheme and not parsed.netloc else None
     base = urlsplit(base_url)
     base_path = base.path.rstrip("/")
-    if href.startswith("/") and base_path and not href.startswith(base_path + "/"):
-        target = urlunsplit((base.scheme, base.netloc, base_path + href, "", ""))
+    original = urlsplit(href)
+    if (
+        not original.scheme
+        and not original.netloc
+        and original.path.startswith("/")
+        and base_path
+        and original.path != base_path
+        and not original.path.startswith(base_path + "/")
+    ):
+        target = urlunsplit(
+            (base.scheme, base.netloc, base_path + original.path, original.query, original.fragment)
+        )
     else:
         target = urljoin(base_url.rstrip("/") + "/", href)
     linked = urlsplit(target)
@@ -609,9 +633,15 @@ def _same_instance_href(href: str, base_url: str | None) -> bool:
             and _url_port(base) == _url_port(linked)
         )
     except ValueError:
-        return False
+        return None
     in_context = not base_path or linked.path == base_path or linked.path.startswith(base_path + "/")
-    return same_origin and in_context and linked.username is None and linked.password is None
+    if not same_origin or not in_context or linked.username is not None or linked.password is not None:
+        return None
+    if href.startswith("/"):
+        return urlunsplit(("", "", linked.path, linked.query, linked.fragment))
+    if original.scheme or original.netloc:
+        return urlunsplit((linked.scheme, linked.netloc, linked.path, linked.query, linked.fragment))
+    return href
 
 
 def _url_port(parts: SplitResult) -> int:

@@ -417,7 +417,10 @@ def _page_blocks(
     header: str | None,
 ) -> list[PageTextBlock]:
     if page_format == "rich":
-        return [PageTextBlock(value) for value in storage_top_level_blocks(source.storage_body)]
+        blocks = [PageTextBlock(value) for value in storage_top_level_blocks(source.storage_body)]
+        if scope.comments:
+            blocks.extend(_comment_blocks(comments, source.metadata.page_id))
+        return blocks
     blocks: list[PageTextBlock] = []
     if header:
         blocks.append(PageTextBlock(header))
@@ -476,7 +479,20 @@ def _record(
     *,
     page_format: PageTextFormat,
 ) -> PageReadRecord:
-    text = "".join(block.text for block in blocks) if page_format == "rich" else "\n\n".join(block.text for block in blocks)
+    selected_comment_ids = {
+        reference.comment_id
+        for block in blocks
+        for reference in block.references
+        if reference.kind == "comment" and reference.comment_id is not None
+    }
+    if page_format == "rich":
+        text = "".join(
+            block.text
+            for block in blocks
+            if not any(reference.kind == "comment" for reference in block.references)
+        )
+    else:
+        text = "\n\n".join(block.text for block in blocks)
     metadata = loaded.source.metadata
     return PageReadRecord(
         page_id=metadata.page_id,
@@ -491,7 +507,7 @@ def _record(
         header=loaded.header,
         references=list(loaded.references),
         attachments=list(loaded.attachments),
-        comments=list(loaded.comments),
+        comments=[comment for comment in loaded.comments if comment.comment_id in selected_comment_ids],
         notes=list(loaded.notes),
     )
 
