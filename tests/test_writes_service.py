@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from confluence_connector.domain.errors import Conflict, InvalidRequest, NotFound, Upstream
+from confluence_connector.domain.errors import AccountMismatch, Conflict, InvalidRequest, NotFound, Upstream
 from confluence_connector.domain.models import (
     ContentSearchHit,
     PageMetadata,
@@ -79,6 +79,19 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.page_id, "700")
         self.assertIn("position was not confirmed", result.warnings[0])
         self.assertEqual(len(self.api.create_calls), 1)
+
+    async def test_account_change_during_positioning_preserves_created_page_result(self) -> None:
+        self.api.metadata["102"] = _metadata(
+            "102", title="Sibling", ancestors=[PageSummary(page_id="100", title="Parent")]
+        )
+        self.api.position_error = AccountMismatch("The active account changed.")
+
+        result = await self.service.create_page(
+            "New before", "body", format="text", parent_id="100", position="before", sibling="102"
+        )
+
+        self.assertEqual(result.page_id, "700")
+        self.assertIn("position was not confirmed", result.warnings[0])
 
     async def test_before_sibling_must_share_selected_parent_and_space(self) -> None:
         self.api.metadata["102"] = _metadata(
@@ -218,6 +231,16 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.added, ["new"])
         self.assertEqual(result.removed, [])
+        self.assertEqual(result.failures[0].label, "old")
+        self.assertEqual(result.not_attempted[0].label, "another")
+
+    async def test_account_change_during_label_updates_preserves_partial_result(self) -> None:
+        self.api.pages["55"].metadata.labels = ["old", "another"]
+        self.api.label_remove_error = AccountMismatch("The active account changed.")
+
+        result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
+
+        self.assertEqual(result.added, ["new"])
         self.assertEqual(result.failures[0].label, "old")
         self.assertEqual(result.not_attempted[0].label, "another")
 

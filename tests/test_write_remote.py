@@ -7,7 +7,7 @@ import unittest
 
 import httpx
 
-from confluence_connector.domain.errors import UncertainWrite
+from confluence_connector.domain.errors import UncertainWrite, Upstream
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.transport import ConfluenceTransport
 from tests.fakes.credential_source import FakeCredentialSource
@@ -228,6 +228,21 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.url.params["targetId"], "101")
         self.assertEqual(request.url.params["mode"], "LEGACY")
         self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
+
+    async def test_position_action_reports_application_level_failures(self) -> None:
+        for payload in (
+            {"validationErrors": ["Synthetic refusal"]},
+            {"commandDelegate": {"actionErrors": ["Synthetic refusal"]}},
+            {"errorMessage": "Synthetic refusal"},
+        ):
+            with self.subTest(payload=payload), self.assertRaisesRegex(Upstream, "rejected"):
+                await self.make_api(lambda _: httpx.Response(200, json=payload)).position_page(
+                    "700",
+                    space_key="SYNTH",
+                    position="above",
+                    target_id="101",
+                    expected_username="sample-user",
+                )
 
     async def test_success_status_with_unreadable_page_response_is_uncertain(self) -> None:
         api = self.make_api(lambda _: httpx.Response(200, text="<html>maintenance</html>"))

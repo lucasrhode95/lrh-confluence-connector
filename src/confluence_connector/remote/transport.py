@@ -264,7 +264,15 @@ class ConfluenceTransport:
             if not 200 <= response.status_code < 300 and not (allow_redirect and response.status_code in REDIRECT_STATUSES):
                 _raise_status(response.status_code, response.content, method=method)
             if token_override is None:
-                self._assert_account(expected_username)
+                try:
+                    self._assert_account(expected_username)
+                except (AccountMismatch, AuthenticationRequired):
+                    if not is_read:
+                        raise UncertainWrite(
+                            "Confluence returned a response, but local authentication changed before the write "
+                            "could be confirmed; inspect the target before retrying."
+                        ) from None
+                    raise
             return response
         raise Upstream("The Confluence request failed after the allowed attempts.")
 

@@ -19,6 +19,7 @@ from confluence_connector.domain.errors import (
     Upstream,
 )
 from confluence_connector.domain.models import PageAttachment
+from confluence_connector.auth.store import StoredCredential
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
@@ -319,6 +320,40 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(handler, credentials=credentials)
         with self.assertRaises(AuthenticationRequired):
             await transport.get_json("rest/api/user/current", expected_username="sample-user")
+
+    async def test_sign_out_after_successful_write_response_reports_uncertain_outcome(self) -> None:
+        credentials = FakeCredentialSource()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            credentials.credential = None
+            return httpx.Response(200, json={"id": "700"})
+
+        _, transport = self.make_client(handler, credentials=credentials)
+        with self.assertRaisesRegex(UncertainWrite, "inspect the target before retrying"):
+            await transport.send_json(
+                "POST",
+                "rest/api/content",
+                body={"title": "Synthetic"},
+                expected_username="sample-user",
+            )
+
+    async def test_account_switch_after_successful_write_response_reports_uncertain_outcome(self) -> None:
+        credentials = FakeCredentialSource()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            credentials.credential = StoredCredential(
+                username="sample-user-b", token="synthetic-pat-b"
+            )
+            return httpx.Response(200, json={"id": "700"})
+
+        _, transport = self.make_client(handler, credentials=credentials)
+        with self.assertRaisesRegex(UncertainWrite, "inspect the target before retrying"):
+            await transport.send_json(
+                "POST",
+                "rest/api/content",
+                body={"title": "Synthetic"},
+                expected_username="sample-user",
+            )
 
     async def test_status_mapping_and_error_detail(self) -> None:
         _, transport = self.make_client(lambda _: httpx.Response(409, json={"message": "Version conflict"}))

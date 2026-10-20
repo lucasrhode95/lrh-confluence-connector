@@ -49,7 +49,8 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
   `CrossPlatLock`.
 - `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
-  checks, plus bounded streaming downloads; it never logs request URLs or payloads.
+  checks, uncertain outcomes when account state changes after a write response, and bounded streaming
+  downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
   page-write and label routes; quick navigation, user lookup, ordered children, page bodies,
   attachments, comments and history mapping. The legacy move action is isolated here.

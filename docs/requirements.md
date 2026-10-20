@@ -333,7 +333,9 @@ logout, explain local token deletion and any need to generate a replacement when
 be recovered. Distinguish local removal from server revocation; revocation behavior remains open.
 
 Coordinate shared authentication state and output files across processes. Preserve account boundaries
-and ensure running processes respect logout/replacement before their next acquisition.
+and ensure running processes respect logout/replacement before their next acquisition. If local
+authentication changes after a write response arrives, report an uncertain write and require inspection
+before retrying; never return data across the account boundary.
 
 **Decided 2026-10-19 (D1):** store the token with `msal-extensions` encrypted persistence and its
 cross-process lock, as `lrh-m365-auth` does; no Microsoft sign-in is involved. If encryption is

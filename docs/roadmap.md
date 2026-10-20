@@ -108,7 +108,8 @@ in the personal space, including a rich-text sample page.
   behavior, inline-comment refusal, permanent draft deletion and partial label reporting. Confirm that
   first/before/after placement works for current pages and drafts, whether duplicate-title preflight
   should include hidden draft titles, and whether the 2,000,000-character body cap and draft-page
-  bounds fit expected use.
+  bounds fit expected use. Verify application-level move failures appear as placement warnings, and
+  account changes during multi-step writes preserve confirmed partial results without further writes.
 
 ### Other live checks
 

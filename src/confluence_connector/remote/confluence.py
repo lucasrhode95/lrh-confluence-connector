@@ -432,7 +432,7 @@ class ConfluenceApi:
         expected_username: str,
     ) -> None:
         """Use Confluence's isolated UI move action to place a page above or below a sibling."""
-        await self._transport.send_json(
+        payload = await self._transport.send_json(
             "POST",
             "pages/movepage.action",
             params={
@@ -445,6 +445,21 @@ class ConfluenceApi:
             skip_atlassian_token_check=True,
             expected_username=expected_username,
         )
+        if not isinstance(payload, dict):
+            raise Upstream("Confluence returned an unexpected page-position response.")
+        delegates = payload.get("commandDelegate")
+        responses = [payload]
+        if isinstance(delegates, dict):
+            responses.append(delegates)
+        if any(
+            response.get("validationErrors")
+            or response.get("actionErrors")
+            or response.get("errorMessage")
+            or response.get("success") is False
+            or response.get("successful") is False
+            for response in responses
+        ):
+            raise Upstream("Confluence rejected the requested page position.")
 
     async def list_page_attachments(
         self, page_id: str, *, expected_username: str

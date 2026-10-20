@@ -108,7 +108,6 @@ class PageWrites:
                     expected_username=self._username,
                 )
             except ConnectorError as exc:
-                _raise_account_error(exc)
                 warnings.append(
                     f"The page was created, but its requested position was not confirmed "
                     f"({type(exc).__name__}); inspect the page before trying to reposition it."
@@ -326,7 +325,6 @@ class PageWrites:
                     )
                     result.removed.append(label)
             except ConnectorError as exc:
-                _raise_account_error(exc)
                 result.failures.append(
                     LabelChangeFailure(action=action, label=label, error=f"{type(exc).__name__}: {exc}")
                 )
