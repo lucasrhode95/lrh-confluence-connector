@@ -21,6 +21,15 @@ requests were made. Broader refactoring, implementation of the decided move rout
 
 ### Bugs
 
+#### Unordered positions abort page reads (P1)
+
+- **Seen live, 2026-10-20:** synthetic pages and expanded ancestors return `position: -1`; numeric
+  count validation rejects it, aborting metadata, child reads and acceptance setup.
+- **Implemented, awaiting review:** map the server's unordered-position sentinels to null in position
+  fields only. An offline regression covers child rows and ancestor metadata. Other numeric fields
+  retain their strict validation.
+
+
 #### Personal-space keys reject account-name punctuation (P1)
 
 - **Seen live, 2026-10-20:** the space listing identifies the account's personal space, but configuration

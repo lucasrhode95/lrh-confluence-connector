@@ -417,6 +417,19 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                         "55", expected_username="sample-user"
                     )
 
+    async def test_unordered_positions_do_not_break_children_or_ancestor_metadata(self) -> None:
+        def handler(request):
+            row = {"id": "55", "title": "Synthetic", "type": "page", "position": -1,
+                   "ancestors": [{"id": "1", "title": "Parent", "position": -1}]}
+            if request.url.path.endswith("/child/page"):
+                return httpx.Response(200, json={"results": [row], "size": 1, "start": 0})
+            return httpx.Response(200, json=row)
+        api = self.make_api(handler)
+        metadata = await api.get_page_metadata("55", expected_username="sample-user")
+        children = await api.list_child_pages("1", start=0, expected_username="sample-user")
+        self.assertIsNone(metadata.ancestors[0].position)
+        self.assertIsNone(children.hits[0].position)
+
     async def test_malformed_echoed_size_is_an_upstream_error(self) -> None:
         def handler(_: httpx.Request) -> httpx.Response:
             return httpx.Response(

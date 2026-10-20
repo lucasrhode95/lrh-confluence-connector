@@ -368,3 +368,10 @@ Isolation on 2026-10-20 confirmed the cause: the `view-file` macro's `name` para
 even with a nonexistent synthetic filename, and that page was trashed afterwards. Plain text and the
 other isolated macro groups also created successfully. The acceptance fixture now uses the reference
 form. This is a fixture defect, not an authentication failure or a general creation restriction.
+
+### 8.2 Unordered page positions
+
+Live, 2026-10-20: newly created synthetic pages and their expanded ancestors reported `position: -1`,
+with extension position `"none"`. These mean no explicit position, not malformed page metadata.
+The adapter maps these position-only sentinels to null; counts and version numbers stay strict.
+This also blocked metadata reads during fixture setup after the macro fix.
