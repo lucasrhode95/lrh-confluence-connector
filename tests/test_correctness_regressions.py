@@ -263,6 +263,35 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(r.name, r.status) for r in report.results[:2]], [("authentication", "PASS"), ("fixture", "PASS")])
         self.assertFalse(any(r.status == "FAIL" for r in report.results))
 
+    async def test_acceptance_download_check_uses_ids_when_local_names_change(self):
+        import tempfile
+        import zipfile
+        from acceptance_fixtures import image_png
+        fixture = new_fixture("deadbeef")
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            text = folder / "renamed (2).txt"
+            image = folder / "renamed (2).png"
+            single = folder / "single.txt"
+            archive = folder / "bundle.zip"
+            text.write_bytes(fixture.attachment_marker.encode())
+            image.write_bytes(image_png())
+            single.write_text("synthetic", encoding="utf-8")
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("root.txt", "synthetic")
+                bundle.writestr(fixture.text_filename, text.read_bytes())
+                bundle.writestr(fixture.image_filename, image.read_bytes())
+            attachments = [SimpleNamespace(attachment_id="200", filename=fixture.text_filename), SimpleNamespace(attachment_id="201", filename=fixture.image_filename)]
+            files = [SimpleNamespace(attachment_id="200", filename=text.name, path=str(text)), SimpleNamespace(attachment_id="201", filename=image.name, path=str(image))]
+            services = SimpleNamespace(
+                username="sample-user",
+                api=SimpleNamespace(list_page_attachments=AsyncMock(return_value=attachments)),
+                attachments=SimpleNamespace(download_attachments=AsyncMock(return_value=SimpleNamespace(files=files, failures=[]))),
+                exports=SimpleNamespace(export_pages=AsyncMock(side_effect=[SimpleNamespace(path=str(single)), SimpleNamespace(path=str(archive))])),
+            )
+            await run_acceptance._check_downloads_and_exports(services, fixture, SimpleNamespace(root="10", child_one="11"))
+            self.assertEqual(services.exports.export_pages.await_count, 2)
+
     async def test_acceptance_rejects_false_success_and_wrong_order(self):
         services = SimpleNamespace(
             username="sample-user",
