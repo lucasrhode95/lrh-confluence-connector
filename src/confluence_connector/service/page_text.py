@@ -14,6 +14,7 @@ _VOID_TAGS = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 )
 _WHITESPACE = re.compile(r"[\t\r\n\f\v ]+")
+_INTEGER_ATTRIBUTE = re.compile(r"[+-]?\d+\Z")
 _PAGE_PATH = re.compile(r"/spaces/[^/]+/pages/(\d+)(?:/|$)")
 
 
@@ -263,14 +264,15 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
 
 def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list[PageTextBlock]:
     blocks: list[PageTextBlock] = []
-    index = 1
+    index = _integer_attr(node.attrs.get("start"), default=1) if ordered else 1
     for child in node.children:
         if not isinstance(child, _Node) or child.tag != "li":
             blocks.extend(_render_blocks(child, context))
             continue
         nested_lists = [item for item in child.children if isinstance(item, _Node) and item.tag in {"ol", "ul"}]
         text, refs = _inline([item for item in child.children if item not in nested_lists], context)
-        marker = f"{index}. " if ordered else "• "
+        item_number = _integer_attr(child.attrs.get("value"), default=index) if ordered else index
+        marker = f"{item_number}. " if ordered else "• "
         if text.strip():
             blocks.append(_block(marker + text.strip(), refs))
         for nested in nested_lists:
@@ -280,7 +282,7 @@ def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list
                 for item in nested_blocks
                 for line in item.text.splitlines()
             )
-        index += 1
+        index = item_number + 1
     return blocks
 
 
@@ -463,16 +465,16 @@ def _storage_macros(storage_html: str) -> list[_Macro]:
         page_id = None
         page_title = None
         jira_key = None
-        for child in _walk(node):
+        for child in _walk_macro_source(node):
             if child.tag == "ac:parameter":
                 parameter_name = (child.attrs.get("ac:name") or child.attrs.get("name") or "").casefold()
                 if parameter_name:
-                    parameters[parameter_name] = _node_text(child).strip()
+                    parameters[parameter_name] = _macro_text(child).strip()
             elif child.tag in {"ac:plain-text-body", "ac:rich-text-body"}:
-                body = _node_text(child).strip()
+                body = _macro_text(child).strip()
             elif child.tag == "ri:page":
                 page_id = child.attrs.get("ri:content-id") or child.attrs.get("ri:page-id")
-                page_title = child.attrs.get("ri:content-title") or _node_text(child).strip() or None
+                page_title = child.attrs.get("ri:content-title") or _macro_text(child).strip() or None
         jira_key = parameters.get("key")
         macros.append(
             _Macro(
@@ -685,13 +687,22 @@ def _walk(node: _Node):
             yield from _walk(child)
 
 
-def _node_text(node: _Node) -> str:
+def _walk_macro_source(node: _Node):
+    """Walk one macro's source fields without attributing nested macro fields to its parent."""
+    yield node
+    for child in node.children:
+        if isinstance(child, _Node) and child.tag != "ac:structured-macro":
+            yield from _walk_macro_source(child)
+
+
+def _macro_text(node: _Node) -> str:
+    """Read source text while skipping any nested macro and its independent metadata."""
     parts: list[str] = []
     for child in node.children:
         if isinstance(child, str):
             parts.append(child)
-        elif child.tag not in {"script", "style"}:
-            parts.append(_node_text(child))
+        elif child.tag != "ac:structured-macro":
+            parts.append(_macro_text(child))
     return "".join(parts)
 
 
@@ -721,6 +732,18 @@ def _positive_attr(value: str | None, *, default: int) -> int:
     if value and value.isdecimal() and int(value) > 0:
         return int(value)
     return default
+
+
+def _integer_attr(value: str | None, *, default: int) -> int:
+    if value is None:
+        return default
+    normalized = value.strip()
+    if not _INTEGER_ATTRIBUTE.fullmatch(normalized):
+        return default
+    try:
+        return int(normalized)
+    except ValueError:
+        return default
 
 
 def _block(text: str, references: tuple[PageReference, ...] | list[PageReference]) -> PageTextBlock:

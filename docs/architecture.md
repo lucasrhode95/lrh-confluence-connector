@@ -145,8 +145,9 @@ historical metadata reads are not implemented. Results identify truncation or pe
 `get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
 the shared transport caps all requests at six in flight. `body.view` supplies resolved text, while
 `body.storage` supplies Jira, PlantUML, HTML-macro and ordered reference metadata. Text output keeps
-headings, lists, code, panels, status, expand blocks, links and pipe tables; complex table cells use
-minimal HTML. Attachment and image identity is mapped from source fields before markers are rendered.
+headings, ordered-list numbering from `start` and `value`, unordered lists, code, panels, status,
+expand blocks, links and pipe tables; complex table cells use minimal HTML. Attachment and image
+identity is mapped from source fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
 Comments are converted from their own `view` bodies and threaded by source ancestry. Typed references

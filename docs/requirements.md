@@ -105,7 +105,8 @@ source-provided descriptions. Markers let an agent request a particular attachme
   takes Jira keys, PlantUML source and HTML-macro identity from `storage`, because `view` loses them.
 - Output is Markdown-like: headings, lists, task lists, fenced code with language, panels as quoted
   blocks (`> [Info] …`), `[Expand: title]`, `[Status: text]`, `@Display Name`, and links with page IDs
-  kept in the references. Tables of contents and generated numbering are dropped.
+  kept in the references. Tables of contents and generated heading numbering are dropped.
+- Ordered lists preserve their source `start` and item `value` numbers.
 - Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, list items become `• item`,
   and images and macros in cells use their normal markers. Merged cells repeat their value into each
   covered cell, with a `[Table: merged cells repeated]` note. Only tables with nested tables or code

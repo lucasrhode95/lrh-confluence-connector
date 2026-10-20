@@ -169,6 +169,38 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["Repeat", "Repeat", "• Same item", "• Same item"],
         )
 
+    def test_nested_macro_fields_stay_with_their_source_macro(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="include"><div data-macro-name="include"></div></div>',
+            '<ac:structured-macro ac:name="include"><ri:page ri:content-id="91" '
+            'ri:content-title="Outer page"/><ac:rich-text-body><ac:structured-macro '
+            'ac:name="include"><ri:page ri:content-id="92" ri:content-title="Nested page"/>'
+            '</ac:structured-macro></ac:rich-text-body></ac:structured-macro>',
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["[Included from: Outer page]", "[Included from: Nested page]"],
+        )
+        self.assertEqual(
+            [block.references[0].page_id for block in rendered.blocks],
+            ["91", "92"],
+        )
+
+    def test_ordered_lists_honor_start_and_item_value_attributes(self) -> None:
+        rendered = render_page_body(
+            '<ol start="4"><li>Fourth</li><li value="9">Ninth</li><li>Tenth</li></ol>'
+            '<ol start="-2"><li>Negative</li></ol>',
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["4. Fourth", "9. Ninth", "10. Tenth", "-2. Negative"],
+        )
+
     def test_storage_blocks_preserve_source_markup_for_rich_continuation(self) -> None:
         source = '<p data-x="1">A &amp; B</p>\n<ac:structured-macro ac:name="code"/><p>C</p>'
         self.assertEqual(
