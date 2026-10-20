@@ -153,18 +153,16 @@ class PageStructure:
                         node.page_id, expected_username=self._username
                     )
                     _require_current_page(child_metadata)
+                    current_parent = child_metadata.ancestors[-1].page_id if child_metadata.ancestors else None
+                    if current_parent != node.parent_id or child_metadata.space_key != node.space_key:
+                        outcomes[node.page_id] = _outcome(node, "skipped", "Parent or space changed after preflight.")
+                        continue
                     if child_metadata.version is None:
                         raise Upstream("Confluence did not return a child page version for the move.")
-                    await self._api.update_page_parent(
-                        node.page_id,
-                        title=child_metadata.title,
-                        next_version=child_metadata.version + 1,
-                        parent_id=new_parent_id,
-                        expected_username=self._username,
-                    )
+                    await self._change_parent(child_metadata, new_parent_id)
                     outcomes[node.page_id] = _outcome(node, "moved_up")
                 except ConnectorError as exc:
-                    status = "unknown" if isinstance(exc, UncertainWrite) else "not_attempted"
+                    status = "unknown" if isinstance(exc, UncertainWrite) else "failed"
                     outcomes[node.page_id] = _outcome(node, status, _error_text(exc))
                     for pending in nodes[index + 2 :]:
                         outcomes[pending.page_id] = _outcome(
@@ -181,7 +179,7 @@ class PageStructure:
                 await self._api.trash_page(node.page_id, expected_username=self._username)
                 outcomes[node.page_id] = _outcome(node, "trashed")
             except ConnectorError as exc:
-                status = "unknown" if isinstance(exc, UncertainWrite) else "not_attempted"
+                status = "unknown" if isinstance(exc, UncertainWrite) else "failed"
                 outcomes[node.page_id] = _outcome(node, status, _error_text(exc))
                 for pending in delete_order[index + 1 :]:
                     outcomes[pending.page_id] = _outcome(
@@ -269,7 +267,7 @@ class PageStructure:
                 None,
             )
 
-        resolved = await self._resolve_page(reference)
+        resolved = await self._resolve_page(reference, status="trashed")
         metadata = await self._api.get_page_metadata(
             resolved.page_id, status="trashed", expected_username=self._username
         )
@@ -469,7 +467,7 @@ class PageStructure:
 
         action_position, target_id = await self._move_action_target(target, metadata.page_id)
         parent_changed = old_parent_id != target.parent_id
-        if parent_changed:
+        if parent_changed and target.parent_id is not None:
             if metadata.version is None:
                 raise Upstream("Confluence did not return the page version required for a parent change.")
             await self._api.update_page_parent(
@@ -480,7 +478,8 @@ class PageStructure:
                 expected_username=self._username,
             )
 
-        needs_position = target.position in {"before", "after", "last"} or (
+        parent_applied = parent_changed and target.parent_id is not None
+        needs_position = target.parent_id is None or target.position in {"before", "after", "last"} or (
             target.position == "first" and target_id is not None
         )
         if not needs_position:
@@ -507,11 +506,11 @@ class PageStructure:
                 page_id=metadata.page_id,
                 title=metadata.title,
                 space_key=target.space_key,
-                parent_id=target.parent_id if parent_changed else old_parent_id,
-                moved=parent_changed,
+                parent_id=target.parent_id if parent_applied else old_parent_id,
+                moved=parent_applied,
                 position_applied=None if uncertain else False,
                 warnings=[
-                    f"The page parent change was applied={parent_changed}, but its requested position was not confirmed ({type(exc).__name__})."
+                    f"The page parent change was applied={parent_applied}, but its requested position was not confirmed ({type(exc).__name__})."
                 ],
             )
         return PageMoveResult(
@@ -548,15 +547,24 @@ class PageStructure:
         _require_current_page(current)
         if not current.ancestors:
             return
-        if current.version is None:
-            raise Upstream("Confluence did not return the restored page version for root recovery.")
-        await self._api.update_page_parent(
-            page_id,
-            title=current.title,
-            next_version=current.version + 1,
-            parent_id=None,
-            expected_username=self._username,
-        )
+        await self._change_parent(current, None)
+
+    async def _change_parent(self, metadata: PageMetadata, parent_id: str | None) -> None:
+        """Apply a validated same-space parent change; empty ancestors are ignored by Confluence."""
+        if parent_id is None:
+            if metadata.space_key is None:
+                raise Upstream("Confluence did not return the page space for its root move.")
+            await self._api.move_page_action(
+                metadata.page_id, space_key=metadata.space_key, position="topLevel",
+                target_id=None, asynchronous=False, expected_username=self._username,
+            )
+        else:
+            if metadata.version is None:
+                raise Upstream("Confluence did not return the page version for its parent change.")
+            await self._api.update_page_parent(
+                metadata.page_id, title=metadata.title, next_version=metadata.version + 1,
+                parent_id=parent_id, expected_username=self._username,
+            )
 
     async def _resolve_placement(
         self,
@@ -764,16 +772,20 @@ class PageStructure:
                     f"A page's child list exceeds the {MAX_HIERARCHY_READ_PAGES}-page read safety cap."
                 )
             next_start = page.start + page.size
-            more = next_start < page.total_size if page.total_size is not None else page.size == CHILD_PAGE_SIZE
-            if not more or page.size == 0:
+            more = page.has_more if page.has_more is not None else (
+                next_start < page.total_size if page.total_size is not None else page.size == CHILD_PAGE_SIZE
+            )
+            if more and page.size == 0:
+                raise Upstream("Confluence returned an empty hierarchy page with a continuation.")
+            if not more:
                 return rows
             if next_start <= start:
                 raise Upstream("Confluence did not advance the page-hierarchy offset.")
             start = next_start
 
-    async def _resolve_page(self, reference: str) -> ResolvedPageReference:
+    async def _resolve_page(self, reference: str, *, status: str | None = None) -> ResolvedPageReference:
         """Resolve one reference already sanitized by a public structure-tool boundary."""
-        resolved = await self._links.resolve(reference, expected_username=self._username)
+        resolved = await self._links.resolve(reference, expected_username=self._username, status=status)
         if resolved.version is not None:
             raise InvalidRequest("Page structure operations target the current page; omit pageVersion from the reference.")
         if not resolved.page_id.isdecimal():
@@ -887,7 +899,7 @@ def _hit_page_id(hit: ContentSearchHit) -> str:
 
 def _outcome(
     node: _PageNode,
-    status: Literal["trashed", "moved_up", "not_attempted", "unknown"],
+    status: Literal["trashed", "moved_up", "skipped", "failed", "not_attempted", "unknown"],
     detail: str | None = None,
 ) -> PageStructureOutcome:
     return PageStructureOutcome(

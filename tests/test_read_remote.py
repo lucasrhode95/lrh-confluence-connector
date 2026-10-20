@@ -186,7 +186,6 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                     "start": start,
                     "size": 1,
                     "limit": 500,
-                    "totalSize": 2,
                     "_links": {"next": "https://elsewhere.example.test/skip"} if start == 0 else {},
                 },
             )

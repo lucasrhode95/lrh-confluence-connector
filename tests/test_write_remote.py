@@ -478,32 +478,13 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[1].url.path, "/wiki/rest/api/content/301/property")
         self.assertEqual(json.loads(observed[1].content), {"key": "placement", "value": {"space_key": "SYNTH"}})
 
-    async def test_parent_update_to_space_root_sends_empty_ancestors(self) -> None:
-        observed: list[httpx.Request] = []
-
+    async def test_parent_update_refuses_the_ineffective_empty_ancestors_route(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
-            observed.append(request)
-            return httpx.Response(
-                200,
-                json={
-                    "id": "301",
-                    "type": "page",
-                    "title": "Synthetic page",
-                    "status": "current",
-                    "space": {"key": "SYNTH"},
-                    "version": {"number": 4},
-                    "ancestors": [],
-                },
+            self.fail("root PUT must never be sent")
+        with self.assertRaisesRegex(InvalidRequest, "topLevel"):
+            await self.make_api(handler).update_page_parent(
+                "301", title="Synthetic", next_version=4, parent_id=None, expected_username="sample-user"
             )
-
-        await self.make_api(handler).update_page_parent(
-            "301",
-            title="Synthetic page",
-            next_version=4,
-            parent_id=None,
-            expected_username="sample-user",
-        )
-        self.assertEqual(json.loads(observed[0].content)["ancestors"], [])
 
     async def test_trash_page_uses_delete_without_purge_parameter(self) -> None:
         observed: list[httpx.Request] = []

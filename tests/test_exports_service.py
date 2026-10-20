@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import tempfile
+import os
+import stat
 import unittest
 import zipfile
 from pathlib import Path
@@ -38,6 +40,8 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.filename.startswith("2026"))
             self.assertLessEqual(len(result.filename), 160)
             self.assertEqual(Path(result.path).read_bytes(), body.encode("utf-8"))
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(Path(result.path).stat().st_mode), 0o600)
             self.assertEqual(result.content_type, "text/plain; charset=utf-8")
             self.assertEqual((result.pages_exported, result.pages_failed), (1, 0))
         self.assertTrue(pages.scopes[0].header)

@@ -79,6 +79,7 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 - `TokenStore` keeps one record, the PAT and its username, in `msal-extensions` encrypted persistence
   under `CrossPlatLock`. No plaintext fallback: if encryption is unavailable, every command fails with
   `SecureStorageUnavailable`.
+- Explicit sign-out clears even malformed JSON without decoding it, under the same encrypted-store lock.
 - `save` refuses a different username until `sign_out`. Every request loads the record again, so a
   sign-out or account switch takes effect on the next request in every process.
 
@@ -143,7 +144,9 @@ converts UTC bounds to CQL minutes in `cql_timezone` (requirements §7).
 
 **[`timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)** takes the
 newest readable page and binary-searches `lastmodified >=` minute cutoffs within ±15 hours to find
-CQL's effective offset. The CLI calls it; `config.py` writes the result atomically under a lock.
+CQL's effective offset. The sample timestamp is rechecked after measurement; a changed sample retries
+once, then fails without a result to persist. The CLI calls it; `config.py` writes the result atomically
+under a lock.
 
 **[`tree.py`](../src/confluence_connector/service/tree.py)** reads space roots with `depth=root` and
 each page's children in server order, stopping at depth 5 or 1,000 pages with `complete: false`.
@@ -405,8 +408,10 @@ Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash
 - The whole affected hierarchy is read first (at most 5,000 pages) and `delete` permission is checked
   on every page before any write. `trash` refuses more than 100 pages, with the count.
 - Each trashed page's parent and position are saved first, best effort, for `restore_page`.
+- `move_up` rechecks each child’s parent and space immediately before its move, skipping changes.
+  Root moves use the `topLevel` action; an empty ancestor list is never used to move to the root.
 - The result lists every affected page with its former parent and position and its status
-  (`trashed`, `moved_up`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
+  (`trashed`, `moved_up`, `skipped`, `failed`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
   likely need a space administrator.
 
 #### `list_trash`
