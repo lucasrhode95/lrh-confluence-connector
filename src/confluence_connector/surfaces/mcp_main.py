@@ -49,6 +49,9 @@ PERMANENT_DELETE = ToolAnnotations(
 LABEL_WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
 )
+PUBLISH_DRAFT = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
 
 INSTRUCTIONS = """\
 Confluence Data Center access for the signed-in local account. Confluence owns its pages, spaces,
@@ -341,7 +344,7 @@ def build_server(context: AppContext) -> FastMCP:
         )
         return result.model_dump(mode="json")
 
-    @mcp.tool(annotations=WRITE)
+    @mcp.tool(annotations=PUBLISH_DRAFT)
     @_logged
     async def publish_draft(draft: str) -> dict[str, Any]:
         """Publish a new-page draft without changing its page ID."""

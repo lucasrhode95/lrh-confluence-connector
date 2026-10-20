@@ -236,7 +236,15 @@ class ConfluenceTransport:
                             "Confluence redirected the API request to a login page; the stored token was not accepted."
                         )
                     else:
-                        response = await _read_response(response)
+                        try:
+                            response = await _read_response(response)
+                        except Upstream:
+                            if not is_read and 200 <= response.status_code < 300:
+                                raise UncertainWrite(
+                                    "Confluence may have applied the write but returned an unreadable response; "
+                                    "inspect before retrying."
+                                ) from None
+                            raise
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
                 if attempt + 1 < MAX_ATTEMPTS:
                     _log.warning("Confluence request could not connect; attempt=%d", attempt + 1)
