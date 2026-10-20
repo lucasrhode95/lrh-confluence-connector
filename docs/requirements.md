@@ -204,10 +204,11 @@ automatically download attachments.
 ## 6. Page and draft management
 
 Daily-use readiness requires search, full reads, tree access, page moves, and create/read/update/delete
-operations for drafts and published pages. This is broader than the current read-only implementation.
+operations for drafts and published pages. Page and draft writes are implemented locally; page moves,
+trash operations and live acceptance remain open.
 
-D5–D9 below settle body formats, edits, undocumented routes, placement, moves and deletion. Drafts
-are new-page drafts only. Draft listing and deletion and trash restore are still open
+D5–D10 below settle body formats, edits, undocumented routes, placement, moves, deletion and the
+page/draft write interface. Drafts are new-page drafts only. Trash restore remains open
 ([roadmap](roadmap.md)). Purge stays excluded. Test writes only against disposable synthetic pages.
 
 **Decided 2026-10-19 (D9), deleting a page with children:** `delete_page` moves pages to the trash
@@ -255,6 +256,8 @@ whether it was deleted through REST or the UI, and restoring needs space-admin r
   `<iframe>`, `<object>`, `<embed>`, `on*` attributes, `javascript:` URLs or the HTML macro. Confluence
   passed these through in testing. Any other markup Confluence cannot parse returns its 400 message
   with row and column; the connector does not repair it further.
+- `rich` input is limited to 128 nested non-void elements and is rejected before remote requests when
+  it exceeds that depth, keeping markup conversion below Python's recursion limit.
 - The write tools' descriptions carry a short storage reference (code macro, panels, expand, status,
   table of contents, task list, page and attachment links, images, mentions) so agents can use the
   full range of Confluence formatting.
@@ -302,6 +305,29 @@ find-and-replace modes. Confluence-specific safeguards:
   (body, labels and attachments) and then trash the original, accepting that comments, history and
   the page ID are lost.
 
+**Decided 2026-10-19 (D10), page and draft write interface:**
+
+- create_page requires exactly one of parent_id or space_key. It creates a current page by default or a
+  new-page draft. position defaults to last; first, before and after use the same-parent sibling
+  order, with sibling required for before/after. A current page with the same title in the target
+  space is refused before creation, with its link.
+- update_page takes a complete body and mandatory expected_version. It checks the version before the
+  write, then sends the next version so Confluence's 409 also catches a concurrent edit.
+- list_drafts returns at most 100 rows per page (default 50) and uses a self-contained cursor.
+  It follows Confluence's next-link signal when present, falling back to the reported total or page
+  size only when that signal is absent. The cursor offset is capped at 1,000,000; the result reports
+  truncation if more drafts remain.
+  publish_draft publishes only new-page drafts and preserves their page ID. delete_draft permanently
+  deletes a new-page draft and bypasses the trash.
+- set_labels takes explicit add and remove global-label lists. It skips already-satisfied changes
+  and applies changes sequentially. On a definitive failure, it compensates confirmed changes in
+  reverse order; `added` and `removed` report changes still applied, `compensated` reports restored
+  states, `rollback_failures` reports failed reversals, and `failures`/`not_attempted` report the
+  requested sequence. It does not compensate when authentication changes or an outcome is uncertain.
+- Titles are limited to 255 printable characters, labels and space keys to 255 ASCII letters, digits,
+  underscores or hyphens, and write bodies to 2,000,000 characters. These limits bound tool inputs;
+  verify that they fit the configured instance's expected content during acceptance.
+
 ## 7. Authentication and concurrent use
 
 Use a user-generated Confluence token without requiring administrator registration or assistance.
@@ -313,7 +339,9 @@ logout, explain local token deletion and any need to generate a replacement when
 be recovered. Distinguish local removal from server revocation; revocation behavior remains open.
 
 Coordinate shared authentication state and output files across processes. Preserve account boundaries
-and ensure running processes respect logout/replacement before their next acquisition.
+and ensure running processes respect logout/replacement before their next acquisition. If local
+authentication changes after a write response arrives, report an uncertain write and require inspection
+before retrying; never return data across the account boundary.
 
 **Decided 2026-10-19 (D1):** store the token with `msal-extensions` encrypted persistence and its
 cross-process lock, as `lrh-m365-auth` does; no Microsoft sign-in is involved. If encryption is

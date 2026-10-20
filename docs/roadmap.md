@@ -9,25 +9,25 @@ user; **live verification** checks something on the real instance before it is b
 
 ## Implementation
 
-### Proposed MCP tools
+### MCP tools pending local implementation or live verification
 
 Names follow the sibling connectors (no product prefix; the MCP server name namespaces them). The
-proof-of-concept tools have been removed. **Ready** means the evidence is enough to build it; otherwise
-the blocking decision (D) or verification (V) is named. Every write tool also waits on V2, because
-writes were verified only through a browser session.
+proof-of-concept tools have been removed. **Ready** means evidence is enough to build the tool;
+**Implemented locally** means offline coverage exists but live acceptance remains pending. Every
+write tool also waits on V2, because writes were verified only through a browser session.
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Ready |
-| `update_page` | Replace title and/or whole body with an explicit `expected_version` | Ready |
-| `publish_draft` | Publish a new-page draft, keeping its ID | Ready |
-| `list_drafts` | The user's new-page drafts | Ready |
-| `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Ready |
+| `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Implemented locally; live acceptance pending |
+| `update_page` | Replace title and/or whole body with an explicit `expected_version` | Implemented locally; live acceptance pending |
+| `publish_draft` | Publish a new-page draft, keeping its ID | Implemented locally; live acceptance pending |
+| `list_drafts` | The user's new-page drafts | Implemented locally; live acceptance pending |
+| `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Implemented locally; live acceptance pending |
 | `move_page` | Move to a target space, parent (or space root) and optional position, as one call | Ready |
 | `delete_page` | Trash a page after a per-page `delete` check, with `children`: refuse (default), `move_up` or `trash`; reports former placement and a one-way warning | Ready |
 | `list_trash` | Trashed pages per space or across visible spaces | Ready |
 | `restore_page` | Restore, then place: caller placement, else stored property (best effort), else space root | Ready |
-| `set_labels` | Add or remove page labels | Ready |
+| `set_labels` | Add or remove page labels | Implemented locally; live acceptance pending |
 
 Comment and attachment writes are not in the requirements and are not proposed here.
 
@@ -35,9 +35,9 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 - Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
   mirrored by offline tests with synthetic fake responses.
-- Remaining content routes and adapters for writes, including paging caps, CQL 400 details, 409
-  conflicts and Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
-  offline tests; each later write capability still needs its own refusal and partial-failure coverage.
+- Remaining move, delete, trash and restore routes and adapters, including long-task polling,
+  hierarchy caps, 409 conflicts and partial-failure results. Shared retry and uncertain-write
+  behavior is implemented and has offline tests.
 
 ## Decisions
 
@@ -102,6 +102,15 @@ in the personal space, including a rich-text sample page.
 - `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
   Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
   1,000,000. Verify current and former-user results during acceptance.
+
+- Task 5 writes have offline synthetic coverage. Before release, verify their REST routes and D5
+  conversions on the configured instance during user-run acceptance, including stale-version 409
+  behavior, inline-comment refusal, permanent draft deletion and partial label reporting. Confirm that
+  first/before/after placement works for current pages and drafts, whether duplicate-title preflight
+  should include hidden draft titles, and whether the 2,000,000-character body cap and draft-page
+  bounds fit expected use. Verify application-level move failures appear as placement warnings, and
+  account changes during multi-step writes preserve confirmed partial results without further writes.
+  Verify reverse compensation after definitive label failures and no compensation after uncertain outcomes.
 
 ### Other live checks
 

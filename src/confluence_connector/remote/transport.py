@@ -162,13 +162,25 @@ class ConfluenceTransport:
         path: str,
         *,
         params: Mapping[str, str] | None = None,
-        body: dict[str, Any] | None = None,
+        body: Any = None,
+        skip_atlassian_token_check: bool = False,
         expected_username: str,
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Send one write request, retrying only when the response proves it was not applied."""
-        return _json_payload(
-            await self._exchange(method, path, params=params, body=body, expected_username=expected_username)
+        response = await self._exchange(
+            method,
+            path,
+            params=params,
+            body=body,
+            expected_username=expected_username,
+            skip_atlassian_token_check=skip_atlassian_token_check,
         )
+        try:
+            return _write_payload(response)
+        except Upstream:
+            raise UncertainWrite(
+                "Confluence may have applied the write but returned an unreadable response; inspect before retrying."
+            ) from None
 
     async def redirect_location(
         self,
@@ -194,10 +206,11 @@ class ConfluenceTransport:
         path: str,
         *,
         params: Mapping[str, str] | None = None,
-        body: dict[str, Any] | None = None,
+        body: Any = None,
         token_override: str | None = None,
         expected_username: str | None = None,
         allow_redirect: bool = False,
+        skip_atlassian_token_check: bool = False,
     ) -> httpx.Response:
         _validate_route(path)
         method = method.upper()
@@ -205,6 +218,8 @@ class ConfluenceTransport:
         for attempt in range(MAX_ATTEMPTS):
             token = self._credential(token_override, expected_username)
             headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+            if skip_atlassian_token_check:
+                headers["X-Atlassian-Token"] = "no-check"
             request = self._client.build_request(method, path, params=params, json=body, headers=headers)
             response: httpx.Response | None = None
             retry_delay: float | None = None
@@ -221,7 +236,19 @@ class ConfluenceTransport:
                             "Confluence redirected the API request to a login page; the stored token was not accepted."
                         )
                     else:
-                        response = await _read_response(response)
+                        try:
+                            response = await _read_response(response)
+                        except Upstream:
+                            uncertain_status = (
+                                200 <= response.status_code < 300
+                                or response.status_code >= 500 and response.status_code != 503
+                            )
+                            if not is_read and uncertain_status:
+                                raise UncertainWrite(
+                                    "Confluence may have applied the write but returned an unreadable response "
+                                    f"(HTTP {response.status_code}); inspect before retrying."
+                                ) from None
+                            raise
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
                 if attempt + 1 < MAX_ATTEMPTS:
                     _log.warning("Confluence request could not connect; attempt=%d", attempt + 1)
@@ -249,7 +276,15 @@ class ConfluenceTransport:
             if not 200 <= response.status_code < 300 and not (allow_redirect and response.status_code in REDIRECT_STATUSES):
                 _raise_status(response.status_code, response.content, method=method)
             if token_override is None:
-                self._assert_account(expected_username)
+                try:
+                    self._assert_account(expected_username)
+                except (AccountMismatch, AuthenticationRequired):
+                    if not is_read:
+                        raise UncertainWrite(
+                            "Confluence returned a response, but local authentication changed before the write "
+                            "could be confirmed; inspect the target before retrying."
+                        ) from None
+                    raise
             return response
         raise Upstream("The Confluence request failed after the allowed attempts.")
 
@@ -309,6 +344,16 @@ def _json_payload(response: httpx.Response) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise Upstream("Confluence returned an unexpected API response.")
     return payload
+
+
+def _write_payload(response: httpx.Response) -> Any:
+    """Parse any JSON write response; 2xx non-JSON replies have an uncertain write outcome."""
+    if response.status_code == 204 or not response.content:
+        return {}
+    try:
+        return json.loads(response.content)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise Upstream("Confluence returned a non-JSON write response.") from None
 
 
 def _validate_route(path: str) -> None:
