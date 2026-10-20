@@ -12,17 +12,14 @@ user; **live verification** checks something on the real instance before it is b
 ### Proposed MCP tools
 
 Names follow the sibling connectors (no product prefix; the MCP server name namespaces them). The
-three proof-of-concept tools (`confluence_search_pages`, `confluence_list_spaces`, `confluence_get_page`)
-are replaced, not kept as aliases. **Ready** means the evidence is enough to build it; otherwise the
-blocking decision (D) or verification (V) is named. Every write tool also waits on V2, because writes
-were verified only through a browser session.
+proof-of-concept tools have been removed. **Ready** means the evidence is enough to build it; otherwise
+the blocking decision (D) or verification (V) is named. Every write tool also waits on V2, because
+writes were verified only through a browser session.
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `auth_status` | Configured instance, whether a token is stored, current user | Ready |
 | `search_content` | Query plus `scope` (spaces, space type, content types, labels, creators/contributors, created/modified ranges, parent/ancestor, archived on by default), `match` and `fields` per [requirements §3](requirements.md#3-search-and-navigation); cursor paging | Ready |
 | `find_users` | Resolve a current user's name to a username for creator/contributor filters; former users are findable only by username | Ready |
-| `list_spaces` | Spaces by name, type and status, including archived | Ready |
 | `get_page_tree` | Children (ordered, paged) and ancestors from a page or space root; depth-bounded | Ready |
 | `get_pages` | Read pages by ID or URL as text with attachment/macro markers, comments per parse scope, and short version metadata | Ready |
 | `get_page_metadata` | Fuller metadata for one or many pages: history, version list, labels, contributors, ancestors | Ready |
@@ -39,27 +36,17 @@ were verified only through a browser session.
 | `restore_page` | Restore, then place: caller placement, else stored property (best effort), else space root | Ready |
 | `set_labels` | Add or remove page labels | Ready |
 
-Signing in and out stay command-line subcommands, named as in the Microsoft 365 connectors
-(`confluence-connector auth` with a hidden prompt, `auth --sign-out`), so a token never passes
-through an agent conversation. Comment and attachment writes are not
-in the requirements and are not proposed here.
+Comment and attachment writes are not in the requirements and are not proposed here.
 
 ### Foundations shared by all tools
 
 - Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
   mirrored by offline tests with synthetic fake responses.
-- Typed models carrying source metadata and ordered content references (page, version, attachment,
-  comment, macro) mapped from REST JSON and storage/`view` structure before any text is rendered.
-- REST client covering the observed contracts: paging on `start + size` (never the echoed `limit` or
-  `next` link), 500-item caps, 409 version conflicts, 400 CQL errors and 500 log referrals.
-- Encrypted token storage with `msal-extensions`; the `auth`, `auth --sign-out`, `status` and `mcp`
-  subcommands and the sibling layout ([architecture §3.1–3.2](architecture.md#31-token-storage-decided-not-built));
-  remove `server.py`, `client.py` and `main.py`.
-- Retry and error policy from the shared rules: bounded read retries, writes retried only on proven
-  non-application, uncertain writes reported. Offline tests with fake responses: connection reset then
-  success, read timeout retried, write timeout reported as uncertain, persistent 500 reported after
-  the retries, and 429 with `Retry-After`. Multi-step writes (page plus labels) report what was
-  completed.
+- Typed page and content models carrying source metadata and ordered references (page, version,
+  attachment, comment, macro) mapped from REST JSON and storage/`view` structure before rendering.
+- Remaining content routes and adapters, including paging caps, CQL 400 details, 409 conflicts and
+  Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
+  offline tests; each later write capability still needs its own refusal and partial-failure coverage.
 
 ## Decisions
 
@@ -69,6 +56,15 @@ None open. Settled decisions are in [requirements](requirements.md).
 
 Each check needs authorization for the exact requests. Synthetic `Connector Lab` fixture pages remain
 in the personal space, including a rich-text sample page.
+
+### Validations
+
+- `list_spaces` requests `current` and `archived` separately. The Data Center REST reference documents
+  the `status` parameter but does not enumerate its accepted values; this filter choice is inferred
+  from the returned status names and the planned tool contract. Verify both result sets on the
+  configured instance during user-run acceptance.
+
+### Other live checks
 
 - Token lifecycle (expiry, revocation visibility) and concurrent processes once D1 is built.
 

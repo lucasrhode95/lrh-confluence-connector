@@ -95,7 +95,7 @@ scripts require an explicit private config file rather than embedded fallback se
 
 A local MCP connector for one user's Confluence Data Center account. Requirements include search,
 full page/tree reads, metadata, attachment retrieval, exports, and draft/page CRUD and moves.
-The current proof of concept implements only three read-only tools; do not describe planned work
+The current MCP surface implements `auth_status` and `list_spaces`; do not describe roadmap work
 as implemented. Confluence credentials are separate from the Microsoft OAuth library.
 
 - Documentation index: `docs/README.md`
@@ -105,15 +105,17 @@ as implemented. Confluence credentials are separate from the Microsoft OAuth lib
 - Open work: `docs/roadmap.md`
 - Probes and UI investigation: `research/README.md`
 
-`server.py` owns MCP entry points; `client.py` owns REST wire formats; `config.py` is the shared
-stdlib-only settings loader. Do not add service/store layers or claim their existence merely to
-match another repository's documentation. Extend the architecture deliberately with the product.
+`__main__.py` owns CLI entry points, `surfaces/mcp_main.py` owns MCP declarations,
+`remote/transport.py` owns HTTP behavior, and `config.py` owns private settings. Add layers only when
+they support a product capability, and keep `docs/architecture.md` aligned with the code.
 
 ## Authentication and configuration
 
-Use a user-generated token without requiring administrator registration. The current app accepts
-PAT or Basic environment credentials and persists neither; encrypted persistence and logout remain
-unbuilt requirements. Never reuse Microsoft SSO as if it were a Confluence OAuth grant.
+Use a user-generated token without requiring administrator registration. The application prompts
+for a PAT without echoing it, verifies it against the configured current-user endpoint, and stores
+the token with its username in encrypted `msal-extensions` persistence under `CrossPlatLock`.
+Environment credential modes belong only to the separate research probe. Never reuse Microsoft SSO
+as if it were a Confluence OAuth grant.
 
 App and probes use a required ignored private JSON file and one loader. Selection precedence is
 `--config PATH`, `CONFLUENCE_CONFIG`, then repository-root `confluence_config.json`; no embedded
@@ -145,7 +147,7 @@ Run both offline checks before every commit:
 
 ```powershell
 uv run python -m unittest discover -s tests
-uv run python -m compileall -q src research main.py tests
+uv run python -m compileall -q src research tests
 ```
 
 After moving or changing the probe, also check its CLI without network access:
