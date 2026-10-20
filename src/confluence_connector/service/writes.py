@@ -83,11 +83,12 @@ class PageWrites:
         if not isinstance(status, str) or status not in {"current", "draft"}:
             raise InvalidRequest("status must be current or draft.")
         placement_kind = _placement_kind(position, sibling)
+        validated_sibling = _page_reference(sibling) if sibling is not None else None
         placement = await self._create_placement(
             parent_id=parent_id,
             space_key=space_key,
             position=placement_kind,
-            sibling=sibling,
+            sibling=validated_sibling,
         )
         await self._assert_title_available(clean_title, placement.space_key)
         created = await self._api.create_page(
@@ -438,7 +439,8 @@ class PageWrites:
         return first_id
 
     async def _sibling(self, reference: str) -> PageMetadata:
-        resolved = await self._resolve_page(_page_reference(reference))
+        """Resolve a page reference validated at the create_page public boundary."""
+        resolved = await self._resolve_page(reference)
         metadata = await self._api.get_page_metadata(
             resolved.page_id, expected_username=self._username
         )

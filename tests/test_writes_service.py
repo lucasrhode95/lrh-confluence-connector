@@ -56,6 +56,16 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.metadata_calls, [])
         self.assertEqual(self.api.title_checks, [])
 
+    async def test_invalid_sibling_is_rejected_before_parent_is_read(self) -> None:
+        for sibling in ("", "   ", "x" * 2_049, "bad\nreference"):
+            with self.subTest(sibling=sibling[:20]), self.assertRaises(InvalidRequest):
+                await self.service.create_page(
+                    "New", "body", format="text", parent_id="100", position="before", sibling=sibling
+                )
+        self.assertEqual(self.api.metadata_calls, [])
+        self.assertEqual(self.api.title_checks, [])
+        self.assertEqual(self.api.create_calls, [])
+
     async def test_create_refuses_active_content_and_invalid_title_before_remote_calls(self) -> None:
         for title, body in (("Valid", "<script>unsafe</script>"), (" \n ", "body")):
             with self.subTest(title=title), self.assertRaises(InvalidRequest):
