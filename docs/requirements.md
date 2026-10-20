@@ -1,445 +1,320 @@
-# Confluence connector requirements
+# Confluence Connector — Requirements
 
-Decisions recorded 2026-10-18. These describe the intended product, not completed implementation.
-See [architecture](architecture.md) for the current implementation.
+**Evidence:** [Confluence API research](api-research.md) · **Contract per tool:** [architecture §8](architecture.md#8-mcp-tools) · **Open work:** [roadmap](roadmap.md)
 
-## 1. Product and ownership
+This document records what the connector must do and the decisions behind it, D1–D10, decided
+2026-10-19 unless dated otherwise. How each tool behaves in detail is in architecture §8; open decisions
+are in the roadmap. Do not resolve an open decision by assumption.
 
-A local MCP connector for one user's account on one Confluence Data Center instance. Multiple MCP
-processes may run concurrently. No hosted service, web UI, scheduler or background crawler is requested.
+---
 
-The local connector accesses an organization-hosted Confluence deployment. Unlike the Microsoft 365
-SaaS services used by the other connectors, its server URL, installation context and endpoint settings
-are deployment-specific. Keep them in explicit private configuration rather than assuming a shared
-vendor service address. This is the reason for the required configuration file.
+## 1. Product
 
-The connector owns Confluence pages, drafts, trees, comments, attachment references and retrieval.
-Agents own interpretation, multilingual query formulation, assessing documentation quality and
-cross-checking evidence against other connectors or source code. External product links stay links;
-handling a genuinely embedded component requires investigation of its source and ownership.
+A local MCP server for **one user's account on one Confluence Data Center instance**. Agents search,
+read, export and edit that user's wiki content through it. Several MCP processes may run at once, one
+per agent session.
 
-Prefer documented APIs. When they cannot provide a required capability, investigate undocumented
-browser/plugin methods. Source presence alone is not proof of a usable endpoint.
+There is no hosted service, web UI, scheduler or background crawler. Unlike the Microsoft 365 services
+the other `lrh-*` connectors use, a Data Center instance is organization-hosted: its URL, context path
+and routes are deployment-specific and live in a required private configuration file (§6), never in
+code.
 
-## 2. Agent use cases
+**Guiding principle: documented first.** Prefer documented Confluence REST routes. Use an undocumented
+browser route only for a required capability that has no documented path, isolated in one place, with
+its failures reported and no silent fallback (D7, §10.4). A route seen in UI source is a lead, not
+proof that it works.
 
-- Research an end-to-end operational process across Confluence and other products.
-- Read a documentation subtree and propose a clearer operational handoff with fewer duplicates.
-- Use documentation to explain the context of a conversation from another connector.
-- Find a topic using a remembered contributor and date range rather than a known page title.
-- Find, explain, summarize and compare pages; identify documented decisions and maintainers.
+## 2. Ownership (2026-10-18)
 
-The wiki can contain wrong, incomplete, duplicated and outdated material. Retrieval must preserve
-provenance and available metadata without treating a search hit or recent edit as proof of authority.
+- The connector owns Confluence spaces, pages, drafts, trees, labels, comments, attachment references
+  and attachment retrieval.
+- Agents own interpretation: multilingual query formulation, judging documentation quality, and
+  cross-checking against other connectors or source code. The agent, not the connector, decides how to
+  reconcile conflicting sources.
+- Links to other products stay links. A genuinely embedded component of another product needs its
+  source and owner investigated first.
+- The wiki holds wrong, duplicated and outdated pages. Results keep provenance and metadata, and never
+  present a search hit or a recent edit as proof of authority.
 
-## 3. Search and navigation
+Confluence credentials are unrelated to the shared Microsoft sign-in (`lrh-m365-auth`); only the
+storage technique is shared (§5).
 
-Search by page title and textual content, across all accessible spaces or selected spaces. Include
-archived content and personal spaces by default. Use a structured `scope` object for space, title,
-labels, author/creator, contributor, creation/modification dates and parent/ancestor filters; do not
-require agents to compose raw CQL. Preserve distinctions between filters that the server treats
-differently. Matching and paging follow D2 below; the exact `scope` field names are set when the
-tool is built.
+## 3. Use cases
 
-Do not silently interpret ordinary query words as boolean operators or drop unsupported scope fields.
-Attachment filenames and server-provided alt text are desirable searchable context where available.
+| # | Use case | Capabilities used |
+|---|---|---|
+| A1 | "How does our release process work end to end?" The agent searches with several phrasings, reads the main pages and their children, then checks the code or tickets elsewhere. | `search_content` (repeated) → `get_pages` → `get_page_tree` |
+| A2 | "Read the onboarding subtree and propose a clearer handoff with fewer duplicates." | `get_page_tree` → `get_pages` / `export_pages` |
+| A3 | "Explain the context of this Teams thread." The agent reads Teams, then looks up the wiki pages it mentions. | Teams MCP + `search_content` → `get_pages`; **no cross-repo integration** |
+| A4 | "Find the page Alex wrote about the migration around March." | `find_users` → `search_content` with `creator_usernames` and `created_after`/`before` |
+| A5 | "Who maintains this page, and what changed recently?" | `get_page_metadata` |
+| A6 | "Draft a runbook page under Operations; I will review it before publishing." | `create_page(status="draft")` → `list_drafts` → `publish_draft` |
+| A7 | "Fix the outdated port numbers on this page." | `get_pages(format="rich")` → `update_page(expected_version=…)` |
+| A8 | "Move these pages under the new Platform parent and trash the obsolete one." | `move_page`, `delete_page`, later `restore_page` if needed |
 
-**Decided 2026-10-19 (D2), query semantics:**
+## 4. Non-goals
 
-- `match` selects `all` (default: every term required, one `siteSearch` clause per term joined with
-  AND), `any` (terms sent together, which the server treats as any-term) or `phrase` (terms in order).
-- Terms split on whitespace only. Punctuation inside a term is kept, because code identifiers such as
-  `x_y.z` are indexed whole. Punctuation standing alone or at a term's edges is dropped. Query text is
-  always literal: operators, quotes and wildcards are never interpreted.
-- `fields` selects `all` (titles, bodies, comments, attachments) or `title`. Title search replaces title
-  punctuation with spaces, which tested more reliably than CQL escaping, and merges `title ~` results
-  with quick navigation (undocumented). Results are de-duplicated and labelled by source; a quick
-  navigation failure is reported without failing the call.
-- Results report the query actually sent, an opaque cursor built from `start + size`, and the server's
-  total, labelled approximate.
-- Date-only scope values (`YYYY-MM-DD`) mean that whole calendar day in Confluence's timezone and
-  work without timezone calibration. ISO-8601 timestamps with offsets are instants; timestamps
-  without an offset mean UTC. Convert timestamp bounds to timezone-less CQL minutes in the configured
-  `cql_timezone`, flooring `*_after` and ceiling `*_before` so the minute boundary stays inclusive.
-  Validate mixed date and timestamp ranges against the date's full local calendar day.
-  Cursors retain the original UTC instants and reconvert them on every page; result timestamps remain
-  the UTC values returned by REST. If the timezone is unset, reject timestamp bounds with instructions
-  to run `confluence-connector status --check` rather than guessing.
-- In a repeated daylight-saving hour, CQL cannot encode which occurrence a timezone-less wall minute
-  refers to. Widen lower bounds to the earlier valid wall minute and upper bounds to the later valid
-  wall minute so both occurrences remain included. Move a rounded-up minute in a spring-forward gap to
-  the next valid minute.
-- The optional private `cql_timezone` setting is an IANA timezone name or a fixed `UTC±HH:MM` offset.
-  CLI calibration measures CQL's effective offset with bounded, read-only searches after token
-  verification in `auth` and `status --check`. If unset, either command writes the measured fixed
-  offset atomically while preserving other settings. A fixed offset does not follow daylight saving;
-  replace it with the appropriate IANA name when needed. `status --check` compares an existing setting
-  with the measured offset and warns without overwriting it.
-- Stemming, stop words and accent folding come from the instance's administrator-set indexing language
-  (English here). The connector cannot control them. The tool description states the observed rules so
-  agents retry with variants, such as Portuguese plurals.
+- A local search index, ranking or content cache. Live search found known pages reliably (research
+  §4); revisit only on evidence of gaps.
+- Raw CQL from agents: search takes literal text and structured filters.
+- Purging the trash, ever. `delete_draft` is the only permanent delete, because Confluence offers no
+  trash for drafts.
+- Unpublished edits of published pages: the editor-draft route cannot be read back and belongs to the
+  non-collaborative editor (research §6.2). Agents propose changes as new-page drafts or edit with
+  `expected_version`.
+- Comment and attachment writes.
+- Interpreting attachment files (parsing, OCR, transcription). Agents receive the raw file.
+- Version comparisons, activity feeds and automated documentation-quality analysis (follow-ups).
 
-Support direct page references and topic discovery, complete page reads, and page-tree navigation.
-Live search found known pages reliably in the 2026-10-19 probes, so no local index, ranking or cache
-is planned. Revisit only if later evidence shows gaps. Exhaustive-search behavior across very large
-result sets remains open.
+## 5. Authentication (D1)
 
-## 4. Content reading and parsing
+- A user-generated personal access token (PAT); no administrator registration or assistance. Native
+  OAuth needs an administrator-registered client and is not used (research §2.2).
+- `confluence-connector auth` prompts for the token without echoing it, verifies it with the configured
+  current-user endpoint, and only then stores it with the returned username. Tokens never pass
+  through MCP tools.
+- Storage is `msal-extensions` encrypted persistence under its cross-process lock, as in
+  `lrh-m365-auth`, with no plaintext fallback: if encryption is unavailable, the connector refuses to
+  run. The token is read for every request, not kept in process memory.
+- A different username is refused until `auth --sign-out`, so switching accounts is explicit.
+  `--sign-out` warns that the token cannot be recovered, then deletes it locally; it does not revoke it
+  in Confluence.
+- `status` reports the stored account offline; `status --check` verifies it. `mcp` runs the stdio
+  server. The command set matches the Microsoft 365 connectors.
+- If the stored account changes after a write's response arrives, the write is reported as uncertain
+  and nothing more is sent. No result ever crosses an account boundary.
 
-Support plain text and Confluence's enriched representation for reads and writes: D3 below sets the
-text form, and D5 (§6) sets `rich` (HTML plus Confluence storage tags) as the enriched form.
+## 6. Configuration
 
-Text extraction preserves headings, tables, code blocks, lists, panels and other textual structure.
-Investigate resolving textual macros/includes or authoritative server-provided alternative text.
-Report unresolved content explicitly. Do not emit binary bodies or base64 strings into agent text.
+- One required private JSON file, shared by the app and the research probe and loaded by one loader.
+  Selection: `--config PATH`, then `CONFLUENCE_CONFIG`, then `confluence_config.json` at the repository
+  root. No instance, route or query is embedded in code. Settings are cached per process: restart the
+  MCP client after editing the file.
+- `cql_timezone` (optional): an IANA zone or a fixed `UTC±HH:MM`. `auth` and `status --check` measure
+  CQL's effective offset with bounded read-only searches; an unset value is written as the measured
+  fixed offset, atomically, keeping the other settings. An existing value is only compared, by
+  `status --check`, with a warning on mismatch. A fixed offset does not follow daylight saving; replace
+  it with an IANA zone where that applies.
+- `acceptance` (optional, research only): `personal_space_key` and `cross_space_key`, the two spaces the
+  acceptance scripts may write to. A missing key skips only the checks that need it; the scripts never
+  pick a space themselves.
 
-A structured parsing/fetching scope controls optional content. Include page comments, inline comments
-and resolved discussions by default. Place inline attachment/image markers at their source positions;
-append other attachment references after the body and before comments. Include filenames and useful
-source-provided descriptions. Markers let an agent request a particular attachment later.
+## 7. Search and navigation (D2)
 
-**Decided 2026-10-19 (D3), text and markers; restated 2026-10-20:**
+- **Scope** is a structured object: spaces, space type, content types, labels, creators, contributors,
+  created and modified ranges, parent, ancestor, and `include_archived`. Archived and personal spaces
+  are included by default. Unsupported fields are refused, never dropped.
+- **Matching:** `match` is `all` (default: one clause per term, joined by AND), `any` or `phrase`.
+  Terms split on whitespace only; punctuation inside a term is kept (code identifiers such as `x_y.z`
+  are indexed whole) and punctuation at its edges is dropped. Query text is always literal: operators,
+  quotes and wildcards are never interpreted.
+- **Fields:** `all` (titles, bodies, comments, attachments) or `title`. Title search replaces
+  punctuation with spaces, which found titles that quoting and escaping missed (research §4.3), and
+  merges results from the private quick-navigation route, labelled by source; a quick-navigation
+  failure is reported without failing the call.
+- **Results** report the query sent, a self-contained cursor built from the returned `start + size`,
+  and the server's total, labelled approximate.
+- **Dates:** a date-only value (`2026-03-14`) means that whole day in Confluence's time zone and needs
+  no calibration. A timestamp with an offset is an instant; one without is UTC. Timestamps become
+  zone-less CQL minutes in `cql_timezone`, rounding lower bounds down and upper bounds up so minutes
+  stay inclusive. A repeated daylight-saving hour is widened to include both occurrences; a minute in a
+  spring-forward gap moves to the next valid minute. Cursors keep the original UTC instants. Without
+  `cql_timezone`, timestamp bounds are refused with instructions, never guessed.
+- **Language:** stemming, stop words and accent folding follow the instance's indexing language,
+  which the connector cannot change. The tool description states the observed rules so agents retry
+  with variants, such as Portuguese plurals.
+- **References:** tools accept page IDs and every same-instance page URL form (D7, §10.4). Trees are
+  read in server order with bounded depth; users are found by display name, or by exact username for
+  former users.
 
-- Confluence renders macros but offers no plain-text output, so the connector converts the `view` body,
-  where includes, excerpts and expand sections are already resolved. It takes Jira keys, PlantUML
-  source, macro parameters and HTML-macro identity from `storage`, because `view` loses them.
-- The goal is faithful, readable text for agents, not an exact Markdown rendering. Generic HTML
-  conversion is delegated to an off-the-shelf HTML-to-Markdown library (markdownify); the connector
-  only adds Confluence-specific handling: macro markers, attachment and image markers, typed
-  references, link normalization to the configured instance, and the table rule below. Library
-  output is accepted as is where these rules are silent.
+## 8. Reading and parsing (D3, D4)
+
+### 8.1 Text form (D3, revised 2026-10-20)
+
+- Confluence has no plain-text output (research §5.1), so the connector converts the `view` body,
+  where includes, excerpts and expand sections are already resolved. Jira keys, PlantUML source, macro
+  parameters and the HTML macro's identity come from `storage`, because `view` loses them.
+- The goal is faithful, readable text for agents, not exact Markdown. Generic HTML conversion is
+  delegated to markdownify; the connector adds only Confluence-specific handling: macro markers,
+  attachment and image markers, typed references, link normalization to the configured instance, and
+  the table rule below. Library output is accepted where these rules are silent.
 - Markers sit where the item appears: `[Image: filename — alt text]`, `[File: filename]`,
-  `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source, `[Code: title]`
-  before titled code, `[Expand: title]`, `[Status: text]`, panels as quoted blocks (`> [Info] …`),
-  `@Display Name`, task items as `[ ]`/`[x]`, and `[Unrendered macro: name]` for anything else without
-  text. Code blocks are fenced with their language. Scripts, styles and tables of contents are
-  dropped. The HTML macro's output reaches `view` without any wrapper, so only its scripts are
-  dropped; storage identifies the macro, and a `[Unrendered macro: html]` marker is appended.
-- Tables are pipe tables. Merged cells repeat their value into each covered cell, with a
-  `[Table: merged cells repeated]` note. Tables with nested tables or code blocks in cells fall back to
-  minimal HTML.
-- Known limitations, accepted: exotic nesting (lists or panels inside table cells, mixed block and
-  inline runs in custom containers) follows the library's rendering, and list numbering, spacing and
-  indentation may differ from what Confluence displays.
-- When the request includes `body.storage`, the response must contain a string storage value; a missing
-  requested value is an upstream error rather than an empty body. Comment reads request `body.view`; a
-  missing or malformed requested view body is an upstream error.
+  `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source,
+  `[Code: title]` before titled code, `[Expand: title]`, `[Status: text]`, panels as quoted blocks
+  (`> [Info] …`), `@Display Name`, tasks as `[ ]`/`[x]`, and `[Unrendered macro: name]` for anything
+  else without text. Code blocks are fenced with their language. Scripts, styles and tables of contents
+  are dropped. The HTML macro has no wrapper in `view`, so only its scripts are dropped and an
+  `[Unrendered macro: html]` marker follows the body.
+- Tables are pipe tables; merged cells repeat their value, with a `[Table: merged cells repeated]`
+  note. Tables with nested tables or code fall back to minimal HTML.
+- Accepted limitations: exotic nesting (lists or panels in table cells) follows the library, and list
+  numbering, spacing and indentation may differ from Confluence's display.
 - Layout: a short header (title, link, version and total versions, last modified, extracted at), the
-  body, `## Attachments` (all attachments with type and size), then `## Comments`, threaded with
-  author, date, location, resolution and an inline comment's selected text. There are no in-body
-  comment anchors for now. Search returns comment hits as comment results; the connector does not
-  map them to their page.
-- A typed `references` list accompanies the text (kind, IDs, filename, media type, size, owner),
-  collected from `view` attributes and `storage` elements before conversion, so agents never parse
-  marker text.
-- Verification uses a few realistic synthetic pages with reviewed golden outputs, plus focused tests
-  for the Confluence-specific rules above, rather than one test per rendering detail.
+  body, `## Attachments` (type and size), then `## Comments`, threaded, with author, date, location,
+  resolution and an inline comment's selected text.
+- A typed `references` list (kind, IDs, filename, media type, size, owner page) is collected from
+  `view` attributes and `storage` elements **before** conversion. Agents never parse marker text, and
+  the connector never reads identity back from it.
+- A requested body that is missing or malformed is an upstream error, never an empty page.
 
-Extract metadata and ordered content references from source fields/structure before rendering. Carry
-them through typed models; never recover attachment identity or ownership from exported text markers.
+### 8.2 Budgets and continuation (D4)
 
-## 5. Metadata, versions and exports
+- `get_pages` takes up to 20 references and `max_chars` (default 40,000, at most 400,000), and returns
+  pages in the order given. Whole pages are packed into the budget; the first is always returned, and
+  pages that did not fit are listed in `remaining`.
+- A larger page is cut between blocks: paragraphs, whole lists, tables and code blocks in text; top-level
+  storage elements in `rich`. A single block over the budget is returned whole with a note. Comment
+  bodies share the budget.
+- The cursor carries page ID, version and the next block's anchor. A continuation reads that same
+  version, through a historical read if the page changed meanwhile; attachment and comment sections
+  resume by item ID. A removed anchor asks the caller to restart. Joined fragments reproduce the
+  original text exactly. Nothing is kept in process memory.
+- `parse_scope` defaults: `comments` (footer and inline, resolved included), `attachments` (the list
+  only), `macros_from_storage` and `header`, all on. Reads never download attachment bytes.
+- A reference with `pageVersion` reads that version. Metadata always describes the current page.
 
-Default page reads show the latest published version. Include concise provenance: page identity/link,
-displayed version, last-modified time, extraction time and total available versions where obtainable.
-Do not assume a version number equals the number of retained versions.
+## 9. Exports (D8)
 
-Provide fuller metadata for one page or a batch. Historical reads and comparisons are later work;
-batch exports should accept selected pages and versions without silently substituting another version.
+- `export_pages` writes up to 500 pages in full, with no budget, and refuses larger requests before
+  starting. It warns that large exports take minutes.
+- One page with no attachment bytes and no failure is a single file; anything else is one `.zip`.
+  `include_attachments: true` always produces a ZIP.
+- Each page is one file at the root named `<Title> (<page id>) v<version>`, with characters Windows
+  forbids replaced and long titles shortened to fit 180 characters and 240 filesystem bytes. No tree
+  folders; each file's header carries the breadcrumb (`Space › Parent › Page`), always, even when
+  `parse_scope.header` is false.
+- `text` files use the unbudgeted `get_pages` text. `rich` files are the unchanged storage body as
+  `.html`, with the header facts in a leading comment and selected comments in a final section.
+- Attachment bytes are excluded by default; with `include_attachments`, they go in a folder named after
+  the page file. `parse_scope.attachments` separately controls the list in the text.
+- `_export-report.txt`, present only when something failed or was skipped, names each item and why.
+  Authentication and account failures abort the export.
+- Output goes to the per-user exports folder. File tools are annotated as changing the local
+  environment, and their files are owner-only on POSIX.
 
-Provide direct agent-readable results and a separate batch extraction operation. The latter accepts
-pages/versions and a parsing/fetching scope, and produces one root ZIP with text files and optional
-attachment folders, following the established Teams/Outlook export conventions. Byte-by-byte
-attachment deduplication is not required.
+## 10. Writes
 
-**Decided 2026-10-19 (D8), export layout:**
+Daily use needs page and draft create, read, update and delete, labels, moves, and trash and restore.
+Writes run only when a write tool is called, and are tested only on disposable synthetic pages.
 
-- One page with no attachment bytes requested and no failures is written as a single file; anything
-  else as one `.zip`. Setting `include_attachments: true` produces a ZIP even when the page has no
-  attachments.
-- Each page is one file at the ZIP root named `<Title> (<page id>) v<version>`, with characters
-  Windows does not allow replaced and long titles shortened. Names fit within 180 characters and
-  240 filesystem bytes or UTF-16 code units. Pages stay flat, with no tree folders.
-  Each file's header carries the ancestor breadcrumb (`Space › Parent › Page`); exports always include
-  this provenance header even when `parse_scope.header` is false.
-- Attachment bytes are excluded by default. With `include_attachments: true`, all listed attachments
-  go in a folder with the page file's name minus its extension. `parse_scope.attachments` controls the
-  attachment list in page text independently of whether bytes are included.
-- `text` exports are `.txt` files with the same unbudgeted `get_pages` text rendering, with the
-  provenance header enabled, and without a character limit.
-  `rich` exports are `.html` files with the storage body unchanged, a metadata comment at the top with
-  the same header facts, and selected comments in a final section.
-- `_export-report.txt` at the root, present only when something failed or was skipped, lists each
-  page or attachment and the reason.
-- Output goes to the per-user exports folder, one timestamped file per export; the tool returns the
-  path. A failed page or attachment produces a ZIP with `_export-report.txt`; account/authentication
-  failures abort the call.
-- Local download and export tools are marked as environment-mutating, and their output folders and
-  files are owner-only on POSIX systems.
-
-**Decided 2026-10-19 (D4), limits and parse scope:**
-
-- `get_pages` takes up to 20 page IDs or URLs and a `max_chars` budget (default 40,000, maximum
-  400,000), returning pages in the order given. Whole pages are packed into the budget; the first is
-  always returned. Pages that did not fit are listed in `remaining`, never dropped.
-- A page larger than the budget is cut between blocks of the converted text (paragraphs, whole lists,
-  tables and fenced code blocks, which are separated by blank lines); a single block larger than the
-  budget is returned whole with a note. `rich` reads cut between top-level storage elements. Its
-  cursor carries page ID, version and a stable next-block anchor; continuation reads that same
-  version through a historical read if the page changed. Mutable attachment and comment sections
-  resume by item identity. If the anchored item was removed, the connector asks the caller to restart
-  the read. Text continuation fragments retain the separator before their first block, so joining
-  fragments preserves the original page text. If the continuation state cannot fit the cursor limit,
-  the request fails instead of returning an unusable cursor. Nothing is kept in process memory between
-  calls.
-- Comment blocks use the same character budget in text and rich reads. Rich page text remains the
-  unchanged storage body; structured comment records appear only when their block is selected, so
-  full comment bodies are not repeated on earlier pages or continuations.
-- The parse scope is an object. Defaults: `comments` (footer and inline, resolved included),
-  `attachments` (list only), `macros_from_storage` and `header`, all on.
-- Pages in one call are fetched with bounded concurrency (6, per the transport defaults).
-- `export_pages` always writes every selected page in full, with no character budget. It accepts at
-  most 500 pages per call and rejects larger requests before starting. Pages that fail are listed in
-  the export with the reason. Its tool description warns that large exports take minutes.
-
-Attachments can be explicitly retrieved or included by export scope. File parsing, transcription,
-OCR and multimedia interpretation are out of scope for now. Ordinary direct reads do not
-automatically download attachments.
-
-## 6. Page and draft management
-
-Daily-use readiness requires search, full reads, tree access, page moves, and create/read/update/delete
-operations for drafts and published pages. Page and draft management is implemented locally; live
-acceptance remains open.
-
-D5–D10 below settle body formats, edits, undocumented routes, placement, moves, deletion and the
-page/draft write interface. Drafts are new-page drafts only. Purge stays excluded. Test writes only
-against disposable synthetic pages.
-
-**Decided 2026-10-19 (D9), deleting a page with children:** `delete_page` moves pages to the trash
-with the documented `DELETE`, never purges, and takes `children`:
-
-- `refuse` (default): fails when the page has children, listing them. Confluence's own behavior
-  leaves children without a parent in the page tree, which is never applied silently.
-- `move_up`: re-parents the children under the deleted page's parent (or the space root), keeping
-  their order, then trashes the page.
-- `trash`: trashes the whole subtree bottom-up. Subtrees over 100 pages are refused, with the count.
-
-The result lists the page and every descendant affected. A failed step stops the operation and
-reports which pages were moved or trashed and which were not; nothing is undone automatically, and an
-uncertain step is reported, not retried.
-
-**Decided 2026-10-19, delete and restore:** Confluence always restores a page to the space root,
-whether it was deleted through REST or the UI, and restoring needs space-admin rights.
-
-- `delete_page` first checks the user's `delete` operation on every affected page and refuses before
-  any write if one is missing. Its result reports each page's former parent and position. When the
-  space permissions cannot be read (the user is likely not a space admin), it warns that restoring
-  will probably not be possible, so the agent can treat the delete as one-way.
-- Best effort: before trashing, `delete_page` stores each page's placement in a content property on
-  the page. Failing to store it is logged and does not stop the delete.
-- `restore_page` uses the documented restore, then places the page: an explicit `placement` from the
-  caller first, otherwise the stored property, otherwise the space root. Any failure reading or
-  applying the property (missing, unreadable, parent gone or trashed, move refused) is logged and the
-  page stays at the space root. The property is removed after a successful restore where possible. The
-  result states where each page ended up and why.
-- `list_trash` lists trashed pages per space or across all visible spaces (title, space, last edit,
-  page ID). It accepts a page size from 1 to 100 and a stateless cursor bounded to offset 1,000,000.
-  Confluence does not expose when or by whom a page was deleted.
-- `delete_page` fully counts a subtree before `children=trash`, refuses more than 100 pages, and
-  refuses a hierarchy larger than the 5,000-page read safety cap before any write. For a refused
-  trash subtree between those limits, the error includes its exact page count. `move_up` preserves
-  direct-child order by reparenting in the order returned by Confluence.
-- Multi-step delete results list each affected page's former parent and numeric sibling position
-  when Confluence returns it. Status distinguishes completed trash or reparent operations, an
-  uncertain write, and steps not attempted after a failure. The connector never undoes completed
-  operations automatically.
-
-**Decided 2026-10-19 (D5), body formats**, mirroring the Outlook connector's text-or-HTML bodies:
+### 10.1 Body formats (D5)
 
 - `create_page` and `update_page` take `body` and `format`. `rich` (default) is HTML plus Confluence
-  storage tags, written as Confluence storage. `text` is escaped and split into paragraphs on blank
-  lines. No wiki markup or Markdown input.
-- Before sending `rich`, the connector applies a small set of documented conversions, because AI tools
-  produce HTML that Confluence stores but renders poorly or rejects:
-  - `<pre><code class="language-X">` and plain `<pre>` become the code macro, with the language when
-    given.
-  - HTML5 void elements (`<br>`, `<hr>`, `<img>`) are self-closed.
-  - `<details>`/`<summary>` become the expand macro.
-- `rich` input is rejected before sending if it contains active content: `<script>`, `<style>`,
-  `<iframe>`, `<object>`, `<embed>`, `on*` attributes, `javascript:` URLs or the HTML macro. Confluence
-  passed these through in testing. Any other markup Confluence cannot parse returns its 400 message
-  with row and column; the connector does not repair it further.
-- `rich` input is limited to 128 nested non-void elements and is rejected before remote requests when
-  it exceeds that depth, keeping markup conversion below Python's recursion limit.
-- The write tools' descriptions carry a short storage reference (code macro, panels, expand, status,
-  table of contents, task list, page and attachment links, images, mentions) so agents can use the
-  full range of Confluence formatting.
-- `get_pages` takes `format`: `text` (default, the D3 output) or `rich`, which returns the storage
-  body unchanged for editing, like Outlook's `body="html"`.
+  storage tags, written as storage. `text` is escaped and split into paragraphs at blank lines. No wiki
+  markup or Markdown input.
+- Before sending `rich`, three conversions fix HTML that AI tools write and Confluence stores badly
+  (research §6.5): `<pre><code class="language-X">` and plain `<pre>` become the code macro;
+  HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro.
+- Refused before sending: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `on*` attributes,
+  `javascript:` URLs, the HTML macro, and more than 128 nested elements. Other unparseable markup
+  returns Confluence's 400 with row and column.
+- Write tool descriptions carry a short storage reference (code, panels, expand, status, table of
+  contents, tasks, page and attachment links, images, mentions).
+- `get_pages(format="rich")` returns storage unchanged for editing, like Outlook's `body="html"`.
 
-**Decided 2026-10-19 (D6), edits:** `update_page` always replaces the whole body (and optionally the
-title), as edits do in the Teams and Outlook connectors. There are no section, append or
-find-and-replace modes. Confluence-specific safeguards:
+### 10.2 Edits (D6)
 
-- The call requires `expected_version`. A page changed in the meantime fails with Confluence's 409
-  and is never overwritten or retried.
-- Before sending, the connector compares the stored and new bodies and reports any inline-comment
-  anchors, macros and attachment references that would disappear. Dropping inline-comment anchors
-  detaches those comments, so such a write is refused unless the call passes
-  `allow_comment_loss: true`.
+`update_page` always replaces the whole body (and optionally the title), as edits do in the Teams and
+Outlook connectors; there are no section, append or find-and-replace modes.
 
-**Decided 2026-10-19 (D7), undocumented write routes:**
+- `expected_version` is required. A stale version is refused before writing, and a concurrent edit is
+  refused by Confluence's 409; neither is retried.
+- The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
+  so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
+  reported as warnings.
 
-- Avoid any route, field or feature known to be deprecated or outdated, documented or not. Prefer
-  documented routes; use an undocumented one only for a required capability with no documented path,
-  isolated in one place, with its failure reported and no silent fallback. Routes marked experimental
-  (such as the version list) are flagged in the research record.
-- No unpublished edits of published pages: the editor-draft route cannot be read back and belongs to
-  the non-collaborative editor. Agents propose changes as new-page drafts or edit with
-  `expected_version`.
-- Pages are identified by page ID, which is unique across the instance and survives renames and
-  moves. Titles are unique only within a space and change on rename. Tools accept page IDs or any page
-  URL form and resolve them to IDs first. `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=` give
-  the ID directly; the title in the path is ignored. A `pageVersion` in the link selects that
-  version. `/x/…` short links are followed. `/display/KEY/Title` needs a lookup by space and title and
-  fails clearly after a rename. Anchors and comment focus are ignored. Links to any host other than
-  the configured base URL are refused.
-- `create_page` and `move_page` take one placement: `parent_id` (or a parent URL), from which the space
-  is derived, or `space_key` alone for the space root, plus an optional position (`first`, `last`,
-  or `before`/`after` a sibling of the same parent). A `space_key` that disagrees with the parent's
-  space fails the call. A title that already exists in the target space fails before any write, with
-  the existing page's link. The connector makes every call needed to reach the placement. Same-space parent changes use the documented content update
-  (`ancestors`); positioning uses the UI's `movepage.action`. If positioning fails after the page was
-  created or moved, the page stays and the result says the position was not applied.
-- Cross-space moves use `movepage.action` with the target `spaceKey` and poll the documented
-  `/rest/api/longtask/{id}` until it finishes. Verified 2026-10-19: page ID, version, children,
-  attachments, comments and labels are kept. If Confluence refuses a cross-space move (for example
-  for lack of permission), the tool description tells agents to recreate the page in the target space
-  (body, labels and attachments) and then trash the original, accepting that comments, history and
-  the page ID are lost.
+### 10.3 Page, draft and label tools (D10)
 
-**Decided 2026-10-19 (D10), page and draft write interface:**
+- `create_page` takes exactly one of `parent_id` or `space_key`, creates a current page or a new-page
+  draft, and refuses a current page with the same title in the target space before creating, with its
+  link.
+- Drafts are new-page drafts only. `list_drafts` pages with a self-contained cursor; `publish_draft`
+  keeps the page ID; `delete_draft` is permanent and bypasses the trash.
+- `set_labels` (revised 2026-10-20) takes add and remove lists of global labels, skips changes already
+  in place, and sends one request per change in order, stopping at the first failure. It never sends
+  an inverse request: Confluence does not say whether this call caused a label to change, so undoing
+  could remove another client's label. Results list what was added, removed, unchanged, failed and not
+  attempted.
+- Bounds: titles of 255 printable characters; labels and space keys of 255 ASCII letters, digits,
+  underscores or hyphens (space keys may start with `~`); bodies of 2,000,000 characters.
 
-- create_page requires exactly one of parent_id or space_key. It creates a current page by default or a
-  new-page draft. position defaults to last; first, before and after use the same-parent sibling
-  order, with sibling required for before/after. A current page with the same title in the target
-  space is refused before creation, with its link.
-- update_page takes a complete body and mandatory expected_version. It checks the version before the
-  write, then sends the next version so Confluence's 409 also catches a concurrent edit.
-- list_drafts returns at most 100 rows per page (default 50) and uses a self-contained cursor.
-  It follows Confluence's next-link signal when present, falling back to the reported total or page
-  size only when that signal is absent. The cursor offset is capped at 1,000,000; the result reports
-  truncation if more drafts remain.
-  publish_draft publishes only new-page drafts and preserves their page ID. delete_draft permanently
-  deletes a new-page draft and bypasses the trash.
-- Updated 2026-10-20, `set_labels`: it takes explicit add and remove global-label lists and skips
-  already-satisfied changes.
-  It applies changes sequentially, stopping at the first failure. It does not automatically reverse
-  successful operations: Confluence's label response does not establish which client caused a state
-  transition, so an inverse request could undo another client's change. `added` and `removed` list
-  operations with successful responses; `failures` reports the failed operation and
-  `not_attempted` reports later operations. An uncertain outcome requires inspection before retrying.
-- Titles are limited to 255 printable characters, labels to 255 ASCII letters, digits, underscores
-  or hyphens, and space keys to 255 such characters with an optional leading `~` for a personal
-  space. Write bodies are limited to 2,000,000 characters. These limits bound tool inputs;
-  verify that they fit the configured instance's expected content during acceptance.
+### 10.4 Routes, identity and placement (D7)
 
-## 7. Authentication and concurrent use
+- Avoid routes and fields known to be deprecated, documented or not. Experimental routes, such as the
+  version list, are flagged in the research record.
+- Pages are identified by ID, which survives renames and moves; titles are unique only within a space.
+  Tools resolve every reference to an ID first: `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=`
+  carry it; `/x/…` short links are followed; `/display/KEY/Title` is looked up by title and fails
+  clearly after a rename. `pageVersion` selects a version; anchors are ignored. Other hosts are
+  refused.
+- Placement is one `parent_id` (the space follows from it) or `space_key` alone for the root, plus an
+  optional `position`: `first`, `last` (default), or `before`/`after` a `sibling` under the same parent.
+  A `space_key` that disagrees with the parent fails the call.
+- Same-space parent changes use the documented content update; positions use the private
+  `movepage.action`. If positioning fails after a create or move, the page stays and the result says the
+  position was not applied. Whether to use one route for both is open
+  ([roadmap](roadmap.md#one-route-for-same-space-moves)).
+- Cross-space moves use `movepage.action` with the target space and wait on the documented long-task
+  route; ID, version, children, attachments, comments and labels are kept (research §6.3). If
+  Confluence refuses one, the tool description tells agents that recreating the page in the target
+  space and trashing the original loses its ID, history and comments.
 
-Use a user-generated Confluence token without requiring administrator registration or assistance.
-Existing PAT probe success is the starting evidence; exact lifecycle and policy must be verified.
-Confluence authentication is separate from Microsoft OAuth; shared Microsoft sign-in is not assumed.
+### 10.5 Delete and restore (D9)
 
-Provide persistent encrypted authentication and explicit logout, with no plaintext fallback. Before
-logout, explain local token deletion and any need to generate a replacement when the original cannot
-be recovered. Distinguish local removal from server revocation; revocation behavior remains open.
+Confluence restores every page at the space root, whether deleted through REST or the UI, and its
+children become top-level pages when it is trashed (research §6.4). The connector compensates:
 
-Coordinate shared authentication state and output files across processes. Preserve account boundaries
-and ensure running processes respect logout/replacement before their next acquisition. If local
-authentication changes after a write response arrives, report an uncertain write and require inspection
-before retrying; never return data across the account boundary.
+- `delete_page` moves pages to the trash, never purges, and takes `children`: `refuse` (default; fails
+  and lists the children), `move_up` (reparents the direct children under the page's parent or the
+  space root, in order, then trashes the page) or `trash` (the whole subtree, bottom-up; more than 100
+  pages is refused with the count).
+- Before any write it reads the whole affected hierarchy (stopping at 5,000 pages without writing) and
+  checks the `delete` operation on every page. When the space's permissions cannot be read, it warns
+  that restoring will probably need a space administrator.
+- Before trashing, it saves each page's parent and position in a content property, best effort; a
+  failure to save is logged and does not stop the delete.
+- `restore_page` restores, then places the page: the caller's placement first, otherwise the saved
+  property, otherwise the space root. Any failure there is reported and leaves the page at the root;
+  the property is removed after a successful restore.
+- `list_trash` lists trashed pages for one space or every visible space (title, space, last edit, ID).
+  Confluence exposes no deletion time or author.
+- Results list every affected page with its former parent and position, and whether its step was done,
+  uncertain or not attempted. A failed step stops the operation; nothing is undone automatically.
 
-**Decided 2026-10-19 (D1):** store the token with `msal-extensions` encrypted persistence and its
-cross-process lock, as `lrh-m365-auth` does; no Microsoft sign-in is involved. If encryption is
-unavailable, refuse to run. Read the stored token on every Confluence call rather than keeping it in
-process memory. The command line matches the Microsoft 365 connectors: `confluence-connector auth`
-prompts for the token without echoing it, verifies it with the current-user endpoint and stores it
-with that username. `confluence-connector auth --sign-out` warns that the token cannot be recovered,
-then deletes it locally; it does not revoke it in Confluence. `status [--check]` reports the stored
-account offline, or verifies it, and `mcp` runs the stdio server. Tokens never pass through MCP tools.
+## 11. Reliability
 
-### Private configuration
+- Report inaccessible pages, unsupported elements, failed downloads and partial coverage explicitly.
+  Keep error messages short and readable, and keep page content out of logs.
+- **Transport** (from the concurrency measurements, research §3): one lazily built async `httpx`
+  client per process, kept across tool calls, HTTP/1.1, at most six connections, and **one limit of six
+  requests in flight for the whole process**, shared by every tool call. Processes do not coordinate;
+  a few concurrent sessions stay within the ten-parallel range tested without throttling.
+- Each page read is up to three parallel requests (bodies with version and history; attachments;
+  comments with replies), skipping parts the parse scope turns off. Embedded `children.*` expansions
+  are not used: they stop at 25 and omit replies.
+- Timeouts: 10 s to connect or wait for a pooled connection, 30 s to read or write.
+- Reads retry up to three attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
+  `Retry-After`. A write is retried only when it provably never applied (not sent, or answered 429 or
+  503); a timeout or any other uncertain outcome is reported for inspection, never resent.
+- Slow operations are described in tool descriptions so agents choose them knowingly; a broad query
+  needs no extra confirmation.
 
-`cql_timezone` is an optional private setting that accepts an IANA timezone name or a fixed
-`UTC±HH:MM` offset. `auth` and `status --check` calibrate only when the user runs those commands;
-calibration uses the verified stored account and read-only CQL searches. An unset value is written as
-a fixed measured offset. An existing value is compared only by `status --check`, which warns on a
-mismatch and leaves the setting unchanged. Users should replace an automatically written fixed offset
-with an IANA name if daylight-saving changes apply.
+## 12. Acceptance
 
-The optional private `acceptance` object may contain `personal_space_key` and `cross_space_key`.
-Fixture setup requires a visible personal space; cross-space checks require a second, distinct,
-visible space. Missing settings skip only the dependent acceptance checks. The connector never
-chooses a space implicitly for fixture writes.
+Functionality is tested against synthetic fixtures with known facts, never against real wiki content or
+its ranking.
 
-## 8. Reliability and acceptance
-
-Report inaccessible pages, unsupported elements, failed downloads and partial coverage explicitly.
-Retry reads a bounded number of times. Retry writes only when known not to have applied, honoring
-`Retry-After` for 429/503. Never resend an uncertain write; report it for inspection. Keep error paths
-short and readable, with no private content in operational logs.
-
-**Decided 2026-10-19, transport defaults** (from the
-[concurrency measurements](api-research.md#search); the PAT run reached 10 in parallel without
-throttling; 6 per tool call matches one browser tab on HTTP/1.1):
-
-- As in the Microsoft 365 connectors, one lazily built async `httpx` client per MCP process, kept
-  across tool calls (keep-alive) and rebuilt when the stored account changes. HTTP/1.1 only. At most
-  6 connections. One limit of 6 requests in flight per tool call, shared by every page
-  and every part of each page. Each chat runs its own connector process and limits are not
-  coordinated across processes; a few concurrent chats stay within the tested 10-parallel range, and
-  429 handling covers the rest.
-- Each page is read as up to three parallel requests: bodies with version and history; attachments
-  (`child/attachment?limit=500`); comments (`child/comment?depth=all`). Parts switched off by the parse
-  scope are skipped. Embedded `children.*` expansions are not used: they stop at 25 and omit replies.
-- Timeouts: 10 s to connect, 30 s to read, 10 s waiting for a pooled connection.
-- Reads retry up to 3 attempts with short jittered backoff on connection errors, timeouts, 429, 500,
-  502, 503 and 504, honouring `Retry-After`. A 500 that persists across the attempts is reported with
-  Confluence's log referral. Writes follow the shared write-retry rule: retried only when the request
-  provably never applied (not sent, or answered 429 or 503). A timeout or any other uncertain outcome is
-  reported for inspection, never resent.
-
-Document potentially slow operations so agents can choose them knowingly; do not add a permission
-prompt solely because a query is broad. Cancellation behavior still needs verification, especially
-when a remote write may already have completed.
-
-Use synthetic offline fixtures and iterative, explicitly authorized UI/API checks. Captures and UI
-resource exports are temporary private investigation inputs outside the repository. Release evidence
-must cover representative searches/reads, trees, draft/page operations and moves, authentication,
-concurrent use and exports.
-
-**Decided 2026-10-19, acceptance:** test functionality against synthetic fixtures with known facts,
-never against real wiki content or its ranking.
-
-- A setup script under `research/` creates or refreshes a `Connector Lab Acceptance` tree in the
-  personal space. It covers unique markers, a punctuated title, a code
-  identifier, accented words, every macro type, merged and nested tables, an inline image and an
-  attachment, a footer comment with a reply, a label, ordered children with a grandchild and several
-  versions. An inline comment is added by hand, because only the UI creates one. A second approved
-  space for cross-space moves is the private `acceptance.cross_space_key` setting. The personal
-  space is `acceptance.personal_space_key`. Setup writes only with `--apply`; the live runner sends
-  requests only with `--run-live`, and it runs Confluence writes only with `--allow-writes`. Missing
-  manual steps or settings make only the dependent checks report `skipped`.
-- Checks cover search modes and scope filters (tolerating indexing delay), cursor paging, link and
-  version resolution, reading output per D3/D4, tree order, metadata, export layout per D8, and every
-  write path including conflicts, refusals, the loss check, cross-space moves and the three
-  `delete_page` modes.
-- Every live check has offline synthetic coverage across the acceptance, service, remote and
-  transport test modules. Run those checks before every commit. The live runner reports pass, fail
-  or skipped with timings and no page content; it runs only after explicit operator opt-in.
-- Ready for daily use means the offline suite passes and every live check passes or is skipped for a
-  stated reason.
-
-Version comparisons, activity feeds, file interpretation and automated documentation-quality analysis
-are follow-ups. The agent, rather than the connector, decides how to reconcile conflicting sources.
+- A setup script creates a `Connector Lab Acceptance` tree in the configured personal space: unique
+  markers, a punctuated title, a code identifier, accented words, every macro type, merged and nested
+  tables, an image and an attachment, a footer comment with a reply, a label, ordered children with a
+  grandchild, and several versions. One inline comment is added by hand, because only the UI creates
+  one.
+- Setup writes only with `--apply`; the runner sends requests only with `--run-live`, and writes only
+  with `--allow-writes`. Missing manual steps or settings make only the dependent checks `skipped`.
+- Checks cover search modes and filters (tolerating index delay), paging, link and version resolution,
+  page text per D3 and D4, tree order, metadata, export layout per D8, and every write path, including
+  conflicts, refusals, the content-loss check, cross-space moves and the three `delete_page` modes.
+- Every live check also has offline synthetic coverage, run before every commit. The live runner reports
+  pass, fail or skipped with timings and no page content.
+- **Ready for daily use** means the offline suite passes and every live check passes or is skipped for
+  a stated reason.

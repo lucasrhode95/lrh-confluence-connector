@@ -1,98 +1,105 @@
-# Confluence research toolkit
+# Research tools
 
-Manual probes and investigation procedures for a configured Confluence deployment. Dated results
-belong in [docs/api-research.md](../docs/api-research.md), not beside the scripts. Requirements and
-implementation decisions belong in [docs/](../docs/README.md).
+Scripts that ask Confluence what this instance actually allows and how its routes actually behave, and
+an opt-in acceptance suite that checks the connector against synthetic pages. None of them runs as a
+routine check, and none makes a request without an explicit flag.
 
-## Configuration and commands
+Findings go to [`docs/api-research.md`](../docs/api-research.md), dated and anonymized. How to act on them
+is in [architecture §6](../docs/architecture.md#6-capability-routing) (capability routing).
 
-The app and probe share the stdlib-only settings loader. Copy `confluence_config.example.json` to
-the ignored `confluence_config.json` and configure the deployment endpoints and a synthetic query.
-No live target, query or credential is embedded as a fallback.
+## What belongs in the findings
 
-From the repository root, explicitly select your private file:
+- Link to Atlassian's documentation for public routes, parameters and schemas. Do not copy that
+  reference material here.
+- Keep what Atlassian does not document or documents ambiguously: dated credential results, caps and
+  paging behavior, search tokenization, write and trash side effects, failed variants and measured
+  costs. A documented route returning 200 is not a finding.
+- For private web routes, keep the request and response contract, the evidence source, the tested
+  variants and the failure behavior. Separate browser and source observations from requests we sent.
+- State the sample and what it does not prove. An empty search does not show a feature is unsupported,
+  and one instance's behavior is not universal.
 
-```powershell
+## Configuration
+
+The probe and the acceptance scripts read the same private `confluence_config.json` as the connector,
+through the same loader ([README](../README.md#setup), step 2). No instance, query or credential is
+built in. `query` is the probe's search text, `form_auth_path` the route of the probe's form-login mode,
+and `acceptance.personal_space_key` and `acceptance.cross_space_key` the only spaces the acceptance
+scripts may write to.
+
+## Authentication probe
+
+```bash
 uv run python research/probe_auth.py --config ./confluence_config.json --mode pat
 ```
 
-Other modes are `anonymous`, `basic`, `form` and `oauth`; run one per invocation. The probe also
-accepts `--base-url` and `--query` overrides. PAT/OAuth secrets are prompted securely. Basic/form
-prompt for username and hidden password. OAuth mode requires an already obtained token and performs
-no registration or grant flow. These modes are research options, not selected product auth backends.
-
-The probe checks current-user identity, both searches, spaces and one content result. It reports
-statuses, response keys and counts, without page content, names, identifiers or secrets. It does
-not store credentials. Settings precedence is `--config`, `CONFLUENCE_CONFIG`, then the required
-repository-root file; missing/invalid settings fail before prompting or making requests.
-
-Form mode makes one transient login attempt against the configured undocumented browser endpoint.
-`--remember-me` additionally requests that cookie behavior; a fresh in-memory client tests immediate
-cookie replay. Nothing persists and no login attempt is retried. Form mode requires authorization
-for that login; it is not part of routine checks or the product authentication path.
+One mode per run: `pat` (the connector's method), `anonymous`, `basic`, `form` (one login through the
+undocumented web login, [research §2.2](../docs/api-research.md#22-credentials); `--remember-me` asks for
+a persistent cookie) or `oauth` (a token from an administrator-registered app; no grant flow). Secrets
+are prompted with `getpass`, never taken as arguments, printed or saved. The probe reads the current
+user, both searches, the spaces and one content result, and prints statuses, response keys and counts.
 
 ## Synthetic acceptance fixture
 
-Both commands require `--config PATH`. Preview mode is offline. Setup only creates or refreshes
-synthetic fixture pages, attachments, a label and footer comments when passed `--apply`:
+The acceptance suite checks the connector, not Confluence, against pages with known facts
+([requirements §12](../docs/requirements.md#12-acceptance)). Use a fresh run ID for each fixture.
 
-```powershell
-uv run python research/setup_acceptance.py --config ./confluence_config.json --run-id deadbeef
-uv run python research/setup_acceptance.py --config ./confluence_config.json --run-id deadbeef --apply
-```
+| Step | Command | Changes Confluence? |
+|---|---|---|
+| 1 | `setup_acceptance.py --config … --run-id deadbeef` | No: lists what would be created |
+| 2 | `setup_acceptance.py --config … --run-id deadbeef --apply` | **Yes**: creates or refreshes the `Connector Lab Acceptance` tree in the personal space |
+| 3 | Add one inline comment to the root page in the Confluence UI | By hand |
+| 4 | `run_acceptance.py --config … --run-id deadbeef` | No: lists the checks offline |
+| 5 | `run_acceptance.py … --run-live` | No: reads, downloads and exports only |
+| 6 | `run_acceptance.py … --run-live --allow-writes` | **Yes**: page, draft, label, move, trash and restore checks on scratch pages |
 
-The setup output includes a run ID. Add one inline comment to the root page in the Confluence UI,
-then preview and, when explicitly authorized, run the live checks with that same ID:
-
-```powershell
-uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef
-uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef --run-live
-uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef --run-live --allow-writes
-```
-
-The fixture is restricted to `acceptance.personal_space_key`; cross-space checks require a distinct,
-visible `acceptance.cross_space_key`. Live checks download synthetic attachments and create local
-exports. Page, draft, label, move, trash and restore writes run only when `--allow-writes` is also
-passed. Inspect any partial fixture after an interrupted run before retrying. The runner reports
-fixed check labels, statuses, timings and exception types; it omits response text and page content.
-
-Do not run either live mode without explicit authorization for those configured requests.
-
-## Investigation rules
-
-- Run live reads/writes only with explicit authorization for those actions and configured targets.
-- Prefer documented APIs. Investigate private routes when a requirement needs them; distinguish
-  browser requests, source-only leads, official documentation and standalone probe success.
-- Keep useful routes/contracts, dated outcomes and limitations. Link to vendor documentation rather
-  than copying its public reference material. Here the relevant vendor is Atlassian.
-- Use the [UI runbook](ui-runbook.md) for controlled browser evidence. HARs and Save All Resources
-  exports stay outside repositories, contain private data, and are treated as data, never code.
-- Do not retain captures, member manifests, source indexes or capture-processing machinery.
-  Probes depend only on explicit settings and authorized endpoints, not captures.
-- Keep account safeguards and distinguish permission denial, malformed requests, unavailable routes,
-  empty search results and transport failures. One instance's behavior is not universal.
+Steps 2, 5 and 6 need the user's authorization for that run. Missing settings or manual steps make only
+the dependent checks `skipped`. After an interrupted run, inspect the fixture before retrying. The runner
+reports check names, statuses, timings and exception types, never response text or page content.
 
 ## Offline checks
 
-```powershell
+```bash
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
 uv run python research/probe_auth.py --help
-uv run python research/setup_acceptance.py --help
-uv run python research/run_acceptance.py --help
 ```
 
-Tests use synthetic settings and fake HTTP responses; they never contact Confluence.
-
-The offline suite mirrors the live acceptance groups:
+Tests use synthetic settings and fake HTTP responses only. Each live acceptance area has offline
+coverage:
 
 | Acceptance area | Offline coverage |
 |---|---|
-| Fixture creation, explicit opt-in and sanitized reporting | `tests/test_acceptance_setup.py` |
-| Search modes, scope, date conversion, cursors and quick navigation | `tests/test_search.py`, `tests/test_cql_dates.py`, `tests/test_timezone_calibration.py` |
-| Spaces, users, page trees and metadata | `tests/test_read_services.py`, `tests/test_read_remote.py` |
-| Text/rich reads, comments, typed references, versions and continuations | `tests/test_page_text_render.py`, `tests/test_pages_service.py`, `tests/test_read_remote.py` |
-| Attachment downloads, export layout and local files | `tests/test_attachments_service.py`, `tests/test_exports_service.py`, `tests/test_localfiles.py` |
-| Page, draft and label writes, conflicts and content safeguards | `tests/test_writes_service.py`, `tests/test_write_remote.py`, `tests/test_write_markup.py` |
-| Move, ordering, trash and restore outcomes | `tests/test_structure_service.py`, `tests/test_write_remote.py` |
-| Retries, account isolation and concurrent request behavior | `tests/test_remote.py`, `tests/test_app.py`, `tests/test_auth_store.py` |
+| Fixture creation, opt-in flags and sanitized reporting | `test_acceptance_setup.py` |
+| Search modes, scope, dates, cursors and quick navigation | `test_search.py`, `test_cql_dates.py`, `test_timezone_calibration.py` |
+| Spaces, users, trees and metadata | `test_read_services.py`, `test_read_remote.py` |
+| Text and rich reads, comments, typed references, versions, continuation | `test_page_text_render.py`, `test_pages_service.py`, `test_read_remote.py` |
+| Attachment downloads, exports and local files | `test_attachments_service.py`, `test_exports_service.py`, `test_localfiles.py` |
+| Page, draft and label writes, conflicts and content safeguards | `test_writes_service.py`, `test_write_remote.py`, `test_write_markup.py` |
+| Moves, ordering, trash and restore | `test_structure_service.py`, `test_write_remote.py` |
+| Retries, account isolation and concurrency | `test_remote.py`, `test_app.py`, `test_auth_store.py` |
+
+## Output and safety rules
+
+- Live requests, read or write, need the user's authorization for those requests and targets. Writes go
+  only to synthetic pages in the configured spaces; nothing is purged.
+- Output is statuses, counts, timings, response keys and error types: no tokens, cookies, page content,
+  names or real IDs.
+- Keep a permission denial, a malformed request, an unavailable route, an empty result and a transport
+  failure apart when recording a result.
+
+## Investigating the web UI
+
+Probes test routes we already know how to call. To find a new route or request shape, watch what
+Confluence's own UI does during one controlled action, following the [UI runbook](ui-runbook.md):
+
+1. Sign in in a browser and perform **one** action with a unique marker, such as a search for
+   `MARKER-1234`, or moving a named `Connector Lab` page.
+2. Export the traffic (DevTools → Network → **Export HAR** with content) or the loaded resources, to a
+   private folder **outside this repository**, and inspect it in place.
+3. Record only routes, request and response shapes, key names and counts in the research record, then
+   delete the export.
+
+**Captures are credentials.** They contain session cookies, `atl_token` values, page content and names.
+Never commit or share them, or turn them into test fixtures; re-implement what they show with the
+connector's own token.
