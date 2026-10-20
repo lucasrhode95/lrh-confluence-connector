@@ -53,10 +53,7 @@ design fixes rather than one patch each.
 
 ## Decisions
 
-- **Page text conversion:** whether to replace the hand-written HTML-to-text converter
-  (`service/page_text.py`) with a thin Confluence layer over an off-the-shelf HTML-to-Markdown library,
-  and restate D3 as faithful, readable text with documented limitations instead of a rule-by-rule
-  specification.
+None open. Settled decisions are in [requirements](requirements.md).
 
 ## Live verification
 
