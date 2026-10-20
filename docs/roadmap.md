@@ -21,6 +21,14 @@ requests were made. Broader refactoring, implementation of the decided move rout
 
 ### Bugs
 
+#### Restore placement trusts a sparse success response (P2)
+
+- **Seen live, 2026-10-20:** restore succeeds but returns no expanded space or version. Placement
+  fails its current-space check, leaving the page at the root and failing acceptance.
+- **Implemented, awaiting review:** reread current metadata after confirmed restoration before
+  applying placement. An offline test uses a successful response with both fields omitted.
+
+
 #### Unordered positions abort page reads (P1)
 
 - **Seen live, 2026-10-20:** synthetic pages and expanded ancestors return `position: -1`; numeric

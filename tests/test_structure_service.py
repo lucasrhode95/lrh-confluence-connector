@@ -228,6 +228,19 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.move_calls, [])
         self.assertEqual(self.api.properties_removed, ["90"])
 
+    async def test_restore_rereads_current_metadata_when_success_response_omits_space_and_version(self) -> None:
+        self.api.pages["90"] = _page("90", "Restored", status="trashed")
+        self.api.pages["30"] = _page("30", "Target")
+        original = self.api.restore_trashed_page
+        async def sparse_restore(page_id, **kwargs):
+            restored = await original(page_id, **kwargs)
+            return restored.model_copy(update={"space_key": None, "version": None})
+        self.api.restore_trashed_page = sparse_restore
+        result = await self.service.restore_page("90", parent_id="30")
+        self.assertEqual(result.placement_status, "applied")
+        self.assertEqual(result.parent_id, "30")
+        self.assertEqual(self.api.parent_updates, [("90", "30", 2)])
+
     async def test_restore_applies_saved_placement_before_removing_the_property(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")
         self.api.pages["30"] = _page("30", "Target")

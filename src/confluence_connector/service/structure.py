@@ -275,7 +275,7 @@ class PageStructure:
             raise InvalidRequest("restore_page accepts trashed pages only.")
         if metadata.space_key is None or metadata.version is None:
             raise Upstream("Confluence did not return the trashed page's space and version.")
-        restored = await self._api.restore_trashed_page(
+        await self._api.restore_trashed_page(
             metadata.page_id,
             title=metadata.title,
             space_key=metadata.space_key,
@@ -350,7 +350,11 @@ class PageStructure:
         actual_space_key: str | None = metadata.space_key
         if chosen is not None:
             try:
-                move_result = await self._move_resolved(restored, chosen)
+                current = await self._api.get_page_metadata(
+                    metadata.page_id, expected_username=self._username
+                )
+                _require_current_page(current)
+                move_result = await self._move_resolved(current, chosen)
             except UncertainWrite as exc:
                 placement_status = "unknown"
                 skip_property_cleanup = True
