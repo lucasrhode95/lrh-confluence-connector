@@ -1,7 +1,7 @@
 # Confluence connector requirements
 
 Decisions recorded 2026-10-18. These describe the intended product, not completed implementation.
-See [architecture](architecture.md) for the current proof of concept.
+See [architecture](architecture.md) for the current implementation.
 
 ## 1. Product and ownership
 
@@ -57,6 +57,23 @@ Attachment filenames and server-provided alt text are desirable searchable conte
   navigation failure is reported without failing the call.
 - Results report the query actually sent, an opaque cursor built from `start + size`, and the server's
   total, labelled approximate.
+- Date-only scope values (`YYYY-MM-DD`) mean that whole calendar day in Confluence's timezone and
+  work without timezone calibration. ISO-8601 timestamps with offsets are instants; timestamps
+  without an offset mean UTC. Convert timestamp bounds to timezone-less CQL minutes in the configured
+  `cql_timezone`, flooring `*_after` and ceiling `*_before` so the minute boundary stays inclusive.
+  Cursors retain the original UTC instants and reconvert them on every page; result timestamps remain
+  the UTC values returned by REST. If the timezone is unset, reject timestamp bounds with instructions
+  to run `confluence-connector status --check` rather than guessing.
+- In a repeated daylight-saving hour, CQL cannot encode which occurrence a timezone-less wall minute
+  refers to. Widen lower bounds to the earlier valid wall minute and upper bounds to the later valid
+  wall minute so both occurrences remain included. Move a rounded-up minute in a spring-forward gap to
+  the next valid minute.
+- The optional private `cql_timezone` setting is an IANA timezone name or a fixed `UTC±HH:MM` offset.
+  CLI calibration measures CQL's effective offset with bounded, read-only searches after token
+  verification in `auth` and `status --check`. If unset, either command writes the measured fixed
+  offset atomically while preserving other settings. A fixed offset does not follow daylight saving;
+  replace it with the appropriate IANA name when needed. `status --check` compares an existing setting
+  with the measured offset and warns without overwriting it.
 - Stemming, stop words and accent folding come from the instance's administrator-set indexing language
   (English here). The connector cannot control them. The tool description states the observed rules so
   agents retry with variants, such as Portuguese plurals.
@@ -277,6 +294,15 @@ prompts for the token without echoing it, verifies it with the current-user endp
 with that username. `confluence-connector auth --sign-out` warns that the token cannot be recovered,
 then deletes it locally; it does not revoke it in Confluence. `status [--check]` reports the stored
 account offline, or verifies it, and `mcp` runs the stdio server. Tokens never pass through MCP tools.
+
+### Private configuration
+
+`cql_timezone` is an optional private setting that accepts an IANA timezone name or a fixed
+`UTC±HH:MM` offset. `auth` and `status --check` calibrate only when the user runs those commands;
+calibration uses the verified stored account and read-only CQL searches. An unset value is written as
+a fixed measured offset. An existing value is compared only by `status --check`, which warns on a
+mismatch and leaves the setting unchanged. Users should replace an automatically written fixed offset
+with an IANA name if daylight-saving changes apply.
 
 ## 8. Reliability and acceptance
 

@@ -15,7 +15,15 @@ from confluence_connector.domain.models import AuthStatus, CurrentUser
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
+from confluence_connector.service.metadata import PageMetadataService
+from confluence_connector.service.search import ContentSearch
 from confluence_connector.service.spaces import SpaceService
+from confluence_connector.service.timezone_calibration import (
+    CqlTimezoneCalibration,
+    calibrate_cql_timezone as _calibrate_cql_timezone,
+)
+from confluence_connector.service.tree import PageTree
+from confluence_connector.service.users import UserSearch
 
 
 @dataclass
@@ -26,6 +34,10 @@ class Services:
     api: ConfluenceApi
     links: PageLinkResolver
     spaces: SpaceService
+    search: ContentSearch
+    users: UserSearch
+    tree: PageTree
+    metadata: PageMetadataService
 
 
 class AppContext:
@@ -89,6 +101,13 @@ class AppContext:
             checked=True,
         )
 
+    async def calibrate_cql_timezone(self) -> CqlTimezoneCalibration:
+        """Measure CQL's timezone after the caller has verified the active stored account."""
+        credential = self.store.load()
+        if credential is None:
+            raise AuthenticationRequired("No Confluence token is stored.")
+        return await _calibrate_cql_timezone(self._api(), credential.username)
+
     async def verify_token(self, token: str) -> CurrentUser:
         """Verify a prompted candidate before the caller persists it; no credential lock is held in flight."""
         if not token.strip():
@@ -104,11 +123,16 @@ class AppContext:
 
     def _build(self, username: str) -> Services:
         api = self._api()
+        links = PageLinkResolver(self.settings, self._transport_or_raise(), api)
         return Services(
             username=username,
             api=api,
-            links=PageLinkResolver(self.settings, self._transport_or_raise(), api),
+            links=links,
             spaces=SpaceService(self.settings, self.store, api, username),
+            search=ContentSearch(api, links, username, self.settings.get("cql_timezone")),
+            users=UserSearch(api, username),
+            tree=PageTree(api, links, username),
+            metadata=PageMetadataService(api, links, username),
         )
 
     def _api(self) -> ConfluenceApi:
