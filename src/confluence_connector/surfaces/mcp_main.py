@@ -39,8 +39,9 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotent
 OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
+# These tools write local outputs, may delete expired outputs during cleanup, and read Confluence.
 LOCAL_FILE = ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=False
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
 )
 WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True

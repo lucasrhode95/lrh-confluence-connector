@@ -257,8 +257,9 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         for name in ("download_attachments", "export_pages"):
             annotations = tools_by_name[name].annotations
             self.assertIsNotNone(annotations)
-            self.assertTrue(annotations.readOnlyHint)
-            self.assertFalse(annotations.openWorldHint)
+            self.assertFalse(annotations.readOnlyHint)
+            self.assertTrue(annotations.destructiveHint)
+            self.assertTrue(annotations.openWorldHint)
             self.assertFalse(annotations.idempotentHint)
         search_schema = tools_by_name["search_content"].model_dump(mode="json")["inputSchema"]
         self.assertIn("Literal search text", search_schema["properties"]["query"]["description"])
