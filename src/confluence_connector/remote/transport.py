@@ -239,10 +239,14 @@ class ConfluenceTransport:
                         try:
                             response = await _read_response(response)
                         except Upstream:
-                            if not is_read and 200 <= response.status_code < 300:
+                            uncertain_status = (
+                                200 <= response.status_code < 300
+                                or response.status_code >= 500 and response.status_code != 503
+                            )
+                            if not is_read and uncertain_status:
                                 raise UncertainWrite(
-                                    "Confluence may have applied the write but returned an unreadable response; "
-                                    "inspect before retrying."
+                                    "Confluence may have applied the write but returned an unreadable response "
+                                    f"(HTTP {response.status_code}); inspect before retrying."
                                 ) from None
                             raise
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:

@@ -216,6 +216,27 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(attempts, 1)
 
+    async def test_oversized_uncertain_server_error_write_response_is_not_retried(self) -> None:
+        for status in (500, 502, 504):
+            with self.subTest(status=status):
+                attempts = 0
+
+                def handler(_: httpx.Request) -> httpx.Response:
+                    nonlocal attempts
+                    attempts += 1
+                    return httpx.Response(status, content=b"oversized")
+
+                _, transport = self.make_client(handler)
+                with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", 4):
+                    with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
+                        await transport.send_json(
+                            "POST",
+                            "rest/api/content",
+                            body={"title": "Synthetic"},
+                            expected_username="sample-user",
+                        )
+                self.assertEqual(attempts, 1)
+
     async def test_write_server_error_is_uncertain_and_never_retried(self) -> None:
         for status in (500, 502, 504):
             with self.subTest(status=status):
