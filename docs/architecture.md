@@ -16,34 +16,48 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes two read-only tools:
+The MCP surface currently exposes six read-only tools:
 
 | Tool | Implemented behavior |
 |---|---|
 | `auth_status` | Offline configured-instance, stored-token, and account-name status |
 | `list_spaces` | Current and archived visible spaces with IDs, keys, names, types, statuses and same-instance links |
+| `search_content` | Literal CQL search with structured scope, approximate totals, stateless cursors, and labelled quick-navigation title matches |
+| `find_users` | Current users by display-name query; former users by exact username |
+| `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
+| `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
 
-Search, page reads, tree navigation, comments, attachment downloads, exports and write tools are not
-implemented yet.
+Page text reads, comments, attachment downloads, exports and write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
 - `src/confluence_connector/__main__.py`: CLI parsing, configuration selection, authentication and
   process exit codes.
 - `src/confluence_connector/bootstrap.py`: lazy process composition and account-bound services.
-- `src/confluence_connector/config.py`: required private settings, loader precedence, product constants
-  and the per-user data directory.
+- `src/confluence_connector/config.py`: required private settings, optional CQL timezone, loader
+  precedence, atomic calibration updates, product constants and the per-user data directory.
+- `src/confluence_connector/timezones.py`: IANA/fixed-offset validation and measured-offset formatting.
 - `src/confluence_connector/logs.py`: process-scoped rotating logs with credential redaction.
 - `src/confluence_connector/auth/store.py`: encrypted PAT and username persistence under
   `CrossPlatLock`.
-- `src/confluence_connector/domain/`: connector errors and typed status/space results.
+- `src/confluence_connector/domain/`: connector errors and typed status, space, search, user, tree and metadata results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
   checks; it never logs request URLs or payloads.
-- `src/confluence_connector/remote/confluence.py`: configured current-user and space routes, space
-  paging and response mapping.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for later page tools; it
+- `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
+  quick navigation, user lookup, ordered children and page-history mapping.
+- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and later page tools; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
+- `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
+  merging and self-contained search cursors.
+- `src/confluence_connector/service/cql_dates.py`: UTC scope normalization, configured-zone conversion,
+  inclusive minute rounding and daylight-saving edge handling.
+- `src/confluence_connector/service/timezone_calibration.py`: bounded read-only CQL search that
+  measures the effective CQL offset against a page's UTC modification time.
+- `src/confluence_connector/service/users.py`: display-name paging and exact username lookups.
+- `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
+- `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
+- `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
 
@@ -56,7 +70,7 @@ The required private JSON contains `base_url`, `query`, `form_auth_path`, and th
 paths. The probe-only `query` and `form_auth_path` remain in the shared loader contract. `--config PATH`
 takes precedence over `CONFLUENCE_CONFIG`, followed by repository-root `confluence_config.json`,
 independent of the working directory. Missing or invalid settings fail before a prompt or network call.
-Settings are cached in each process; restart after edits.
+Settings are cached in each process; restart after edits or a CLI calibration writes `cql_timezone`.
 
 `APP_NAME`, `CLI_NAME`, `MCP_SERVER_NAME`, and the log-level environment variable are named in
 `config.py`. Local state lives at `%USERPROFILE%\.lrh-confluence-connector` on Windows, under the XDG
@@ -69,9 +83,19 @@ and sign-out. There is no plaintext fallback. A different username is refused un
 `auth --sign-out`, making account switching explicit. The Confluence credential is unrelated to
 Microsoft OAuth.
 
-`status` reads local state only. `status --check` verifies the token against the current-user endpoint.
-The MCP `auth_status` tool is offline and reports the stored account name; it does not claim that the
-server still accepts the token. Sign-out clears the local credential and does not revoke it remotely.
+`status` reads local state only. `auth` calibrates the CQL timezone after verifying and storing the
+candidate token; `status --check` verifies the stored token and then calibrates it. Calibration uses a
+newest readable page and a bounded binary search of `lastmodified` minute cutoffs. It runs only when a
+user invokes these CLI commands, never on MCP startup or a tool call. If `cql_timezone` is absent,
+`config.py` writes the measured fixed offset atomically under a cross-process lock, preserving other
+settings. If set, only `status --check` compares the configured zone's offset at the calibration
+instant and warns on a mismatch without overwriting it. The automatically written fixed offset does
+not follow daylight saving; users replace it with an IANA zone when needed. The MCP `auth_status` tool
+is offline and reports the stored account name; it does not claim that Confluence still accepts the
+token. Sign-out clears the local credential and does not revoke it remotely.
+
+The optional private `cql_timezone` setting accepts an IANA name or a fixed `UTC±HH:MM` offset. The
+example config leaves it `null` so the next user-run `auth` or `status --check` can measure it.
 
 ## 4. HTTP, paging and links
 
@@ -87,11 +111,38 @@ using the returned `start + size`; the connector does not use the echoed `limit`
 `next` URL. Invalid offsets, sizes, totals and duplicate spaces fail with an upstream error instead
 of silently dropping entries.
 
+Search sends only CQL constructed from literal terms and validated scope values. `match=all` creates
+one `siteSearch` or `title` clause per term joined by AND; `any` sends the terms together; `phrase`
+preserves their order. Query punctuation is retained inside terms and stripped at their edges. Title
+search replaces punctuation with spaces and adds the observed quick-navigation source on the first
+page only when no scope filters are set; CQL hits keep their order and the merged page is capped at the
+requested limit. Each hit reports its source, and cursors remember only quick-navigation IDs included
+in the returned page. Quick-navigation failures leave CQL results usable, while account changes still
+fail the call. Cursors carry the normalized request and actual next offset, are revalidated on use, and
+do not depend on process memory. Full pages can have a continuation even when Confluence's approximate
+total suggests otherwise.
+
+Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
+`contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
+`include_archived` (true by default). Date-only values pass through as `yyyy/MM/dd` and mean that
+calendar day in Confluence's timezone. Timestamps with offsets are normalized to UTC; timestamps
+without offsets are treated as UTC. Timestamp bounds require `cql_timezone`, convert to timezone-less
+`yyyy/MM/dd HH:mm`, and round lower bounds down and upper bounds up to preserve inclusive minutes.
+Repeated daylight-saving hours are conservatively widened because CQL literals cannot identify a
+fold; a rounded minute in a spring-forward gap moves to the next valid minute. Cursors store the
+original UTC instants and reconvert them on every page. If the setting is missing, date-only search
+continues to work and timestamp filters return an actionable `InvalidRequest`. Page/space trees keep
+the server's child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
+Metadata accepts at most 20 references; experimental page versions are read in 200-item pages and
+capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
+historical metadata reads are not implemented. Results identify truncation or per-reference failures.
+
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title
 inside their space, and a renamed title fails clearly. Short-link redirects are followed manually and
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
-comment focus are ignored. No page-reading MCP tool exposes this resolver yet.
+comment focus are ignored. Search scope, page trees and metadata use this resolver for page references;
+page text reading is still open work.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
   <title id="title">Confluence connector architecture</title>
-  <desc id="desc">The CLI and MCP surface compose account-bound services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
+  <desc id="desc">The CLI and six-tool MCP surface compose account-bound services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#61778d" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
@@ -21,19 +21,19 @@
 
   <rect x="55" y="345" width="218" height="132" rx="16" class="box entry"/>
   <text x="78" y="383" class="head">MCP surface</text>
-  <text x="78" y="410" class="body"><tspan x="78">auth_status</tspan><tspan x="78" dy="22">list_spaces</tspan></text>
+  <text x="78" y="410" class="body"><tspan x="78">auth_status · list_spaces</tspan><tspan x="78" dy="22">search_content · find_users</tspan><tspan x="78" dy="22">get_page_tree · get_page_metadata</tspan></text>
 
   <rect x="359" y="235" width="250" height="164" rx="18" class="box core"/>
   <text x="384" y="274" class="head">AppContext</text>
   <text x="384" y="303" class="body"><tspan x="384">One account-bound service set</tspan><tspan x="384" dy="22">Rebuilt on username change</tspan><tspan x="384" dy="22">Lazy HTTP client lifecycle</tspan></text>
 
   <rect x="691" y="142" width="250" height="132" rx="16" class="box remote"/>
-  <text x="716" y="180" class="head">SpaceService</text>
-  <text x="716" y="207" class="body"><tspan x="716">Offline auth status</tspan><tspan x="716" dy="22">List visible spaces</tspan></text>
+  <text x="716" y="180" class="head">Read services</text>
+  <text x="716" y="207" class="body"><tspan x="716">spaces · search · users</tspan><tspan x="716" dy="22">tree · page metadata</tspan></text>
 
   <rect x="691" y="345" width="250" height="132" rx="16" class="box remote"/>
   <text x="716" y="383" class="head">ConfluenceApi</text>
-  <text x="716" y="410" class="body"><tspan x="716">Current-user and space routes</tspan><tspan x="716" dy="22">Maps REST JSON to models</tspan></text>
+  <text x="716" y="410" class="body"><tspan x="716">Search, quicknav, user and tree routes</tspan><tspan x="716" dy="22">Maps REST JSON to typed models</tspan></text>
 
   <rect x="1013" y="235" width="220" height="164" rx="18" class="box cloud"/>
   <text x="1038" y="274" class="head">Confluence DC</text>

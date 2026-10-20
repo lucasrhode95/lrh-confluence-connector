@@ -14,7 +14,15 @@ from confluence_connector import config
 from confluence_connector.auth.store import TokenStore
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.config import add_config_argument, load_config
-from confluence_connector.domain.errors import AuthenticationRequired, ConnectorError
+from confluence_connector.domain.errors import (
+    AuthenticationRequired,
+    ConnectorError,
+    InvalidRequest,
+    Throttled,
+    Upstream,
+)
+from confluence_connector.service.timezone_calibration import CqlTimezoneCalibration
+from confluence_connector.timezones import fixed_offset_name, offset_minutes_at, parse_cql_timezone
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -81,37 +89,89 @@ def _auth(sign_out: bool, config_path: Path | None) -> int:
     if not token:
         raise AuthenticationRequired("The Confluence token cannot be empty.")
 
-    async def verify_and_store() -> str:
+    async def verify_and_store() -> tuple[str, CqlTimezoneCalibration | None]:
         context = AppContext(settings, store=store)
         try:
             user = await context.verify_token(token)
             store.save(token=token, username=user.username)
-            return user.username
+            calibration = await _try_calibrate_timezone(context)
+            return user.username, calibration
         finally:
             await context.aclose()
 
-    username = asyncio.run(verify_and_store())
+    username, calibration = asyncio.run(verify_and_store())
     print(f"Confluence token stored securely for {username}.")
+    _report_cql_timezone(settings, calibration, compare_configured=False)
     return EXIT_OK
 
 
 def _status(settings: dict[str, Any], check: bool) -> int:
-    async def report() -> tuple[bool, str | None]:
+    async def report() -> tuple[bool, str | None, CqlTimezoneCalibration | None]:
         context = AppContext(settings)
         try:
             status = await (context.check_auth_status() if check else context.auth_status())
-            return status.token_stored, status.username
+            calibration = await _try_calibrate_timezone(context) if check and status.token_stored else None
+            return status.token_stored, status.username, calibration
         finally:
             await context.aclose()
 
-    stored, username = asyncio.run(report())
+    stored, username, calibration = asyncio.run(report())
     print(f"Confluence instance: {settings['base_url']}")
     if not stored:
         print("No Confluence token is stored.")
         return EXIT_AUTH_REQUIRED if check else EXIT_OK
     print(f"Token stored for: {username}")
     print("Token verified with Confluence." if check else "Offline status only; use --check to verify.")
+    if check:
+        _report_cql_timezone(settings, calibration, compare_configured=True)
     return EXIT_OK
+
+
+async def _try_calibrate_timezone(context: AppContext) -> CqlTimezoneCalibration | None:
+    """Turn ordinary calibration failures into a user-visible warning without hiding auth failures."""
+    try:
+        return await context.calibrate_cql_timezone()
+    except (InvalidRequest, Throttled, Upstream):
+        return None
+
+
+def _report_cql_timezone(
+    settings: dict[str, Any],
+    calibration: CqlTimezoneCalibration | None,
+    *,
+    compare_configured: bool,
+) -> None:
+    """Persist a missing fixed offset or report whether the configured zone matches the sample."""
+    if calibration is None:
+        print("CQL timezone calibration failed; the configuration was not changed.")
+        return
+    measured = fixed_offset_name(calibration.offset_minutes)
+    configured = settings.get("cql_timezone")
+    if configured is None:
+        written = config.write_cql_timezone_if_missing(measured)
+        settings = load_config()
+        configured = settings.get("cql_timezone")
+        if written:
+            print(
+                f"CQL timezone {measured} was written to the private config. Replace it with an IANA zone "
+                "if your Confluence timezone observes daylight saving."
+            )
+            return
+    if not compare_configured:
+        print("Configured cql_timezone was left unchanged; `status --check` compares it with CQL.")
+        return
+    try:
+        configured_offset = offset_minutes_at(parse_cql_timezone(configured), calibration.reference_utc)
+    except (TypeError, ValueError):
+        print("Warning: cql_timezone could not be compared with the measured CQL offset.")
+        return
+    if configured_offset != calibration.offset_minutes:
+        print(
+            f"Warning: configured cql_timezone differs from the measured CQL offset ({measured}); "
+            "the setting was not overwritten."
+        )
+    else:
+        print("Configured cql_timezone matches the measured CQL offset.")
 
 
 def _add_command_config(parser: argparse.ArgumentParser) -> None:

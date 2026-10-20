@@ -15,7 +15,13 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "research"))
 
-from confluence_connector.config import _read_config, add_config_argument, data_dir, load_config
+from confluence_connector.config import (
+    _read_config,
+    add_config_argument,
+    data_dir,
+    load_config,
+    write_cql_timezone_if_missing,
+)
 from confluence_connector.__main__ import build_parser
 import probe_auth
 
@@ -85,6 +91,43 @@ class ConfigurationChecks(unittest.TestCase):
         del config["endpoints"]["spaces"]  # type: ignore[index]
         with self.assertRaisesRegex(SystemExit, "endpoints must define"):
             self.configure(config)
+
+    def test_cql_timezone_accepts_iana_and_fixed_offsets(self) -> None:
+        for timezone_name in ("Atlantic/Reykjavik", "UTC+05:30", "UTC-03:00"):
+            with self.subTest(timezone=timezone_name):
+                _read_config.cache_clear()
+                config = settings()
+                config["cql_timezone"] = timezone_name
+                self.assertEqual(self.configure(config)["cql_timezone"], timezone_name)
+
+    def test_invalid_cql_timezone_is_rejected(self) -> None:
+        for timezone_name in ("Mars/Olympus", "UTC+15:00", "UTC+00:75", 330):
+            with self.subTest(timezone=timezone_name):
+                _read_config.cache_clear()
+                config = settings()
+                config["cql_timezone"] = timezone_name
+                with self.assertRaisesRegex(SystemExit, "cql_timezone"):
+                    self.configure(config)
+
+    def test_calibration_writes_timezone_atomically_once_and_preserves_other_keys(self) -> None:
+        original = settings()
+        self.configure(original)
+        with (
+            patch.dict(os.environ, {"CONFLUENCE_CONNECTOR_HOME": str(self.folder / "state")}),
+            patch("confluence_connector.config.os.replace", wraps=os.replace) as replace,
+        ):
+            self.assertTrue(write_cql_timezone_if_missing("UTC+05:30"))
+            self.assertFalse(write_cql_timezone_if_missing("UTC-03:00"))
+        replace.assert_called_once()
+        temporary, target = (Path(value) for value in replace.call_args.args)
+        self.assertEqual(temporary.parent, target.parent)
+        self.assertEqual(target, self.config_path.resolve())
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["cql_timezone"], "UTC+05:30")
+        for key, value in original.items():
+            self.assertEqual(saved[key], value)
+        self.assertEqual(load_config()["cql_timezone"], "UTC+05:30")
+        self.assertEqual(list(self.folder.glob(".confluence_config.json.*.tmp")), [])
 
     def test_relative_and_absolute_paths_share_the_same_settings(self) -> None:
         original = self.configure(settings())

@@ -18,11 +18,7 @@ writes were verified only through a browser session.
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `search_content` | Query plus `scope` (spaces, space type, content types, labels, creators/contributors, created/modified ranges, parent/ancestor, archived on by default), `match` and `fields` per [requirements §3](requirements.md#3-search-and-navigation); cursor paging | Ready |
-| `find_users` | Resolve a current user's name to a username for creator/contributor filters; former users are findable only by username | Ready |
-| `get_page_tree` | Children (ordered, paged) and ancestors from a page or space root; depth-bounded | Ready |
 | `get_pages` | Read pages by ID or URL as text with attachment/macro markers, comments per parse scope, and short version metadata | Ready |
-| `get_page_metadata` | Fuller metadata for one or many pages: history, version list, labels, contributors, ancestors | Ready |
 | `download_attachments` | Save named attachments of a page locally; return paths | Ready |
 | `export_pages` | Pages and versions plus parse scope into one ZIP with text and attachment folders | Ready |
 | `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Ready |
@@ -44,8 +40,8 @@ Comment and attachment writes are not in the requirements and are not proposed h
   mirrored by offline tests with synthetic fake responses.
 - Typed page and content models carrying source metadata and ordered references (page, version,
   attachment, comment, macro) mapped from REST JSON and storage/`view` structure before rendering.
-- Remaining content routes and adapters, including paging caps, CQL 400 details, 409 conflicts and
-  Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
+- Remaining content routes and adapters for page text, attachments, exports and writes, including
+  paging caps, CQL 400 details, 409 conflicts and Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
   offline tests; each later write capability still needs its own refusal and partial-failure coverage.
 
 ## Decisions
@@ -63,6 +59,37 @@ in the personal space, including a rich-text sample page.
   the `status` parameter but does not enumerate its accepted values; this filter choice is inferred
   from the returned status names and the planned tool contract. Verify both result sets on the
   configured instance during user-run acceptance.
+- `search_content` fixes the scope input names as `space_keys`, `space_type`, `content_types`,
+  `labels`, `creator_usernames`, `contributor_usernames`, `created_after/before`,
+  `modified_after/before`, `parent`, `ancestor` and `include_archived`. Confirm calibration and
+  `cql_timezone` conversion on the configured instance, and whether CQL uses the profile or server
+  zone if they ever differ. Confirm conservative widening during repeated daylight-saving hours.
+  The tool accepts up to 100 results per page, 50 values per collection filter and 255 characters per
+  filter value; query text is capped at 1,000 characters. Cursors are limited to 16,384 characters
+  and offsets to 1,000,000. These bounds protect request and response sizes.
+- Quick-navigation title rows are mapped from the observed `contentNameMatches` envelope using
+  `contentId/id`, `title/name`, `spaceKey` or nested `space`, and `url/href`. This route and row shape
+  are browser-observed and deployment-specific; verify result coverage and returned fields on the
+  configured instance. The supplement is skipped for scoped title searches because quick navigation
+  does not accept those filters. Merged first-page hits stay within the caller's result limit, preserving
+  CQL order; only returned quick-navigation IDs affect continuation filtering. Search terms escape
+  text-query syntax separately from CQL string quoting; verify metacharacter behavior on the configured
+  instance. User lookup continues to use the CQL search and exact `/rest/api/user?key=` lookup for former
+  users; quick navigation with `type=user` is known to fail.
+- `get_page_tree` uses `rest/api/space/{spaceKey}/content/page` for space-root pages and
+  `rest/api/content/{id}/child/page` for descendants. Verify space-root response order and paging on
+  the configured instance. Page depth is 1–5 (default 3), counting the selected page as level 1;
+  for a space root, top-level pages are level 1. A result is capped at 1,000 pages; the cap is
+  intended to prevent oversized MCP responses. Space keys accept letters, digits, underscores and
+  hyphens, up to 255 characters.
+- `get_page_metadata` accepts up to 20 references and returns successful records alongside per-page
+  failures. Each record lists up to 5,000 experimental versions (200 per request) and reports when
+  that cap truncates history. Metadata reports the current page and rejects versioned references;
+  historical reads remain separate later work. Confirm the expansion fields, contributor mapping
+  and version-list totals for the configured instance during acceptance.
+- `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
+  Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
+  1,000,000. Verify current and former-user results during acceptance.
 
 ### Other live checks
 
