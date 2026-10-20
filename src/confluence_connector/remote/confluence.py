@@ -1017,7 +1017,7 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
     links = links if isinstance(links, dict) else {}
     extensions = content.get("extensions")
     extensions = extensions if isinstance(extensions, dict) else {}
-    position = _optional_nonnegative_int(content.get("position", extensions.get("position")))
+    position = _optional_position(content.get("position", extensions.get("position")))
     raw_url = _optional_string(value.get("url")) or _optional_string(links.get("webui"))
     return ContentSearchHit(
         content_id=content_id,
@@ -1201,7 +1201,7 @@ def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:
                 title=title,
                 space_key=_optional_string(space.get("key")),
                 url=_same_instance_link(base_url, links.get("webui")),
-                position=_optional_nonnegative_int(item.get("position")),
+                position=_optional_position(item.get("position")),
             )
         )
     return summaries
@@ -1391,6 +1391,13 @@ def _identifier(value: Any) -> str | None:
 
 def _optional_string(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _optional_position(value: Any) -> int | None:
+    """Map the server's unordered-position sentinels without weakening numeric count validation."""
+    if value in (-1, "-1", "none"):
+        return None
+    return _optional_nonnegative_int(value)
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:
