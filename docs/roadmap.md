@@ -12,11 +12,16 @@ Snapshot **2026-10-20**, from whole-project reviews of `e67b60d` and the unresol
 PRs #5–#9. An item that came from a review thread links it: resolve the thread, with a one-line reply
 naming the fixing commit, when the fix lands.
 
+Correctness pass **2026-10-20**, awaiting user review: all 18 bug entries below retain their original
+context and now record implementation and offline coverage. The full suite ran 275 tests successfully
+(one platform skip); compilation and the probe CLI help check passed. No live requests or review
+requests were made. Broader refactoring, the move-route decision and live verification remain open.
+
 ## Implementation
 
 ### Bugs
 
-Each bug is **Seen** (a synthetic example: the call and what came back), **Expected**, **Cause** and
+Each bug is **Seen** (a reproduction or explicitly identified inspection finding), **Expected**, **Cause** and
 **Fix**. Priority follows the review scale: P1 breaks a promised behavior, P2 is a narrower defect, P3 is
 minor.
 
@@ -60,6 +65,8 @@ minor.
   expects a callable ([`research/run_acceptance.py`](../research/run_acceptance.py)).
 - **Fix:** pass `_pass`. Review thread:
   [PR #8](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507237).
+- **Implemented — awaiting review (2026-10-20):** Passed `_pass` as a callable for authentication
+  and fixture checks. An offline runner test executes both prerequisites and verifies PASS outcomes.
 
 #### `move_up` undoes a concurrent reparent (P2)
 
@@ -185,6 +192,11 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
   ([`research/acceptance_fixtures.py`](../research/acceptance_fixtures.py)).
 - **Fix:** drop the HTML macro from the fixture, or add it through a fixture-only path. Review thread:
   [PR #8](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507219).
+- **Implemented — awaiting review (2026-10-20):** Removed the HTML macro from the automatically
+  written fixture; product write validation remains strict. Replaced the shallow macro-list test
+  with setup through the real write service and fake HTTP transport. Setup also rereads the version
+  after placement changes before a body update, with its own regression. HTML-macro behavior remains
+  an offline renderer case and a separately authorized live verification.
 
 #### The live move check ignores order (P2)
 
@@ -193,6 +205,9 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** it reads the returned parent only, and the cross-space check trusts the service's
   reported target ([`research/run_acceptance.py`](../research/run_acceptance.py)).
 - **Fix:** re-read metadata and ordered children independently before cleanup.
+- **Implemented — awaiting review (2026-10-20):** Required confirmed positioning and independently
+  reread metadata and all ordered children for same-space and cross-space moves. Tests reject
+  explicit positioning failure, wrong sibling order and wrong destination.
 
 #### Acceptance leaves restored pages current (P2)
 
@@ -202,6 +217,10 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** the restore checks never trash the pages again.
 - **Fix:** trash them after their assertions. Review thread:
   [PR #8](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507255).
+- **Implemented — awaiting review (2026-10-20):** Re-trashed the restored move-up parent and
+  subtree, then independently checked that all seven delete/restore scratch pages are trashed. An
+  offline workflow runs the production structure service against synthetic state and verifies every
+  scratch page’s final status.
 
 #### Label removal is skipped beyond 200 labels (P3)
 
@@ -284,7 +303,8 @@ conversion it then discards. Parse once and skip the conversion for `rich`.
 
 Remove the unused helper in `service/writes.py`, the unreachable ownership branch in `bootstrap.py` and
 the needless `async` on `_nodes_for_children`. Add a `pyflakes`-style check to the documented checks:
-`service/pages.py` raises `Upstream` without importing it, which `compileall` does not catch.
+`service/pages.py` raised `Upstream` without importing it, which `compileall` does not catch.
+The missing import is fixed in this pass; the dead-code cleanup and additional static check remain open.
 
 #### Fewer, stronger tests
 
@@ -296,6 +316,9 @@ the needless `async` on `_nodes_for_children`. Add a `pyflakes`-style check to t
   case to the export tests).
 - Remove the trash assertions repeated in the omnibus route test and assertions on embedded constants,
   such as the fixture PNG signature.
+
+The shallow fixture macro-list test and embedded PNG-signature assertion were removed in this pass;
+fixture creation now has an integration regression. The remaining test consolidation is still open.
 
 ### Enhancements
 
@@ -326,7 +349,8 @@ for the reads or writes it makes; record the dated result in the research record
 ### Acceptance run
 
 The opt-in runner ([research toolkit](../research/README.md#synthetic-acceptance-fixture)) has never
-completed: fix the three acceptance bugs above first. Then run setup, add the one inline comment by
+completed. The setup, callable handling, move assertions and scratch cleanup fixes above have offline
+coverage; their live verification is still pending. After review, run setup, add the one inline comment by
 hand, and run `--run-live --allow-writes`. It covers search modes and filters, paging, link and version
 resolution, page text, trees, metadata, exports, and every write path including conflicts, refusals,
 the content-loss check, cross-space moves and the three `delete_page` modes.

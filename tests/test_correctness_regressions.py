@@ -208,6 +208,101 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(measured.offset_minutes, 0)
                 self.assertEqual(selections, 2)
 
+    async def test_fixture_setup_uses_real_rich_write_validation(self):
+        fixture = new_fixture("deadbeef")
+        written = []
+        def respond(request):
+            if request.method == "POST":
+                import json
+                body = json.loads(request.content)
+                written.append(body["body"]["storage"]["value"])
+                return httpx.Response(200, json={"id": "42", "title": fixture.root_title, "type": "page", "status": "current", "space": {"key": "SYNTH"}, "version": {"number": 1}})
+            return httpx.Response(200, json={"results": []})
+        api, links = self.api(respond)
+        services = SimpleNamespace(api=api, links=links, username="sample-user", writes=PageWrites(api, links, "sample-user", "https://confluence.example.test/wiki"))
+        created = await setup_acceptance._ensure_page(
+            services, fixture, title=fixture.root_title, body=root_storage(fixture),
+            space_key="SYNTH", parent_id=None, position=None,
+        )
+        self.assertEqual(created, "42")
+        self.assertEqual(len(written), 1)
+        self.assertIn(fixture.marker, written[0])
+        self.assertNotIn('ac:name="html"', written[0])
+
+    async def test_fixture_refresh_uses_the_version_after_a_parent_move(self):
+        fixture = new_fixture("deadbeef")
+        before = SimpleNamespace(storage_body=f"<p>{fixture.marker}</p>", version=1, metadata=_page("42", "Fixture", parent_id="9"))
+        after = SimpleNamespace(storage_body=before.storage_body, version=2)
+        services = SimpleNamespace(
+            username="sample-user",
+            api=SimpleNamespace(find_page_id_by_title=AsyncMock(return_value="42"), get_page_content=AsyncMock(side_effect=[before, after])),
+            structure=SimpleNamespace(move_page=AsyncMock()),
+            writes=SimpleNamespace(update_page=AsyncMock()),
+        )
+        await setup_acceptance._ensure_page(services, fixture, title=fixture.root_title, body=root_storage(fixture), space_key="SYNTH", parent_id="10", position="last")
+        self.assertEqual(services.writes.update_page.call_args.kwargs["expected_version"], 2)
+
+    async def test_runner_records_successful_auth_and_fixture_checks(self):
+        from contextlib import ExitStack
+        services = SimpleNamespace(username="sample-user")
+        context = SimpleNamespace(
+            check_auth_status=AsyncMock(return_value=SimpleNamespace(checked=True, username="sample-user")),
+            services=AsyncMock(return_value=services),
+        )
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(run_acceptance, "_locate_fixture", new=AsyncMock(return_value=SimpleNamespace(root="42"))))
+            for name in ("_check_spaces", "_check_search_modes", "_check_search_filters", "_check_search_date_filters", "_check_cursor_and_user", "_check_tree_and_metadata", "_check_page_reads", "_check_inline_comment_marker", "_check_downloads_and_exports", "_check_concurrent_reads"):
+                stack.enter_context(patch.object(run_acceptance, name, new=AsyncMock()))
+            report = await run_acceptance._run_live(context, settings(), new_fixture("deadbeef"), "SYNTH", False)
+        self.assertEqual([(r.name, r.status) for r in report.results[:2]], [("authentication", "PASS"), ("fixture", "PASS")])
+        self.assertFalse(any(r.status == "FAIL" for r in report.results))
+
+    async def test_acceptance_rejects_false_success_and_wrong_order(self):
+        services = SimpleNamespace(
+            username="sample-user",
+            writes=SimpleNamespace(create_page=AsyncMock(return_value=SimpleNamespace(page_id="42"))),
+            structure=SimpleNamespace(move_page=AsyncMock(return_value=SimpleNamespace(moved=True, parent_id="20", position_applied=False))),
+        )
+        pages = SimpleNamespace(root="10", child_one="20", personal_space="SYNTH")
+        with self.assertRaisesRegex(AssertionError, "did not complete"):
+            await run_acceptance._check_move_and_order(services, new_fixture("deadbeef"), pages)
+        services.api = SimpleNamespace(
+            get_page_metadata=AsyncMock(return_value=_page("42", "Moved", parent_id="20")),
+            list_child_pages=AsyncMock(return_value=SimpleNamespace(start=0, size=2, has_more=False, hits=[SimpleNamespace(content_id="42"), SimpleNamespace(content_id="99")])),
+        )
+        with self.assertRaisesRegex(AssertionError, "sibling order"):
+            await run_acceptance._assert_placement(services, "42", "SYNTH", "20", "last")
+        services.api.get_page_metadata.return_value.space_key = "OTHER"
+        with self.assertRaisesRegex(AssertionError, "destination"):
+            await run_acceptance._assert_placement(services, "42", "SYNTH", "20", "first")
+
+    async def test_acceptance_delete_restore_leaves_every_scratch_page_trashed(self):
+        class Api(_StructureApi):
+            async def list_child_pages(self, page_id, *, start, expected_username):
+                ids = [key for key, page in self.pages.items() if page.status == "current" and page.ancestors and page.ancestors[-1].page_id == page_id]
+                return self._child_page(ids, start)
+
+            async def move_page_action(self, page_id, **kwargs):
+                await super().move_page_action(page_id, **kwargs)
+                parent = kwargs["target_id"] if kwargs["position"] == "append" else None
+                self.pages[page_id].ancestors = [PageSummary(page_id=parent, title="Parent")] if parent else []
+
+            async def list_trash_page(self, **kwargs):
+                rows = [TrashPageSummary(page_id=key, title=page.title, space_key=page.space_key) for key, page in self.pages.items() if page.status == "trashed"]
+                return RemoteTrashPage(pages=rows, start=0, size=len(rows), has_more=False)
+
+        api = Api()
+        api.pages["10"] = _page("10", "Fixture")
+        api.add_child("10", "11", "Fixture child")
+        async def create(title, body, **kwargs):
+            page_id = str(len(api.pages) + 100)
+            api.pages[page_id] = _page(page_id, title, parent_id=kwargs.get("parent_id"))
+            return api.pages[page_id]
+        services = SimpleNamespace(api=api, username="sample-user", writes=SimpleNamespace(create_page=create), structure=PageStructure(api, _Links(), "sample-user"))
+        await run_acceptance._check_delete_and_restore(services, new_fixture("deadbeef"), SimpleNamespace(root="10", personal_space="SYNTH"))
+        scratch = [page for key, page in api.pages.items() if key not in {"10", "11"}]
+        self.assertEqual(len(scratch), 7)
+        self.assertTrue(all(page.status == "trashed" for page in scratch))
 
 
 class RendererRegressions(unittest.TestCase):
