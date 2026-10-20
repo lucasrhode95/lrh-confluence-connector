@@ -187,10 +187,10 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
             pages=[], start=0, size=0, total_size=0, has_more=False
         )
 
-        result = await self.service.list_trash(space_key="~sample-user")
+        result = await self.service.list_trash(space_key="~sample.user@example.test")
 
         self.assertEqual(result.pages, [])
-        self.assertEqual(self.api.trash_requests, [("~sample-user", 0, 50)])
+        self.assertEqual(self.api.trash_requests, [("~sample.user@example.test", 0, 50)])
 
     async def test_restore_returns_to_root_when_caller_positioning_is_refused(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")

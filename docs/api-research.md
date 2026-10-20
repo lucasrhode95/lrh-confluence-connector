@@ -345,3 +345,19 @@ Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a re
 | `/plugins/viewstorage/viewpagestorage.action?pageId=` | Storage as `text/plain`, the same as `body.storage` |
 | `/rest/prototype/1/search/user.json` | Prototype user search |
 | `/pages/reorderpages.action`, tree-copy and tree-delete actions | Source only |
+
+## 8. Personal-space keys
+
+Live REST discovery, 2026-10-20: the spaces listing returned the authenticated user's personal space
+with a `~` key containing dots and `@`. Personal keys derived from account usernames must preserve
+those characters; the configured acceptance target was confirmed against the authenticated username.
+
+### 8.1 Acceptance setup result
+
+Live, 2026-10-20: after accepting the personal-space key, setup reached `POST /rest/api/content`
+for a synthetic current root page containing the acceptance macro fixture. The instance returned
+HTTP 500 with a JSON content type. The connector reported `UncertainWrite`; the write was not
+automatically retried. Direct content-collection lookups by exact title and personal space found no
+current fixture pages after inspection. A subsequent manually inspected setup attempt also returned
+500; final direct reads again found zero current fixture pages. This does not establish that REST
+creation is generally unavailable; the fixture body or instance-side processing still needs diagnosis.

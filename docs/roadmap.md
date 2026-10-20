@@ -21,6 +21,16 @@ requests were made. Broader refactoring, implementation of the decided move rout
 
 ### Bugs
 
+#### Personal-space keys reject account-name punctuation (P1)
+
+- **Seen live, 2026-10-20:** the space listing identifies the account's personal space, but configuration
+  and service validators reject its key because the username contains dots and `@`; setup stops before
+  creating any fixture pages.
+- **Implemented, awaiting review:** allow those characters after the `~` personal-space prefix in the
+  configuration, tree, page-write and structure boundaries. Existing synthetic boundary tests now use
+  a fictional dotted account name. Normal-space validation remains unchanged.
+
+
 Each bug is **Seen** (a reproduction or explicitly identified inspection finding), **Expected**, **Cause** and
 **Fix**. Priority follows the review scale: P1 breaks a promised behavior, P2 is a narrower defect, P3 is
 minor.
@@ -351,6 +361,15 @@ for the reads or writes it makes; record the dated result in the research record
 `Connector Lab` pages stay in the personal space for these checks.
 
 ### Acceptance run
+
+**Attempted 2026-10-20; blocked during setup.** Authentication succeeded. The personal-space key
+validation defect above was fixed, but creating the fixture root returned HTTP 500 with a JSON response.
+The connector correctly reported an uncertain write. Exact-title content-collection reads after
+inspection and a subsequent setup attempt found no current fixture pages. Diagnose fixture-body versus
+instance-side creation failure before another write attempt. The cross-space target and CQL timezone
+are still unset, and the manual inline-comment prerequisite is incomplete. The live runner completed with **1 pass (authentication), 0 failed checks and 16 skipped checks**
+because the fixture was absent after its bounded indexing wait. This is not an acceptance pass.
+
 
 The opt-in runner ([research toolkit](../research/README.md#synthetic-acceptance-fixture)) has never
 completed. The setup, callable handling, move assertions and scratch cleanup fixes above have offline

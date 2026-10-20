@@ -43,11 +43,11 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_page_accepts_a_personal_space_key_prefix(self) -> None:
         result = await self.service.create_page(
-            "Personal page", "body", format="text", space_key="~sample-user"
+            "Personal page", "body", format="text", space_key="~sample.user@example.test"
         )
 
         self.assertEqual(result.page_id, "700")
-        self.assertEqual(self.api.create_calls[0]["space_key"], "~sample-user")
+        self.assertEqual(self.api.create_calls[0]["space_key"], "~sample.user@example.test")
 
     async def test_duplicate_title_fails_before_page_creation_and_returns_link(self) -> None:
         self.api.title_matches[("SYNTH", "Existing")] = "123"

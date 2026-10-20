@@ -20,7 +20,7 @@ from confluence_connector.remote.links import PageLinkResolver
 DEFAULT_DEPTH = 3
 MAX_DEPTH = 5
 MAX_TREE_PAGES = 1_000
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_-]{1,254})$")
+_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
 class PageTree:
@@ -199,7 +199,7 @@ def _space_key(value: Any) -> str:
     if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
         raise InvalidRequest(
             "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "optionally prefixed by ~ for a personal space."
+            "or a ~ personal-space key whose username may also contain dots and @."
         )
     return value
 

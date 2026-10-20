@@ -103,7 +103,7 @@ class ConfigurationChecks(unittest.TestCase):
     def test_acceptance_spaces_are_optional_and_allow_personal_space_prefix(self) -> None:
         config = settings()
         config["acceptance"] = {
-            "personal_space_key": "~sample-user",
+            "personal_space_key": "~sample.user@example.test",
             "cross_space_key": "SYNTH_TARGET",
         }
 
@@ -136,7 +136,7 @@ class ConfigurationChecks(unittest.TestCase):
     def test_calibration_writes_timezone_atomically_once_and_preserves_other_keys(self) -> None:
         original = settings()
         original["acceptance"] = {
-            "personal_space_key": "~sample-user",
+            "personal_space_key": "~sample.user@example.test",
             "cross_space_key": "SYNTH_TARGET",
         }
         self.configure(original)
