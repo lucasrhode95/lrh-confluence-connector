@@ -266,6 +266,10 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "publish_draft",
                 "delete_draft",
                 "set_labels",
+                "move_page",
+                "delete_page",
+                "list_trash",
+                "restore_page",
             },
         )
         tools_by_name = {tool.name: tool for tool in tools}
@@ -279,6 +283,10 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         publish_annotations = tools_by_name["publish_draft"].annotations
         self.assertIsNotNone(publish_annotations)
         self.assertTrue(publish_annotations.destructiveHint)
+        structure_annotations = tools_by_name["delete_page"].annotations
+        self.assertIsNotNone(structure_annotations)
+        self.assertTrue(structure_annotations.destructiveHint)
+        self.assertTrue(tools_by_name["list_trash"].annotations.readOnlyHint)
         await context.aclose()
 
     async def test_search_tool_runs_through_the_account_bound_mcp_service(self) -> None:

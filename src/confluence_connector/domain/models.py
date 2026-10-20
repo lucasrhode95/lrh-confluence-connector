@@ -404,7 +404,7 @@ class PageRestoreResult(BaseModel):
 
     page_id: str
     title: str
-    space_key: str
+    space_key: str | None = None
     parent_id: str | None = None
     placement_source: Literal["caller", "saved_property", "space_root"]
     placement_status: Literal["applied", "root", "partial", "unknown"]

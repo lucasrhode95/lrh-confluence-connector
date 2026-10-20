@@ -20,12 +20,16 @@ from confluence_connector.domain.models import (
     LabelChangeResult,
     PageExportResult,
     PageParseScope,
+    PageDeleteResult,
+    PageMoveResult,
+    PageRestoreResult,
     PageTextFormat,
     PageWriteResult,
     SearchFields,
     SearchMatch,
     SearchScope,
     SpaceList,
+    TrashListResult,
 )
 
 log = logging.getLogger(__name__)
@@ -51,6 +55,15 @@ LABEL_WRITE = ToolAnnotations(
 )
 PUBLISH_DRAFT = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
+MOVE_PAGE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
+TRASH_PAGE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
+)
+RESTORE_PAGE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\
@@ -88,8 +101,13 @@ drafts, comments and attachment references; links to other products remain links
 - create_page makes a published page or new-page draft. update_page replaces the entire published
   page body and requires expected_version; it refuses to detach inline comments unless explicitly
   confirmed. publish_draft publishes a new-page draft without changing its ID. delete_draft is
-  permanent and bypasses the trash. set_labels adds or removes global page labels. These tools write
-  to Confluence and require the user's explicit request.
+  permanent and bypasses the trash. set_labels adds or removes global page labels. move_page changes
+  one page's parent or position. delete_page moves a page to the trash; children default to refusal,
+  and can instead move up or be trashed as a bounded subtree. list_trash pages through visible
+  trashed pages. restore_page restores a trashed page and best-effort returns it to its saved or
+  caller-selected placement. If Confluence refuses a cross-space move, recreating the page in the
+  target space and trashing the original is a separate recovery plan; it loses the page ID, history
+  and comments. These tools write to Confluence and require the user's explicit request.
 - Authenticate or remove the local token with `confluence-connector auth` or
   `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
 - Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
@@ -378,6 +396,98 @@ def build_server(context: AppContext) -> FastMCP:
             page,
             add=add,
             remove=remove,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=MOVE_PAGE)
+    @_logged
+    async def move_page(
+        page: str,
+        parent_id: str | None = None,
+        space_key: str | None = None,
+        position: Literal["first", "last", "before", "after"] | None = None,
+        sibling: str | None = None,
+    ) -> dict[str, Any]:
+        """Move one current page under a parent or to a space root.
+
+        Pass exactly one of parent_id or space_key. Position defaults to last; before/after require
+        a sibling in the selected parent. A failed follow-up position leaves a confirmed parent move
+        in place and is reported in the result. Cross-space moves are waited on through Confluence's
+        long-task status route. If Confluence refuses one, recreating the page in the target space
+        and trashing the original is a separate recovery plan; it loses the page ID, history and
+        comments.
+        """
+        services = await context.services()
+        result: PageMoveResult = await services.structure.move_page(
+            page,
+            parent_id=parent_id,
+            space_key=space_key,
+            position=position,
+            sibling=sibling,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=TRASH_PAGE)
+    @_logged
+    async def delete_page(
+        page: str,
+        children: Literal["refuse", "move_up", "trash"] | None = None,
+    ) -> dict[str, Any]:
+        """Move a page to the trash after checking delete permission on every affected page.
+
+        children defaults to refuse. move_up reparents direct children in order before trashing the
+        page. trash removes the subtree bottom-up and refuses more than 100 pages. The result reports
+        each confirmed, uncertain and unattempted step; no completed step is undone automatically.
+        """
+        services = await context.services()
+        result: PageDeleteResult = await services.structure.delete_page(
+            page,
+            children=children if children is not None else "refuse",
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_logged
+    async def list_trash(
+        space_key: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """List trashed pages in one space or across spaces visible to the signed-in account.
+
+        Results are bounded to 100 pages. Pass only the returned cursor to continue; the result has
+        page IDs, titles, space and last-edit time, but Confluence exposes no deletion timestamp.
+        """
+        services = await context.services()
+        result: TrashListResult = await services.structure.list_trash(
+            space_key=space_key,
+            limit=limit,
+            cursor=cursor,
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=RESTORE_PAGE)
+    @_logged
+    async def restore_page(
+        page: str,
+        parent_id: str | None = None,
+        space_key: str | None = None,
+        position: Literal["first", "last", "before", "after"] | None = None,
+        sibling: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore a trashed page, then use caller placement, saved placement or the space root.
+
+        Pass exactly one of parent_id or space_key to choose placement explicitly. Without placement,
+        the connector uses the best-effort record saved during delete; Confluence itself restores at
+        the space root. The result states the confirmed placement and any fallback reason.
+        """
+        services = await context.services()
+        result: PageRestoreResult = await services.structure.restore_page(
+            page,
+            parent_id=parent_id,
+            space_key=space_key,
+            position=position,
+            sibling=sibling,
         )
         return result.model_dump(mode="json")
 

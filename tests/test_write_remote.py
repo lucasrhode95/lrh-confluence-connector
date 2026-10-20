@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -418,6 +419,23 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 expected_username="sample-user",
             )
 
+    async def test_async_move_has_a_wall_clock_poll_bound(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/movepage.action"):
+                return httpx.Response(200, json={"longTaskId": "task-9"})
+            return httpx.Response(200, json={"finished": False, "successful": False})
+
+        with patch("confluence_connector.remote.confluence.LONGTASK_MAX_WAIT_SECONDS", 0.001):
+            with self.assertRaisesRegex(UncertainWrite, "still pending"):
+                await self.make_api(handler).move_page_action(
+                    "301",
+                    space_key="TARGET",
+                    position="topLevel",
+                    target_id=None,
+                    asynchronous=True,
+                    expected_username="sample-user",
+                )
+
     async def test_placement_property_is_created_when_missing(self) -> None:
         observed: list[httpx.Request] = []
 
@@ -435,6 +453,33 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/301/property/placement")
         self.assertEqual(observed[1].url.path, "/wiki/rest/api/content/301/property")
         self.assertEqual(json.loads(observed[1].content), {"key": "placement", "value": {"space_key": "SYNTH"}})
+
+    async def test_parent_update_to_space_root_sends_empty_ancestors(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "301",
+                    "type": "page",
+                    "title": "Synthetic page",
+                    "status": "current",
+                    "space": {"key": "SYNTH"},
+                    "version": {"number": 4},
+                    "ancestors": [],
+                },
+            )
+
+        await self.make_api(handler).update_page_parent(
+            "301",
+            title="Synthetic page",
+            next_version=4,
+            parent_id=None,
+            expected_username="sample-user",
+        )
+        self.assertEqual(json.loads(observed[0].content)["ancestors"], [])
 
     async def test_trash_page_uses_delete_without_purge_parameter(self) -> None:
         observed: list[httpx.Request] = []

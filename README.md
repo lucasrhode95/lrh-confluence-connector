@@ -4,9 +4,9 @@
 
 Local MCP connector for one user's Confluence Data Center account. The current release provides
 encrypted token setup, account status, space listing, content search, user lookup, page trees and page
-metadata, budgeted page-text reads, selected attachment downloads and batch page exports. The
-current page and draft write tools are implemented locally; page moves, trash operations and live
-acceptance remain open in the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
+metadata, budgeted page-text reads, selected attachment downloads and batch page exports. Page,
+draft and structure management tools are implemented locally; live acceptance remains open in the
+[requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
 |---|---|
@@ -52,6 +52,15 @@ acceptance remain open in the [requirements](docs/requirements.md) and [roadmap]
 - `set_labels` adds/removes global labels, compensates confirmed changes in reverse order after a
   definitive failure, and reports partial results or failed reversals. It does not compensate an
   uncertain outcome or account change.
+- `move_page` moves a page under a parent or to a space root, with optional first/last/before/after
+  positioning. Cross-space moves wait for Confluence's long task to finish. If Confluence refuses a
+  cross-space move, recreating the page and trashing the original loses its ID, history and comments.
+- `delete_page` moves a page to the trash after checking delete access on every affected page.
+  Children default to refusal; they can instead move up in order or be trashed bottom-up, with a
+  100-page subtree limit. Partial and uncertain outcomes are reported without automatic rollback.
+- `list_trash` lists trashed pages in one space or across visible spaces, using bounded cursors.
+- `restore_page` restores at the space root, then tries caller placement or the placement record
+  saved during deletion. It reports when a page remains at the root or placement is uncertain.
 
 Page writes change Confluence content. Live acceptance uses disposable synthetic pages and remains
 manual; no write probes run as routine checks.

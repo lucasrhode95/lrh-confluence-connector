@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface exposes eight read tools, two local-file tools and five write tools:
+The MCP surface exposes eight read tools, two local-file tools and nine write tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -35,6 +35,10 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
 | `publish_draft` | Publish a new-page draft under the same page ID |
 | `delete_draft` | Permanently delete a new-page draft, bypassing the trash |
 | `set_labels` | Add or remove global labels with reverse compensation and explicit partial-failure results |
+| `move_page` | Move a page between parents or spaces, then apply sibling position; cross-space moves poll the long task |
+| `delete_page` | Preflight delete operations, preserve placement, and trash a page, direct children or bounded subtree |
+| `list_trash` | Page through trashed pages for one space or all visible spaces |
+| `restore_page` | Restore at the space root, then best-effort apply caller or saved placement |
 
 ## 2. Modules and boundaries
 
@@ -52,9 +56,9 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
   checks, uncertain outcomes when account state changes after a write response, and bounded streaming
   downloads; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
-  page-write and label routes; quick navigation, user lookup, ordered children, page bodies,
-  attachments, comments and history mapping. The legacy move action is isolated here and reports
-  application-level errors returned in successful HTTP responses.
+  page-write, label, trash, restore, permission and content-property routes; quick navigation, user
+  lookup, ordered children, page bodies, attachments, comments and history mapping. The UI move
+  action is isolated here, reports application-level errors and polls documented cross-space tasks.
 - `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
@@ -71,6 +75,7 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
 - `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
 - `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors, partial results and safe label compensation.
+- `src/confluence_connector/service/structure.py`: validated moves, bounded trash cursors, subtree and permission preflight, placement properties, restore fallbacks and exact partial delete results.
 - `src/confluence_connector/service/write_markup.py`: text escaping, safe rich-body conversions, active-content and 128-level nesting refusal, and source-reference loss detection.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage parameters and references, the Confluence pre-pass over `view`, and markdownify-based conversion into budget blocks.
@@ -202,7 +207,7 @@ numeric suffix. Failed downloads remove their partial file and are returned alon
 Output files older than seven days are removed when the folder is next used.
 On POSIX systems, output directories are owner-only and claimed files use owner read/write permissions.
 
-### Page and draft writes
+### Page, draft and structure management
 
 `create_page` accepts exactly one parent_id page reference or space root. It checks for a current duplicate title
 before creating the page, converts the body, and uses the configured REST content route. First/before/
@@ -226,6 +231,31 @@ sends one request per change. On a definitive failure, confirmed changes are rev
 order. Successful reversals move into `compensated`; changes still applied remain in `added` or
 `removed`, and failed reversals appear in `rollback_failures`. Uncertain write outcomes and account
 changes stop compensation so the service never issues an inverse write against an unknown state.
+
+`move_page` validates one parent or space-root target. Same-space parent changes send a versioned
+content update with the new ancestors; first/last/before/after ordering uses the isolated move action.
+Cross-space moves use `position=append` for a parent or `position=topLevel` for a space root, then
+poll the documented long-task route for at most 10 seconds and 40 times. A confirmed parent change
+is retained when a separate same-space position step fails, and the result identifies that partial
+state.
+
+`delete_page` reads the direct children or full target subtree and checks `expand=operations` for
+every affected page before its first write. `refuse` reports direct children; `move_up` re-parents
+them in source order, then trashes the selected page; `trash` refuses more than 100 pages and
+trashes descendants bottom-up. The complete subtree count is bounded by a 5,000-page read safety
+cap. Former parent, sibling position and next sibling are saved on each page being trashed (the
+selected page in `move_up`) in a content property, on a best-effort basis. An unreadable space
+permission list adds a restore warning. Each
+write stops at its first failure; results distinguish completed, unknown and unattempted pages, and
+no completed write is automatically undone.
+
+`list_trash` uses the documented content collection with `type=page&status=trashed`, batches of up
+to 100, and stateless cursors bounded to offset 1,000,000. `restore_page` restores through the
+documented status update, then tries caller placement, the saved property, and finally the space
+root. Missing, invalid or unusable saved placement is logged and reported. If a same-space parent
+change succeeds but its requested sibling position is definitively refused, the connector returns
+the restored page to the space root; an uncertain recovery is reported for inspection. After a
+successful restore, the connector removes its property when possible.
 
 `export_pages` validates up to 500 references before any request, then reads two full pages at a time;
 the transport still caps total in-flight HTTP requests at six. It resolves each requested version and
