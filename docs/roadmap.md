@@ -9,12 +9,12 @@ user; **live verification** checks something on the real instance before it is b
 
 ## Implementation
 
-### MCP tools pending local implementation or live verification
+### Implemented tools with live acceptance pending
 
 Names follow the sibling connectors (no product prefix; the MCP server name namespaces them). The
-proof-of-concept tools have been removed. **Ready** means evidence is enough to build the tool;
-**Implemented locally** means offline coverage exists but live acceptance remains pending. Every
-write tool also waits on V2, because writes were verified only through a browser session.
+proof-of-concept tools have been removed. These tools are implemented locally with offline
+coverage; live acceptance remains open. The acceptance runner requires `--allow-writes` for
+Confluence writes.
 
 | Tool | Purpose | Status |
 |---|---|---|
@@ -24,13 +24,15 @@ write tool also waits on V2, because writes were verified only through a browser
 | `list_drafts` | The user's new-page drafts | Implemented locally; live acceptance pending |
 | `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Implemented locally; live acceptance pending |
 | `set_labels` | Add or remove page labels | Implemented locally; live acceptance pending |
+| `move_page` | Change parent, space or sibling order | Implemented locally; live acceptance pending |
+| `delete_page` | Trash a page and handle its children | Implemented locally; live acceptance pending |
+| `list_trash` | List trashed pages | Implemented locally; live acceptance pending |
+| `restore_page` | Restore a page with placement fallbacks | Implemented locally; live acceptance pending |
 
 Comment and attachment writes are not in the requirements and are not proposed here.
 
 ### Foundations shared by all tools
 
-- Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
-  mirrored by offline tests with synthetic fake responses.
 - Live acceptance for every page, draft and structure write remains pending. Shared retry and
   uncertain-write behavior is implemented and has offline tests.
 
@@ -83,7 +85,9 @@ in the personal space, including a rich-text sample page.
   the configured instance. Page depth is 1–5 (default 3), counting the selected page as level 1;
   for a space root, top-level pages are level 1. A result is capped at 1,000 pages; the cap is
   intended to prevent oversized MCP responses. Space keys accept letters, digits, underscores and
-  hyphens, up to 255 characters.
+  hyphens, up to 255 characters, with one optional leading `~` for a personal space. Confirm the
+  configured personal-space key and its `~` form on the target instance; verify the fixture runner's
+  personal and cross-space settings.
 - Structure writes have offline coverage only. During user-run acceptance, verify same-space parent
   changes, first/last and before/after ordering, cross-space long-task completion/failure, delete
   operation preflight, trash permission warnings, property persistence across trash, and restore

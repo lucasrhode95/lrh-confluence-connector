@@ -782,6 +782,39 @@ class ConfluenceApi:
             comments.append(comment)
         return comments
 
+    async def create_page_comment(
+        self,
+        page_id: str,
+        storage_body: str,
+        *,
+        expected_username: str,
+        parent_comment_id: str | None = None,
+    ) -> str:
+        """Create a fixture footer comment or reply from trusted synthetic storage content."""
+        if not page_id.isdecimal() or (
+            parent_comment_id is not None and not parent_comment_id.isdecimal()
+        ):
+            raise InvalidRequest("Page and parent comment IDs must be decimal identifiers.")
+        body: dict[str, Any] = {
+            "type": "comment",
+            "container": {"id": page_id, "type": "page"},
+            "body": {"storage": {"value": storage_body, "representation": "storage"}},
+        }
+        if parent_comment_id is not None:
+            body["ancestors"] = [{"id": parent_comment_id}]
+        payload = await self._transport.send_json(
+            "POST",
+            self._content_collection_route(),
+            body=body,
+            expected_username=expected_username,
+        )
+        comment_id = _identifier(payload.get("id")) if isinstance(payload, dict) else None
+        if comment_id is None or not comment_id.isdecimal():
+            raise UncertainWrite(
+                "Confluence may have accepted the fixture comment but returned no usable ID; inspect before retrying."
+            )
+        return comment_id
+
     async def list_page_versions(
         self, page_id: str, *, expected_username: str
     ) -> tuple[list[PageVersion], bool]:

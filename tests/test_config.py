@@ -100,6 +100,30 @@ class ConfigurationChecks(unittest.TestCase):
                 config["cql_timezone"] = timezone_name
                 self.assertEqual(self.configure(config)["cql_timezone"], timezone_name)
 
+    def test_acceptance_spaces_are_optional_and_allow_personal_space_prefix(self) -> None:
+        config = settings()
+        config["acceptance"] = {
+            "personal_space_key": "~sample-user",
+            "cross_space_key": "SYNTH_TARGET",
+        }
+
+        loaded = self.configure(config)
+
+        self.assertEqual(loaded["acceptance"], config["acceptance"])
+
+    def test_invalid_acceptance_settings_are_rejected(self) -> None:
+        for acceptance in (
+            {"personal_space_key": "BAD/KEY"},
+            {"cross_space_key": "~"},
+            {"unknown": "SYNTH"},
+        ):
+            with self.subTest(acceptance=acceptance):
+                _read_config.cache_clear()
+                config = settings()
+                config["acceptance"] = acceptance
+                with self.assertRaisesRegex(SystemExit, "acceptance"):
+                    self.configure(config)
+
     def test_invalid_cql_timezone_is_rejected(self) -> None:
         for timezone_name in ("Mars/Olympus", "UTC+15:00", "UTC+00:75", 330):
             with self.subTest(timezone=timezone_name):
@@ -111,6 +135,10 @@ class ConfigurationChecks(unittest.TestCase):
 
     def test_calibration_writes_timezone_atomically_once_and_preserves_other_keys(self) -> None:
         original = settings()
+        original["acceptance"] = {
+            "personal_space_key": "~sample-user",
+            "cross_space_key": "SYNTH_TARGET",
+        }
         self.configure(original)
         with (
             patch.dict(os.environ, {"CONFLUENCE_CONNECTOR_HOME": str(self.folder / "state")}),

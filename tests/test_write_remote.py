@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import httpx
 
-from confluence_connector.domain.errors import Conflict, UncertainWrite, Upstream
+from confluence_connector.domain.errors import Conflict, InvalidRequest, UncertainWrite, Upstream
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.transport import ConfluenceTransport
 from tests.fakes.credential_source import FakeCredentialSource
@@ -492,6 +492,52 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].method, "DELETE")
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/301")
         self.assertEqual(dict(observed[0].url.params), {})
+
+    async def test_fixture_comment_and_reply_use_the_content_collection_route(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(200, json={"id": "501" if len(observed) == 1 else "502"})
+
+        api = self.make_api(handler)
+        comment_id = await api.create_page_comment(
+            "301", "<p>synthetic footer</p>", expected_username="sample-user"
+        )
+        reply_id = await api.create_page_comment(
+            "301",
+            "<p>synthetic reply</p>",
+            expected_username="sample-user",
+            parent_comment_id=comment_id,
+        )
+
+        self.assertEqual((comment_id, reply_id), ("501", "502"))
+        self.assertEqual([request.url.path for request in observed], [
+            "/wiki/rest/api/content",
+            "/wiki/rest/api/content",
+        ])
+        self.assertEqual(json.loads(observed[0].content)["container"], {"id": "301", "type": "page"})
+        self.assertEqual(json.loads(observed[1].content)["ancestors"], [{"id": "501"}])
+
+    async def test_fixture_comment_rejects_invalid_ids_and_uncertain_missing_id(self) -> None:
+        calls = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, json={"accepted": True})
+
+        api = self.make_api(handler)
+        with self.assertRaises(InvalidRequest):
+            await api.create_page_comment(
+                "not-a-page", "<p>synthetic</p>", expected_username="sample-user"
+            )
+        self.assertEqual(calls, 0)
+        with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
+            await api.create_page_comment(
+                "301", "<p>synthetic</p>", expected_username="sample-user"
+            )
+        self.assertEqual(calls, 1)
 
     async def test_success_status_with_unreadable_page_response_is_uncertain(self) -> None:
         api = self.make_api(lambda _: httpx.Response(200, text="<html>maintenance</html>"))

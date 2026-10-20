@@ -1,145 +1,136 @@
 ![Confluence connector overview](docs/connector-overview.svg)
 
-# Confluence connector
+A local MCP server for one user's Confluence Data Center account.
 
-Local MCP connector for one user's Confluence Data Center account. The current release provides
-encrypted token setup, account status, space listing, content search, user lookup, page trees and page
-metadata, budgeted page-text reads, selected attachment downloads and batch page exports. Page,
-draft and structure management tools are implemented locally; live acceptance remains open in the
-[requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
+- Search pages and find users, then read page text, metadata and ordered trees.
+- Download selected attachments and export pages to local files.
+- Create and update pages, manage drafts and labels, move pages, and use the trash.
+- Keep authentication encrypted locally; the connector has no hosted service or background process.
 
-| Document | Purpose |
-|---|---|
-| [Requirements](docs/requirements.md) | Agreed scope, capabilities and ownership |
-| [Architecture](docs/architecture.md) | Current code and implemented contracts |
-| [Roadmap](docs/roadmap.md) | Open implementation and live-verification work |
-| [API research](docs/api-research.md) | Dated evidence and limitations |
-| [Research toolkit](research/README.md) | Explicit manual probes and UI investigation |
+## Requirements
 
-## Current MCP tools
-
-- `auth_status` reports whether a token is stored and which account name it is bound to. It is offline;
-  use the CLI's `status --check` to verify that Confluence still accepts the token.
-- `list_spaces` lists current and archived spaces visible to the stored account, including their name,
-  key, type, status and link when Confluence supplies one. It follows the server's actual
-  `start + size` paging and requests up to 500 spaces at a time.
-- `search_content` performs literal, scoped content or title searches with stateless continuation
-  cursors. Archived spaces are included by default; title searches can add labelled quick-navigation
-  results when no additional filters are set.
-- `find_users` resolves current users by display name and former users by exact username.
-- `get_page_tree` returns ordered children and ancestors from a page or space root with bounded depth.
-- `get_page_metadata` returns history, retained versions, labels, contributors and ancestors for up
-  to 20 page references.
-- `get_pages` returns up to 20 page IDs or same-instance URLs as Markdown-like text or unchanged
-  storage markup. Text reads include typed references, attachment lists, and threaded comments by
-  default; attachments are not downloaded. A character budget packs whole pages and uses a
-  version-pinned cursor when the first page needs continuation.
-- `download_attachments` saves selected attachment IDs from one page to the local downloads folder.
-  It verifies each ID belongs to that page and returns a path or per-attachment failure.
-- `export_pages` writes up to 500 pages in full as text or rich HTML. One clean page can be a single
-  timestamped file; multi-page, incomplete or attachment-inclusive exports are ZIPs. Attachment bytes
-  are excluded by default, and `_export-report.txt` records page or attachment failures. Large exports
-  may take minutes. The provenance header is always included.
-- `create_page` creates a current page or new-page draft under one parent or at a space root. It
-  accepts rich HTML/storage or escaped text, checks for a duplicate current title, and reports if a
-  requested first/before/after position could not be confirmed.
-- `update_page` replaces the whole body and requires `expected_version`. It refuses stale versions
-  and refuses to detach inline comments unless `allow_comment_loss` is true; removed macros and
-  attachment references appear in warnings.
-- `list_drafts` lists the signed-in user's new-page drafts with continuation cursors.
-- `publish_draft` publishes a new-page draft without changing its page ID.
-- `delete_draft` permanently deletes a new-page draft and bypasses the trash.
-- `set_labels` adds/removes global labels, compensates confirmed changes in reverse order after a
-  definitive failure, and reports partial results or failed reversals. It does not compensate an
-  uncertain outcome or account change.
-- `move_page` moves a page under a parent or to a space root, with optional first/last/before/after
-  positioning. Cross-space moves wait for Confluence's long task to finish. If Confluence refuses a
-  cross-space move, recreating the page and trashing the original loses its ID, history and comments.
-- `delete_page` moves a page to the trash after checking delete access on every affected page.
-  Children default to refusal; they can instead move up in order or be trashed bottom-up, with a
-  100-page subtree limit. Partial and uncertain outcomes are reported without automatic rollback.
-- `list_trash` lists trashed pages in one space or across visible spaces, using bounded cursors.
-- `restore_page` restores at the space root, then tries caller placement or the placement record
-  saved during deletion. It reports when a page remains at the root or placement is uncertain.
-
-Page writes change Confluence content. Live acceptance uses disposable synthetic pages and remains
-manual; no write probes run as routine checks.
-Authentication is separate from Microsoft 365 sign-in.
+- A Confluence Data Center account and a user-generated personal access token.
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Access to the target spaces and permissions for any requested writes.
 
 ## Setup
 
-Requires Python 3.12+ and `uv`. Copy `confluence_config.example.json` to the ignored
-`confluence_config.json`, then set the deployment URL and relative API paths. The probe query and form
-login path are used only by the separate research toolkit. The optional `cql_timezone` accepts an
-IANA timezone name or a fixed `UTC±HH:MM` offset; it is `null` in the example and may be populated by
-the CLI calibration described below.
+1. **Install the connector.** Clone the repository, then install its locked dependencies:
 
-From the repository root:
+   ```bash
+   git clone https://github.com/lucasrhode95/lrh-confluence-connector.git
+   cd lrh-confluence-connector
+   uv sync --locked
+   ```
 
-```powershell
-uv sync --locked
-uv run confluence-connector auth
-uv run confluence-connector status --check
-```
+2. **Configure the instance.** Copy `confluence_config.example.json` to the ignored
+   `confluence_config.json`. Set the deployment URL and its relative API paths. The required `query`
+   and `form_auth_path` are used by the separate research probe. Optional settings:
 
-`auth` prompts for a personal access token without echoing it, checks it against the configured
-current-user endpoint, then stores the token and account name in encrypted per-user storage. It then
-calibrates CQL's effective timezone with read-only searches. If `cql_timezone` is unset, `auth` and
-`status --check` write the measured offset to the private config atomically while preserving its other
-settings. The written fixed offset does not follow daylight saving; replace it with an IANA name when
-your Confluence timezone observes daylight-saving changes. `status --check` compares a configured
-timezone with the current measurement and warns on a mismatch without changing it. Calibration runs
-only when you explicitly run `auth` or `status --check`, never when MCP starts. If encrypted storage is
-unavailable, the command fails without a plaintext fallback. To clear the local token, run
-`uv run confluence-connector auth --sign-out`; this does not revoke the token on the server.
+   - `cql_timezone`: an IANA timezone or fixed `UTC±HH:MM` offset. `auth` or `status --check`
+     measures the effective CQL offset when this is unset. The automatically written fixed offset
+     will not follow daylight saving; replace it with an IANA timezone if needed.
+   - `acceptance.personal_space_key` and `acceptance.cross_space_key`: explicit approved spaces for
+     the manual synthetic acceptance fixture. The cross-space key must be different from the
+     personal-space key.
 
-`search_content` accepts date-only values as calendar days in Confluence's timezone and ISO-8601
-timestamps as instants. Mixed date and timestamp bounds are checked against the full local calendar
-day. Timestamps without offsets mean UTC; timestamp filters require a calibrated `cql_timezone`
-setting.
+   Configuration can also be selected with `--config PATH` or `CONFLUENCE_CONFIG`. The checked-in
+   example contains only synthetic values; never commit private settings or credentials.
+   Validated settings are cached in each process, so restart MCP after configuration edits or after
+   CLI timezone calibration. API paths are relative to the configured base URL, including an
+   installation context such as `/wiki`.
 
-Configuration precedence is `--config PATH`, `CONFLUENCE_CONFIG`, then the repository-root
-`confluence_config.json`, independent of the working directory. Every command supports `--config`.
-Validated settings are cached per process, so restart MCP processes after editing or after a CLI
-calibration updates the config. API paths are relative to the configured base URL, including an
-installation context such as `/wiki`.
+3. **Authenticate.** Run these commands from the repository folder:
 
-## MCP client configuration
+   ```bash
+   uv run confluence-connector auth
+   uv run confluence-connector status --check
+   ```
 
-Use command `uv` and these arguments, replacing both paths with absolute local paths:
+   `auth` prompts for the token without echoing it, verifies the account and stores the credential
+   in encrypted per-user storage. It then calibrates the CQL timezone with read-only searches.
+   Calibration runs only when you invoke `auth` or `status --check`, never when MCP starts. If
+   encryption is unavailable, the connector refuses to run. `auth --sign-out` removes the local
+   token; it does not revoke it in Confluence.
 
-```json
-{
-  "mcpServers": {
-    "lrh-confluence-connector": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "C:\\path\\to\\lrh-confluence-connector",
-        "confluence-connector",
-        "--config",
-        "C:\\path\\to\\lrh-confluence-connector\\confluence_config.json",
-        "mcp"
-      ]
-    }
-  }
-}
-```
+   Date-only search bounds mean the full calendar day in the configured Confluence timezone.
+   ISO-8601 timestamps with offsets are instants; timestamps without an offset mean UTC. Timestamp
+   filters need a configured `cql_timezone`.
 
-## Research and checks
+4. **Configure an MCP client.** Use the absolute paths to `uv` and this checkout. For example:
 
-Live probes are manual and require authorization for the requested operations. The [research toolkit](research/README.md)
-explains its modes; the [UI runbook](research/ui-runbook.md) starts with search and page reading.
-Browser form login is an isolated research option, not the application authentication backend.
+   ```json
+   {
+     "mcpServers": {
+       "lrh-confluence-connector": {
+         "command": "uv",
+         "args": [
+           "run",
+           "--directory",
+           "C:\\path\\to\\lrh-confluence-connector",
+           "confluence-connector",
+           "--config",
+           "C:\\path\\to\\lrh-confluence-connector\\confluence_config.json",
+           "mcp"
+         ]
+       }
+     }
+   }
+   ```
 
-Run offline checks from the repository root:
+   Replace the sample paths. Use the full path to `uv.exe` if the desktop client has a different
+   `PATH` from your terminal; JSON paths may use escaped backslashes or forward slashes.
+
+## MCP tools
+
+Sign-in is a CLI command. The MCP server exposes these tools; inputs and response details are in the
+[architecture guide](docs/architecture.md#6-mcp-tools).
+
+| Tool | Behavior |
+|---|---|
+| `auth_status` | Report the stored account without contacting Confluence. |
+| `list_spaces` | List visible current and archived spaces. |
+| `search_content` | Search content or titles with structured filters and continuation cursors. |
+| `find_users` | Find users by display name or exact username. |
+| `get_page_tree` | Read ordered page descendants and ancestors. |
+| `get_page_metadata` | Read page history, versions, labels, contributors and ancestors. |
+| `get_pages` | Read text or unchanged storage markup with typed references and optional sections. |
+| `download_attachments` | Save selected attachment IDs from one page to local storage. |
+| `export_pages` | Export pages as text or rich HTML, optionally with attachment bytes. |
+| `create_page` | Create a current page or new-page draft at a space root or under a parent. |
+| `update_page` | Replace a page body with an explicit expected version and content-loss checks. |
+| `list_drafts` | List the signed-in user's new-page drafts. |
+| `publish_draft` | Publish a new-page draft without changing its page ID. |
+| `delete_draft` | Permanently delete a new-page draft, bypassing the trash. |
+| `set_labels` | Add or remove page labels and report partial outcomes. |
+| `move_page` | Move a page between parents or spaces and optionally set sibling order. |
+| `delete_page` | Trash a page and optionally move up or trash its children. |
+| `list_trash` | List trashed pages for a space or across visible spaces. |
+| `restore_page` | Restore a page and report its resulting placement. |
+
+Page and structure writes change Confluence content. The connector checks permissions and reports
+partial or uncertain outcomes; it does not retry a write whose result is unknown.
+
+## Research and acceptance
+
+The [research toolkit](research/README.md) documents manual probes, synthetic fixture setup, and
+the opt-in live acceptance runner. Neither acceptance script makes network requests by default.
+Fixture setup requires `--apply`; live checks require `--run-live`; Confluence write checks also
+require `--allow-writes`. The fixture uses synthetic titles and content in the configured spaces.
+
+Run the offline checks from the repository root:
 
 ```powershell
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
-uv run python research/probe_auth.py --help
 ```
 
-Keep deployment settings, tokens, cookies, page content, HARs and downloaded resource bundles outside
-Git. Tests and fixtures use synthetic content only.
+See [requirements](docs/requirements.md), [architecture](docs/architecture.md),
+[roadmap](docs/roadmap.md), and [API research](docs/api-research.md) for scope, implementation,
+open verification and dated evidence.
+
+## Local data
+
+Credentials use encrypted per-user storage. Downloads and exports are written beneath the connector's
+local data directory and are removed after seven days during a later file operation. Set
+`CONFLUENCE_CONNECTOR_HOME` to override the data root.
