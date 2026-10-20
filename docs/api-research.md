@@ -389,6 +389,34 @@ and the result was not reproduced in the follow-up below.
   administrator, and the UI trash page showed a permission message in the non-administered space.
   `/rest/api/content/{id}/permission/check` returns 404.
 
+## Review-finding checks
+
+**2026-10-20 — Live, browser session, user-authorized:** read-only paging and label checks, plus
+seven disposable `Connector Lab Verify` pages in the personal space, all trashed afterwards (none
+purged).
+
+- **Paging continuation:** `child/page` (with and without `expand=position`) and
+  `space/{key}/content/page?depth=root` include `_links.next` only when more results exist, and its
+  `start` is `start + size`. A short page (`size < limit`) with no `next` link was final in every
+  case. 115 visible global spaces each returned their whole root listing in one request at
+  `limit=500`; `/rest/api/space` returned all 115 at `limit=500`.
+- **Labels:** the `metadata.labels` expansion is a paged envelope (`results`, `start`, `limit`, `size`,
+  `_links`) with `limit` 200. `GET /rest/api/content/{id}/label` caps `limit` at 200, reports the
+  applied limit (not the requested 1,000), and pages with `_links.next`. The largest label set among
+  100 sampled pages was 6.
+- **Root move through REST:** `PUT /rest/api/content/{id}` with `ancestors: []` and the next version
+  returned 200 but changed nothing: the page kept its parent, stayed out of the root listing and did
+  not get a new version.
+- **Root move through the move action:** `POST /pages/movepage.action` with `position=topLevel`
+  (`mode=LEGACY`) moved the page to the space root in one call, first among the root pages, without a
+  new version.
+- **Same-space reparenting through the move action:** `position=above` with a `targetId` under another
+  parent moved the page under that parent, directly before the target, in one call; `position=append`
+  with the old parent as `targetId` moved it back as the last child. Neither created a page version.
+- **Trashed pages by title:** `GET /rest/api/content?type=page&spaceKey=…&title=…&status=trashed`
+  found the trashed page (`status: trashed`); the same request without `status` returned nothing.
+  CQL still matched the page immediately after the trash, and stopped within seconds.
+
 Official schemas and CQL behavior remain at the
 [Data Center REST reference](https://developer.atlassian.com/server/confluence/rest/latest/) and
 [CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/).

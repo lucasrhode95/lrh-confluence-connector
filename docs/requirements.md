@@ -333,11 +333,13 @@ find-and-replace modes. Confluence-specific safeguards:
   truncation if more drafts remain.
   publish_draft publishes only new-page drafts and preserves their page ID. delete_draft permanently
   deletes a new-page draft and bypasses the trash.
-- set_labels takes explicit add and remove global-label lists. It skips already-satisfied changes
-  and applies changes sequentially. On a definitive failure, it compensates confirmed changes in
-  reverse order; `added` and `removed` report changes still applied, `compensated` reports restored
-  states, `rollback_failures` reports failed reversals, and `failures`/`not_attempted` report the
-  requested sequence. It does not compensate when authentication changes or an outcome is uncertain.
+- Updated 2026-10-20, `set_labels`: it takes explicit add and remove global-label lists and skips
+  already-satisfied changes.
+  It applies changes sequentially, stopping at the first failure. It does not automatically reverse
+  successful operations: Confluence's label response does not establish which client caused a state
+  transition, so an inverse request could undo another client's change. `added` and `removed` list
+  operations with successful responses; `failures` reports the failed operation and
+  `not_attempted` reports later operations. An uncertain outcome requires inspection before retrying.
 - Titles are limited to 255 printable characters, labels to 255 ASCII letters, digits, underscores
   or hyphens, and space keys to 255 such characters with an optional leading `~` for a personal
   space. Write bodies are limited to 2,000,000 characters. These limits bound tool inputs;
