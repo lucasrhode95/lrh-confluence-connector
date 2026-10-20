@@ -159,9 +159,12 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 2. A BeautifulSoup pass over `view` replaces each `data-macro-name` wrapper with its marker, pairing
    wrappers with storage macros by name and document order (wrappers inside a resolved include take no
    local source); turns images and attachment links into markers with typed references; renders
-   mentions and tasks; makes same-instance links absolute; and drops scripts and styles.
-3. markdownify converts the result, with one table override (merged cells repeated; nested tables or
-   code fall back to minimal HTML). The text is split into blocks at blank lines outside fenced code.
+   mentions and tasks; makes same-instance links absolute; and drops scripts and styles. Attachment
+   identity is matched only after checking origin and source ownership; included content cannot inherit
+   local attachment IDs by filename. Jira without a known storage key keeps its rendered text.
+3. markdownify converts the result, with table handling (merged cells repeated; nested tables or
+   code fall back to minimal HTML) and code fences longer than any backtick run in the source code.
+   The text is split at blank lines outside matching fenced blocks, preserving fence-like code lines.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body

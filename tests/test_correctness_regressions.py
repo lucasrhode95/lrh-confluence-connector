@@ -208,3 +208,52 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(measured.offset_minutes, 0)
                 self.assertEqual(selections, 2)
 
+
+
+class RendererRegressions(unittest.TestCase):
+    def test_inner_punctuation_is_quoted_for_both_search_modes(self):
+        for match in ("all", "any"):
+            cql = _build_cql(["ci-cd", "alpha"], match, "all", SearchScope())
+            self.assertIn('"ci', cql)
+            self.assertIn('cd"', cql)
+            self.assertIn("alpha", cql)
+
+    def test_attachment_identity_respects_origin_and_source_owner(self):
+        from confluence_connector.domain.models import PageAttachment
+        view = (
+            '<a href="https://other.example.test/download/attachments/100/report.pdf">report.pdf</a>'
+            '<a href="/download/attachments/900/report.pdf" data-linked-resource-id="777">report.pdf</a>'
+            '<img src="/download/attachments/900/report.pdf" data-linked-resource-filename="report.pdf" data-linked-resource-id="777" />'
+            '<a href="/pages/viewpage.action" data-page-id="44">target</a>'
+        )
+        result = render_page_body(view, "", page_id="100", base_url="https://wiki.example.test", attachments=[PageAttachment(attachment_id="200", filename="report.pdf")])
+        text = "\n\n".join(b.text for b in result.blocks)
+        self.assertIn("https://other.example.test/download/attachments/100/report.pdf", text)
+        files = [r for r in result.references if r.kind in {"image", "attachment"}]
+        self.assertEqual({r.attachment_id for r in files}, {"777"})
+        self.assertEqual({r.owner_page_id for r in files}, {"900"})
+        self.assertEqual({r.filename for r in files}, {"report.pdf"})
+        self.assertIn("44", {r.page_id for r in result.references})
+
+    def test_included_images_without_an_owner_never_match_local_names(self):
+        from confluence_connector.domain.models import PageAttachment
+        result = render_page_body(
+            '<div data-macro-name="include"><img data-linked-resource-filename="report.pdf" /></div>',
+            "", page_id="100", attachments=[PageAttachment(attachment_id="200", filename="report.pdf")],
+        )
+        image = next(r for r in result.references if r.kind == "image")
+        self.assertEqual(image.filename, "report.pdf")
+        self.assertIsNone(image.owner_page_id)
+        self.assertIsNone(image.attachment_id)
+
+    def test_code_fence_text_cannot_split_parsed_code_into_budget_blocks(self):
+        result = render_page_body('<p>Before</p><pre>one\n```\n\ntwo\n~~~\n\nthree</pre><p>After</p>', "", page_id="100", attachments=[])
+        self.assertEqual(len(result.blocks), 3)
+        self.assertIn("one\n```\n\ntwo\n~~~\n\nthree", result.blocks[1].text)
+        self.assertTrue(result.blocks[1].text.startswith("````\n"))
+        self.assertTrue(result.blocks[1].text.endswith("\n````"))
+
+    def test_jira_without_storage_keeps_rendered_text(self):
+        result = render_page_body('<span data-macro-name="jira">SYN-123: synthetic issue</span>', "", page_id="100", attachments=[], macros_from_storage=False)
+        self.assertIn("SYN-123: synthetic issue", result.blocks[0].text)
+

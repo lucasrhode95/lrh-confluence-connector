@@ -24,7 +24,7 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(query, "O'Brien alpha")
         self.assertEqual(terms, ["O'Brien", "alpha"])
         cql = _build_cql(terms, "all", "all", SearchScope())
-        self.assertEqual(cql, "siteSearch ~ 'O\\'Brien' AND siteSearch ~ 'alpha'")
+        self.assertEqual(cql, "siteSearch ~ '\"O\\'Brien\"' AND siteSearch ~ 'alpha'")
 
     async def test_any_and_phrase_are_single_literal_search_clauses(self) -> None:
         terms = ["one", "two"]
@@ -42,7 +42,7 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
             f'a{cql_escape}"b',
             f"a{cql_escape}-b",
         ):
-            self.assertIn(f"siteSearch ~ '{term}'", cql)
+            self.assertIn(f"siteSearch ~ '\"{term}\"'", cql)
 
     async def test_scope_is_quoted_and_timestamps_convert_to_cql_wall_minutes(self) -> None:
         api = _SearchApi()

@@ -364,7 +364,10 @@ def _build_cql(
     cql_timezone: str | None = None,
 ) -> str:
     search_field = "title" if fields == "title" else "siteSearch"
-    escaped_terms = [_text_search_term(term) for term in terms]
+    escaped_terms = [
+        '"' + _text_search_term(term) + '"' if match != "phrase" and any(_is_punctuation(c) for c in term)
+        else _text_search_term(term) for term in terms
+    ]
     if match == "all":
         clauses = [f"{search_field} ~ {_cql_literal(term)}" for term in escaped_terms]
     elif match == "any":
