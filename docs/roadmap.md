@@ -2,7 +2,7 @@
 
 Open work only. Settled requirements are in [requirements](requirements.md); the current implementation
 is in [architecture](architecture.md); dated evidence is in [API research](api-research.md).
-Delete items when complete. Snapshot **2026-10-19**.
+Delete items when complete. Snapshot **2026-10-20**.
 
 Work is split by what it needs: **implementation** is code still to write; **decisions** wait for the
 user; **live verification** checks something on the real instance before it is built or relied on.
@@ -36,17 +36,138 @@ Comment and attachment writes are not in the requirements and are not proposed h
 - Live acceptance for every page, draft and structure write remains pending. Shared retry and
   uncertain-write behavior is implemented and has offline tests.
 
-### Deferred review findings
+### Review findings (2026-10-20)
 
-P2 review findings left open when their PR was merged, for the final pass. Group related items into
-design fixes rather than one patch each.
+From whole-project reviews of `e67b60d` by Codex and Claude, plus the unresolved review threads on
+PRs #5–#9 that are still open in the code.
 
-- PR #5, `service/writes.py`: label compensation can undo a label that another client added after the
-  metadata snapshot, because Confluence's add-label response does not show whether this call caused
-  the transition. Compensate only transitions this call is known to have caused.
-- PR #5, `remote/confluence.py`: `list_drafts` can return a title-based `/display/…` or
-  `resumedraft.action` URL that `PageLinkResolver` cannot resolve back to the draft. Return an
-  ID-based supported URL, or resolve draft URLs.
+Nine review threads stay open until their fix lands. Resolve each one in the commit's PR, with a
+one-line reply naming the fixing commit:
+
+- PR #6, page text item: [Jira without a key](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881306),
+  [image filenames](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881317),
+  [`data-page-id`](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881324),
+  [fence-like code lines](https://github.com/lucasrhode95/lrh-confluence-connector/pull/6#discussion_r4327881330).
+- PR #7: [trashed display URLs](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234259),
+  [`move_up` parent recheck](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234270).
+- PR #8: [HTML-macro fixture](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507219),
+  [`_pass` callable](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507237),
+  [re-trash scratch pages](https://github.com/lucasrhode95/lrh-confluence-connector/pull/8#discussion_r4328507255).
+Group related items into design fixes rather than one patch each.
+
+**Bugs**, highest first:
+
+- [P1] Paging can stop before delete preflight reads the whole subtree: child-page mapping drops
+  `_links.next` and traversal treats a page under 500 as final, so `children=trash` can report success
+  while leaving descendants behind. Space listing has the same assumption. Keep the continuation
+  signal and advance on actual `start + size` (`service/structure.py`, `remote/confluence.py`).
+  Live 2026-10-20: both listings send `_links.next` only when more results exist, with `start + size`.
+- [P1] Moving to the space root never moves: live 2026-10-20, `PUT` with `ancestors: []` returned 200
+  but left the parent and version unchanged, so `move_page`, restore placement and `move_up` can report
+  a root move that did not happen. `movepage.action` with `position=topLevel` did move the page to the
+  root (first, no new version); use it and change the test that asserts the empty list
+  (`remote/confluence.py`, `service/structure.py`).
+- [P1] Every live acceptance run fails: the authentication and fixture checks pass the coroutine
+  `_pass()` where `AcceptanceReport.run` expects a callable, so both record a `TypeError` and the run
+  exits 1. Pass `_pass` (`research/run_acceptance.py`, from PR #8).
+- [P2] `delete_page` with `children: "move_up"` can undo a concurrent reparent: each child's fresh
+  metadata is checked only for being current, then moved under the deleted page's former parent.
+  Skip a child whose parent or space no longer matches the captured node (`service/structure.py`,
+  from PR #7).
+- [P2] `restore_page` cannot take a `/display/SPACE/Title` URL: the resolver looks the title up
+  through CQL, which excludes trashed content, so it always fails with `NotFound` despite every URL
+  form being promised. Live 2026-10-20: `GET /rest/api/content?type=page&spaceKey=…&title=…&status=trashed`
+  finds the trashed page; resolve display URLs through it for `restore_page` (`service/structure.py`,
+  `remote/links.py`, from PR #7).
+- [P2] Search: a term with inner punctuation (`ci-cd`, `release/notes`) is matched as either half,
+  not as one term. Live 2026-10-20: `ci-cd` matched 2,160 pages, `"ci-cd"` 482. Quote such terms in
+  `match: "all"` and `"any"` (`service/search.py`).
+- [P2] External attachment links can take a local attachment's identity: attachment classification
+  and filename matching run before origin validation, and included-page attachments are ambiguous
+  the same way. Validate origin and owner first (`service/page_text.py`).
+- [P3] `set_labels` can silently skip a removal on a page with more than 200 labels: metadata reads
+  only the first expanded labels page (200, verified live 2026-10-20), so an unseen label counts as
+  absent. Follow `_links.next` on `/label` or stop claiming absence (`remote/confluence.py`).
+- [P2] Timezone calibration assumes the sample page is not edited during the search; one concurrent
+  edit made a UTC instance measure `UTC+00:01`, which would then be written to the config. Re-read the
+  sample's timestamp and retry or abandon on change (`service/timezone_calibration.py`).
+- [P2] A malformed credential record also blocks `auth --sign-out`, because sign-out decodes the
+  record before clearing it. Let sign-out clear it, keeping encryption and locking (`auth/store.py`).
+- [P2] A malformed URL (`https://[broken`) raises `ValueError` from `urlsplit`, so one bad reference
+  aborts a whole batch. Convert it to `InvalidRequest` (`remote/links.py`).
+- [P2] Acceptance setup cannot create its root fixture: the fixture body includes the HTML macro,
+  which the write service refuses. Make the fixture match the write contract and handle refused
+  cases explicitly (`research/acceptance_fixtures.py`).
+- [P2] The live move and order check passes even when positioning fails: it reads the returned parent
+  but never the sibling order, and cross-space checks trust the service's reported target. Re-read
+  metadata and ordered children independently before cleanup (`research/run_acceptance.py`).
+- [P2] A successful `--allow-writes` acceptance run leaves restored scratch pages current: the
+  `move_up` parent and the three subtree pages are restored but never re-trashed, so they accumulate
+  in the personal space and a reused run ID hits duplicate titles. Re-trash them after their
+  assertions (`research/run_acceptance.py`, from PR #8).
+- [P2] Page text, from PR #6: rendered Jira content becomes `[Unrendered macro: jira]` when there is
+  no storage key (storage disabled, or a macro in an included page); images with only
+  `data-linked-resource-filename` lose their filename; links whose ID is only in `data-page-id` lose
+  their page reference; a code line starting with ``` or `~~~` can split one code block into two
+  budget blocks (`service/page_text.py`).
+- [P3] `delete_page` reports definite failures as `not_attempted`; use `failed`, keeping `unknown`
+  for uncertain outcomes (`service/structure.py`).
+- [P3] The missing-`cql_timezone` error says to run `status --check`, but running MCP processes cache
+  the config; also say to restart the MCP client (`service/cql_dates.py`).
+- [P3, POSIX] A single-file export replaces the owner-only claimed file with a staging file written
+  under the normal umask, so it can end up `0644` (`service/exports.py`).
+
+**Simplification and efficiency:**
+
+- Same-space moves make two writes by default: position defaults to `last`, so `movepage.action` runs
+  after every documented parent change, adding a page version and a failure point. Use one route per
+  move (decide with the user, since D7 named the documented route for parent changes). Live
+  2026-10-20: `movepage.action` reparents and positions within a space in one call (`above`/`below`/
+  `append` with a `targetId` under the new parent, `topLevel` for the root) without a new version.
+- Unify page-reference validation, space-key validation, the current-page check, the account-error
+  passthrough, filename sanitization (attachments and exports), `_cql_literal` and same-instance URL
+  parsing (`remote/links.py`, `remote/confluence.py`, `service/page_text.py`). These are repeated
+  across services and already differ in control-character handling and errors.
+- Share placement resolution between create, move and restore (`_Placement`/`_create_placement` and
+  `PagePlacement`/`_resolve_placement`).
+- Replace the hand-written `HTMLParser` in `service/write_markup.py` (362 lines) with BeautifulSoup,
+  already a dependency, as was done for page text.
+- Parse storage once per page instead of separately for macros and references, and skip Markdown
+  conversion for `rich` reads, whose output is the storage body.
+- Merge the duplicated retry loop of `ConfluenceTransport.download_to` into `_exchange`.
+- Remove dead paths: the unused helper in `service/writes.py`, the unreachable ownership branch in
+  `bootstrap.py`, and the unneeded `async` on `_nodes_for_children`.
+- Add a lightweight undefined-name check (for example `pyflakes`) to the documented checks:
+  `service/pages.py` raises `Upstream` without importing it, which compilation does not catch.
+
+**Tests:**
+
+- Replace the acceptance-fixture tests that only check macro names with a fake-transport run of the
+  setup's real write path (it would have caught the fixture bug above).
+- Turn similar cases into tables: uncertain-write outcomes (timeout, oversized 2xx, oversized 5xx,
+  5xx) and account changes after a write (`test_remote.py`); label partial failures (ordinary,
+  account change, uncertain) and draft cursors (`test_writes_service.py`); config precedence
+  (`test_config.py`); MCP tool round-trips in `test_app.py`, moving the export attachment-reuse case
+  to the exports tests.
+- Remove the trash assertions duplicated in the omnibus route test (`test_write_remote.py` keeps its
+  focused trash test) and assertions that only inspect embedded constants, such as the fixture PNG's
+  signature.
+- Keep the golden renderer output, typed-reference checks, account-boundary checks and
+  uncertain-write checks.
+
+**Documentation:**
+
+- README: the architecture link points to a missing `#6-mcp-tools` anchor.
+- Requirements: historical reads are called later work although versioned body reads exist; the
+  transport decision says six requests per tool call and a client rebuilt on account change, while
+  the code shares one process-wide limit of six and keeps the transport.
+- Roadmap: token-lifecycle checks still wait on D1, which is built, and completed implementation is
+  repeated as open work. Validations mixes settled implementation choices with real live checks;
+  keep only what needs live verification and move contract details to the architecture.
+- `research/README.md` calls the configuration loader stdlib-only, but it now imports
+  `msal_extensions`.
+- Keep `requirements.md` (434 lines) direct and summarized: fold the dated restatements into the
+  current rules.
 
 ## Decisions
 
@@ -130,7 +251,8 @@ in the personal space, including a rich-text sample page.
   should include hidden draft titles, and whether the 2,000,000-character body cap and draft-page
   bounds fit expected use. Verify application-level move failures appear as placement warnings, and
   account changes during multi-step writes preserve confirmed partial results without further writes.
-  Verify reverse compensation after definitive label failures and no compensation after uncertain outcomes.
+  Verify partial label results on the configured instance after definitive and uncertain failures;
+  successful operations remain visible and are not automatically reversed.
 
 ### Other live checks
 

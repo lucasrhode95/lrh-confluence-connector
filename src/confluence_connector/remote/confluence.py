@@ -1085,9 +1085,19 @@ def _draft_summary(value: Any, *, base_url: str) -> DraftSummary:
         title=metadata.title,
         space_key=metadata.space_key,
         space_name=metadata.space_name,
-        url=metadata.url,
+        url=_draft_url(metadata, base_url=base_url),
         modified_at=metadata.modified_at,
     )
+
+
+def _draft_url(metadata: PageMetadata, *, base_url: str) -> str:
+    """Build an ID-based URL that the page-reference resolver can resolve for this draft."""
+    instance_root = base_url.rstrip("/")
+    page_id = quote(metadata.page_id, safe="")
+    if metadata.space_key is not None:
+        space_key = quote(metadata.space_key, safe="")
+        return f"{instance_root}/spaces/{space_key}/pages/{page_id}"
+    return f"{instance_root}/pages/viewpage.action?pageId={page_id}"
 
 
 def _trash_summary(value: Any, *, base_url: str) -> TrashPageSummary:

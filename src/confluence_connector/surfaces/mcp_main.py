@@ -6,10 +6,11 @@ import functools
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
@@ -38,8 +39,9 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotent
 OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
+# These tools write local outputs, may delete expired outputs during cleanup, and read Confluence.
 LOCAL_FILE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
 )
 WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
@@ -136,12 +138,32 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def search_content(
-        query: str | None = None,
-        scope: SearchScope | None = None,
-        match: SearchMatch | None = None,
-        fields: SearchFields | None = None,
-        limit: int | None = None,
-        cursor: str | None = None,
+        query: Annotated[
+            str | None,
+            Field(description="Literal search text. Omit it only when continuing with cursor."),
+        ] = None,
+        scope: Annotated[
+            SearchScope | None,
+            Field(
+                description="Structured filters for spaces, types, labels, users, dates and page ancestry."
+            ),
+        ] = None,
+        match: Annotated[
+            SearchMatch | None,
+            Field(description="Term matching: all (default), any, or phrase."),
+        ] = None,
+        fields: Annotated[
+            SearchFields | None,
+            Field(description="Search all supported fields (default) or title only."),
+        ] = None,
+        limit: Annotated[
+            int | None,
+            Field(ge=1, le=100, description="Results per page, 1 through 100 (default 25)."),
+        ] = None,
+        cursor: Annotated[
+            str | None,
+            Field(description="Continuation cursor from an earlier result. Pass it alone."),
+        ] = None,
     ) -> dict[str, Any]:
         """Search Confluence using literal text and structured scope filters.
 
@@ -168,10 +190,22 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def find_users(
-        query: str | None = None,
-        username: str | None = None,
-        limit: int | None = None,
-        cursor: str | None = None,
+        query: Annotated[
+            str | None,
+            Field(description="Display-name search for current users; omit with username or cursor."),
+        ] = None,
+        username: Annotated[
+            str | None,
+            Field(description="Exact username lookup, including former users; use alone."),
+        ] = None,
+        limit: Annotated[
+            int | None,
+            Field(ge=1, le=100, description="Results per page, 1 through 100 (default 25)."),
+        ] = None,
+        cursor: Annotated[
+            str | None,
+            Field(description="Continuation cursor for a display-name search. Pass it alone."),
+        ] = None,
     ) -> dict[str, Any]:
         """Find current users by display-name query, or look up one exact username.
 
@@ -189,9 +223,18 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def get_page_tree(
-        page: str | None = None,
-        space_key: str | None = None,
-        max_depth: int | None = None,
+        page: Annotated[
+            str | None,
+            Field(description="Numeric page ID or supported URL; use exactly one of page and space_key."),
+        ] = None,
+        space_key: Annotated[
+            str | None,
+            Field(description="Space key for a space-root tree; use exactly one of page and space_key."),
+        ] = None,
+        max_depth: Annotated[
+            int | None,
+            Field(ge=1, le=5, description="Maximum tree depth, 1 through 5 (default 3)."),
+        ] = None,
     ) -> dict[str, Any]:
         """Return ordered child pages from exactly one page reference or space root.
 
@@ -208,7 +251,12 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
-    async def get_page_metadata(pages: list[str] | str) -> dict[str, Any]:
+    async def get_page_metadata(
+        pages: Annotated[
+            list[str] | str,
+            Field(description="One to 20 numeric page IDs or supported same-instance page URLs."),
+        ]
+    ) -> dict[str, Any]:
         """Return history, versions, labels, contributors and ancestors for up to 20 page references."""
         services = await context.services()
         result = await services.metadata.get_page_metadata(pages)
@@ -217,11 +265,28 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def get_pages(
-        pages: list[str] | str | None = None,
-        format: PageTextFormat | None = None,
-        max_chars: int | None = None,
-        parse_scope: PageParseScope | None = None,
-        cursor: str | None = None,
+        pages: Annotated[
+            list[str] | str | None,
+            Field(
+                description="One to 20 numeric page IDs or supported URLs; omit when continuing with cursor."
+            ),
+        ] = None,
+        format: Annotated[
+            PageTextFormat | None,
+            Field(description="text (default) or unchanged rich storage markup."),
+        ] = None,
+        max_chars: Annotated[
+            int | None,
+            Field(ge=1, le=400_000, description="Character budget from 1 to 400000 (default 40000)."),
+        ] = None,
+        parse_scope: Annotated[
+            PageParseScope | None,
+            Field(description="Choose header, macro/reference parsing, attachment lists and comments."),
+        ] = None,
+        cursor: Annotated[
+            str | None,
+            Field(description="Version-pinned continuation cursor. Pass it alone."),
+        ] = None,
     ) -> dict[str, Any]:
         """Read up to 20 page IDs or same-instance URLs as text or rich storage.
 
@@ -244,7 +309,17 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=LOCAL_FILE)
     @_logged
-    async def download_attachments(page: str, attachment_ids: list[str]) -> dict[str, Any]:
+    async def download_attachments(
+        page: Annotated[str, Field(description="Page ID or supported same-instance page URL.")],
+        attachment_ids: Annotated[
+            list[str],
+            Field(
+                min_length=1,
+                max_length=500,
+                description="One to 500 attachment IDs belonging to the page.",
+            ),
+        ],
+    ) -> dict[str, Any]:
         """Save selected attachment IDs from one page into the local downloads folder.
 
         Pass page as a numeric ID or same-instance URL, and attachment_ids from a typed reference or
@@ -252,16 +327,30 @@ def build_server(context: AppContext) -> FastMCP:
         selected; successful files return local paths and failures are listed per attachment.
         """
         services = await context.services()
-        result: AttachmentDownloadResult = await services.attachments.download_attachments(page, attachment_ids)
+        result: AttachmentDownloadResult = await services.attachments.download_attachments(
+            page, attachment_ids
+        )
         return result.model_dump(mode="json")
 
     @mcp.tool(annotations=LOCAL_FILE)
     @_logged
     async def export_pages(
-        pages: list[str] | str,
-        format: PageTextFormat | None = None,
-        parse_scope: PageParseScope | None = None,
-        include_attachments: bool = False,
+        pages: Annotated[
+            list[str] | str,
+            Field(description="One to 500 numeric page IDs or supported same-instance page URLs."),
+        ],
+        format: Annotated[
+            PageTextFormat | None,
+            Field(description="text (default) or rich storage markup."),
+        ] = None,
+        parse_scope: Annotated[
+            PageParseScope | None,
+            Field(description="Choose exported sections such as header, attachments and comments."),
+        ] = None,
+        include_attachments: Annotated[
+            bool,
+            Field(description="Download attachment bytes into the export (default false)."),
+        ] = False,
     ) -> dict[str, Any]:
         """Export up to 500 pages in full as a local file or ZIP archive.
 
@@ -282,14 +371,35 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=WRITE)
     @_logged
     async def create_page(
-        title: str,
-        body: str,
-        format: PageTextFormat | None = None,
-        status: Literal["current", "draft"] | None = None,
-        parent_id: str | None = None,
-        space_key: str | None = None,
-        position: Literal["first", "last", "before", "after"] | None = None,
-        sibling: str | None = None,
+        title: Annotated[str, Field(max_length=255, description="New page title, up to 255 characters.")],
+        body: Annotated[
+            str,
+            Field(max_length=2_000_000, description="Complete page body, up to 2 million characters."),
+        ],
+        format: Annotated[
+            PageTextFormat | None,
+            Field(description="rich HTML/storage markup (default) or escaped plain text."),
+        ] = None,
+        status: Annotated[
+            Literal["current", "draft"] | None,
+            Field(description="Create a published page (default) or a new-page draft."),
+        ] = None,
+        parent_id: Annotated[
+            str | None,
+            Field(description="Parent page ID/reference; use exactly one of parent_id and space_key."),
+        ] = None,
+        space_key: Annotated[
+            str | None,
+            Field(description="Target space root; use exactly one of space_key and parent_id."),
+        ] = None,
+        position: Annotated[
+            Literal["first", "last", "before", "after"] | None,
+            Field(description="Sibling position (default last); before/after require sibling."),
+        ] = None,
+        sibling: Annotated[
+            str | None,
+            Field(description="Sibling page ID/reference required for before or after position."),
+        ] = None,
     ) -> dict[str, Any]:
         """Create a page or new-page draft in exactly one parent or space root.
 
@@ -317,12 +427,24 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=REPLACE_PAGE)
     @_logged
     async def update_page(
-        page: str,
-        body: str,
-        expected_version: int,
-        format: PageTextFormat | None = None,
-        title: str | None = None,
-        allow_comment_loss: bool = False,
+        page: Annotated[str, Field(description="Published page ID or supported same-instance page URL.")],
+        body: Annotated[
+            str,
+            Field(max_length=2_000_000, description="Replacement body, up to 2 million characters."),
+        ],
+        expected_version: Annotated[
+            int,
+            Field(ge=1, description="Current page version; stale versions are refused."),
+        ],
+        format: Annotated[
+            PageTextFormat | None,
+            Field(description="rich HTML/storage markup (default) or escaped plain text."),
+        ] = None,
+        title: Annotated[str | None, Field(max_length=255, description="Optional replacement title.")] = None,
+        allow_comment_loss: Annotated[
+            bool,
+            Field(description="Confirm if replacement would detach inline-comment anchors."),
+        ] = False,
     ) -> dict[str, Any]:
         """Replace a published page's complete body, with an optional title change.
 
@@ -349,9 +471,14 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def list_drafts(
-        space_key: str | None = None,
-        limit: int | None = None,
-        cursor: str | None = None,
+        space_key: Annotated[str | None, Field(description="Limit drafts to this space; optional.")] = None,
+        limit: Annotated[
+            int | None,
+            Field(ge=1, le=100, description="Results per page, 1 through 100 (default 50)."),
+        ] = None,
+        cursor: Annotated[
+            str | None, Field(description="Draft-list continuation cursor; pass it alone.")
+        ] = None,
     ) -> dict[str, Any]:
         """List the signed-in user's new-page drafts; pass only cursor to continue."""
         services = await context.services()
@@ -364,7 +491,9 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=PUBLISH_DRAFT)
     @_logged
-    async def publish_draft(draft: str) -> dict[str, Any]:
+    async def publish_draft(
+        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
+    ) -> dict[str, Any]:
         """Publish a new-page draft without changing its page ID."""
         services = await context.services()
         result: PageWriteResult = await services.writes.publish_draft(draft)
@@ -372,7 +501,9 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=PERMANENT_DELETE)
     @_logged
-    async def delete_draft(draft: str) -> dict[str, Any]:
+    async def delete_draft(
+        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
+    ) -> dict[str, Any]:
         """Permanently delete a new-page draft. This bypasses the trash and cannot be restored."""
         services = await context.services()
         result: DraftDeletionResult = await services.writes.delete_draft(draft)
@@ -381,15 +512,21 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=LABEL_WRITE)
     @_logged
     async def set_labels(
-        page: str,
-        add: list[str] | None = None,
-        remove: list[str] | None = None,
+        page: Annotated[str, Field(description="Published page ID or supported same-instance page URL.")],
+        add: Annotated[
+            list[str] | None,
+            Field(description="Global labels to add, one operation per label."),
+        ] = None,
+        remove: Annotated[
+            list[str] | None,
+            Field(description="Global labels to remove; removals are destructive."),
+        ] = None,
     ) -> dict[str, Any]:
         """Add or remove global labels on one published page; removals are destructive.
 
-        If a later change fails definitively, confirmed changes are compensated in reverse order when
-        safe. The result lists final changes, compensations, rollback failures, and unattempted labels.
-        Uncertain outcomes or account changes stop further writes without compensation.
+        Changes run sequentially and stop at the first failure. Prior successful operations remain
+        applied and are reported; the connector does not reverse them because Confluence does not
+        identify whether this request caused a label transition. Inspect partial results before retrying.
         """
         services = await context.services()
         result: LabelChangeResult = await services.writes.set_labels(
@@ -402,11 +539,23 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=MOVE_PAGE)
     @_logged
     async def move_page(
-        page: str,
-        parent_id: str | None = None,
-        space_key: str | None = None,
-        position: Literal["first", "last", "before", "after"] | None = None,
-        sibling: str | None = None,
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        parent_id: Annotated[
+            str | None,
+            Field(description="Target parent page; use exactly one of parent_id and space_key."),
+        ] = None,
+        space_key: Annotated[
+            str | None,
+            Field(description="Target space root; use exactly one of space_key and parent_id."),
+        ] = None,
+        position: Annotated[
+            Literal["first", "last", "before", "after"] | None,
+            Field(description="Sibling position (default last); before/after require sibling."),
+        ] = None,
+        sibling: Annotated[
+            str | None,
+            Field(description="Sibling page ID/reference required for before or after position."),
+        ] = None,
     ) -> dict[str, Any]:
         """Move one current page under a parent or to a space root.
 
@@ -430,8 +579,11 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=TRASH_PAGE)
     @_logged
     async def delete_page(
-        page: str,
-        children: Literal["refuse", "move_up", "trash"] | None = None,
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        children: Annotated[
+            Literal["refuse", "move_up", "trash"] | None,
+            Field(description="Direct-child handling: refuse (default), move_up, or trash subtree."),
+        ] = None,
     ) -> dict[str, Any]:
         """Move a page to the trash after checking delete permission on every affected page.
 
@@ -449,9 +601,14 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     @_logged
     async def list_trash(
-        space_key: str | None = None,
-        limit: int | None = None,
-        cursor: str | None = None,
+        space_key: Annotated[str | None, Field(description="Limit results to this space; optional.")] = None,
+        limit: Annotated[
+            int | None,
+            Field(ge=1, le=100, description="Results per page, 1 through 100 (default 50)."),
+        ] = None,
+        cursor: Annotated[
+            str | None, Field(description="Trash-list continuation cursor; pass it alone.")
+        ] = None,
     ) -> dict[str, Any]:
         """List trashed pages in one space or across spaces visible to the signed-in account.
 
@@ -469,11 +626,23 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=RESTORE_PAGE)
     @_logged
     async def restore_page(
-        page: str,
-        parent_id: str | None = None,
-        space_key: str | None = None,
-        position: Literal["first", "last", "before", "after"] | None = None,
-        sibling: str | None = None,
+        page: Annotated[str, Field(description="Trashed page ID or supported same-instance page URL.")],
+        parent_id: Annotated[
+            str | None,
+            Field(description="Requested parent; use exactly one of parent_id and space_key."),
+        ] = None,
+        space_key: Annotated[
+            str | None,
+            Field(description="Requested space root; use exactly one of space_key and parent_id."),
+        ] = None,
+        position: Annotated[
+            Literal["first", "last", "before", "after"] | None,
+            Field(description="Sibling position (default last); before/after require sibling."),
+        ] = None,
+        sibling: Annotated[
+            str | None,
+            Field(description="Sibling page ID/reference required for before or after position."),
+        ] = None,
     ) -> dict[str, Any]:
         """Restore a trashed page, then use caller placement, saved placement or the space root.
 

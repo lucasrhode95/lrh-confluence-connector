@@ -235,10 +235,30 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         api = _SearchApi()
         links = _Links(page_id="55")
         await ContentSearch(api, links, "sample-user").search_content(
-            "alpha", scope={"parent": "55"}
+            "alpha", scope={"parent": "  55  "}
         )  # type: ignore[arg-type]
         self.assertEqual(links.references, ["55"])
         self.assertIn("parent = 55", api.search_calls[0][0])
+
+    async def test_parent_and_ancestor_references_are_bounded_before_resolution(self) -> None:
+        links = _Links()
+        service = ContentSearch(_SearchApi(), links, "sample-user")  # type: ignore[arg-type]
+        for field, reference in (("parent", "x" * 2_049), ("ancestor", "bad\x00reference")):
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(InvalidRequest, "page ID or supported page URL"),
+            ):
+                await service.search_content("alpha", scope={field: reference})  # type: ignore[dict-item]
+        self.assertEqual(links.references, [])
+
+    async def test_resolved_parent_id_must_fit_the_cursor_contract(self) -> None:
+        api = _SearchApi()
+        links = _Links(page_id="7" * 256)
+        with self.assertRaisesRegex(InvalidRequest, "invalid page ID"):
+            await ContentSearch(api, links, "sample-user").search_content(
+                "alpha", scope={"parent": "55"}
+            )  # type: ignore[arg-type]
+        self.assertEqual(api.search_calls, [])
 
 
 class _Links:

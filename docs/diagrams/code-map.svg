@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1080" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1700" role="img" aria-labelledby="title desc">
   <title id="title">Confluence connector code map</title>
-  <desc id="desc">A package map of the CLI, nineteen MCP tools, bootstrap, read, structure, write, export and local-file services, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
+  <desc id="desc">A package and class map of the CLI, nineteen MCP tools, services, remote adapters, encrypted token store, utilities, and typed domain models. Arrows show the primary call paths.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#60758a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
@@ -11,7 +11,7 @@
       .secure{fill:#fff6e9;stroke:#d9bd87}.domain{fill:#f1f4f7;stroke:#bac7d2}.line{fill:none;stroke:#60758a;stroke-width:1.8;marker-end:url(#arrow)}
     </style>
   </defs>
-  <rect width="1480" height="1080" rx="26" fill="#f6f8fb"/>
+  <rect width="1480" height="1700" rx="26" fill="#f6f8fb"/>
   <text x="48" y="58" class="title">Package and call map</text>
   <text x="48" y="88" class="body">Foundation, read, export, attachment-download, page/draft-write and structure modules currently implemented.</text>
 
@@ -62,6 +62,89 @@
   <text x="78" y="907" class="body"><tspan class="small">MCP:</tspan><tspan> mcp_main → AppContext → account-bound read/write services → ConfluenceApi → ConfluenceTransport → Confluence DC</tspan></text>
   <text x="78" y="943" class="body"><tspan class="small">Credential:</tspan><tspan> CLI / AppContext → TokenStore → encrypted persistence; transport reloads and checks the active username</tspan></text>
   <text x="78" y="979" class="body"><tspan class="small">Page URLs:</tspan><tspan> PageLinkResolver → ConfluenceApi for display-title lookup, or ConfluenceTransport for short-link redirects</tspan></text>
+
+  <text x="48" y="1038" class="section">Package and class inventory</text>
+  <rect x="48" y="1060" width="445" height="590" rx="16" class="box remote"/>
+  <text x="70" y="1094" class="head">service/</text>
+  <text x="70" y="1124" class="body" font-size="12">
+    <tspan x="70">service/spaces.py · SpaceService</tspan>
+    <tspan x="70" dy="23">service/search.py · ContentSearch</tspan>
+    <tspan x="70" dy="23">service/users.py · UserSearch</tspan>
+    <tspan x="70" dy="23">service/tree.py · PageTree, _TreeState</tspan>
+    <tspan x="70" dy="23">service/metadata.py · PageMetadataService</tspan>
+    <tspan x="70" dy="23">service/pages.py · PageTextService, _PageRequest,</tspan>
+    <tspan x="88" dy="19">_LoadedPage, _CursorState</tspan>
+    <tspan x="70" dy="23">service/page_text.py · PageTextBlock, RenderedPageBody,</tspan>
+    <tspan x="88" dy="19">_Macro, _ConfluenceMarkdown</tspan>
+    <tspan x="70" dy="23">service/attachments.py · AttachmentDownloads</tspan>
+    <tspan x="70" dy="23">service/exports.py · PageExports, _ReportItem,</tspan>
+    <tspan x="88" dy="19">_PageMetadata, _PageExport</tspan>
+    <tspan x="70" dy="23">service/writes.py · PageWrites, _Placement</tspan>
+    <tspan x="70" dy="23">service/structure.py · PageStructure, _PageNode</tspan>
+    <tspan x="70" dy="23">service/write_markup.py · _MarkupNode, _MarkupParser,</tspan>
+    <tspan x="88" dy="19">_TextCollector, _SafetyParser</tspan>
+    <tspan x="70" dy="23">service/timezone_calibration.py · CqlTimezoneCalibration</tspan>
+    <tspan x="70" dy="23">service/cql_dates.py · date and timezone conversion</tspan>
+    <tspan x="70" dy="23">service/cursors.py · cursor encoding and decoding</tspan>
+    <tspan x="70" dy="23">service/localfiles.py · private output and cleanup</tspan>
+  </text>
+
+  <rect x="515" y="1060" width="500" height="590" rx="16" class="box domain"/>
+  <text x="537" y="1094" class="head">domain/models.py</text>
+  <text x="537" y="1124" class="body" font-size="11.5">
+    <tspan x="537">CurrentUser</tspan><tspan x="537" dy="19">AuthStatus</tspan>
+    <tspan x="537" dy="19">SpaceSummary</tspan><tspan x="537" dy="19">SpaceList</tspan>
+    <tspan x="537" dy="19">SearchScope</tspan><tspan x="537" dy="19">SearchQuery</tspan>
+    <tspan x="537" dy="19">PageSummary</tspan><tspan x="537" dy="19">ContentSearchHit</tspan>
+    <tspan x="537" dy="19">RemoteContentSearchPage</tspan><tspan x="537" dy="19">ContentSearchResult</tspan>
+    <tspan x="537" dy="19">PersonSummary</tspan><tspan x="537" dy="19">RemoteUserSearchPage</tspan>
+    <tspan x="537" dy="19">UserSearchResult</tspan><tspan x="537" dy="19">PageTreeNode</tspan>
+    <tspan x="537" dy="19">PageTreeResult</tspan><tspan x="537" dy="19">PageVersion</tspan>
+    <tspan x="537" dy="19">PageMetadata</tspan><tspan x="537" dy="19">PageMetadataFailure</tspan>
+    <tspan x="537" dy="19">PageMetadataResult</tspan><tspan x="537" dy="19">ResolvedPageReference</tspan>
+    <tspan x="537" dy="19">PageParseScope</tspan><tspan x="537" dy="19">PageReference</tspan>
+    <tspan x="537" dy="19">PageAttachment</tspan><tspan x="537" dy="19">SavedAttachment</tspan>
+  </text>
+  <text x="785" y="1124" class="body" font-size="11.5">
+    <tspan x="785">AttachmentDownloadFailure</tspan><tspan x="785" dy="19">AttachmentDownloadResult</tspan>
+    <tspan x="785" dy="19">PageExportResult</tspan><tspan x="785" dy="19">PageWriteResult</tspan>
+    <tspan x="785" dy="19">PagePlacement</tspan><tspan x="785" dy="19">PageMoveResult</tspan>
+    <tspan x="785" dy="19">PageStructureOutcome</tspan><tspan x="785" dy="19">PageDeleteResult</tspan>
+    <tspan x="785" dy="19">TrashPageSummary</tspan><tspan x="785" dy="19">TrashListResult</tspan>
+    <tspan x="785" dy="19">PageRestoreResult</tspan><tspan x="785" dy="19">DraftSummary</tspan>
+    <tspan x="785" dy="19">DraftListResult</tspan><tspan x="785" dy="19">DraftDeletionResult</tspan>
+    <tspan x="785" dy="19">RemoteDraftPage</tspan><tspan x="785" dy="19">RemoteTrashPage</tspan>
+    <tspan x="785" dy="19">LabelChangeFailure</tspan><tspan x="785" dy="19">LabelChangeResult</tspan>
+    <tspan x="785" dy="19">PageComment</tspan><tspan x="785" dy="19">RemotePageComment</tspan>
+    <tspan x="785" dy="19">RemotePageContent</tspan><tspan x="785" dy="19">PageReadRecord</tspan>
+    <tspan x="785" dy="19">PageReadFailure</tspan><tspan x="785" dy="19">PageReadResult</tspan>
+  </text>
+
+  <rect x="1037" y="1060" width="395" height="590" rx="16" class="box secure"/>
+  <text x="1059" y="1094" class="head">Foundation and remote</text>
+  <text x="1059" y="1124" class="body" font-size="11.5">
+    <tspan x="1059">bootstrap.py · Services, AppContext</tspan>
+    <tspan x="1059" dy="21">auth/store.py · StoredCredential, TokenStore</tspan>
+    <tspan x="1059" dy="21">logs.py · SecretRedactionFilter</tspan>
+    <tspan x="1059" dy="21">remote/ports.py · CredentialSource</tspan>
+    <tspan x="1059" dy="21">remote/transport.py · ConfluenceTransport</tspan>
+    <tspan x="1059" dy="21">remote/confluence.py · _LongTaskFailure,</tspan>
+    <tspan x="1077" dy="18">ConfluenceApi</tspan>
+    <tspan x="1059" dy="21">remote/links.py · PageLinkResolver</tspan>
+    <tspan x="1059" dy="21">domain/errors.py</tspan>
+    <tspan x="1059" dy="19">ConnectorError · AuthenticationRequired</tspan>
+    <tspan x="1059" dy="19">AccountMismatch · SecureStorageUnavailable</tspan>
+    <tspan x="1059" dy="19">InvalidRequest · NotFound · Throttled</tspan>
+    <tspan x="1059" dy="19">Upstream · PermissionDenied · Conflict</tspan>
+    <tspan x="1059" dy="19">UncertainWrite</tspan>
+    <tspan x="1059" dy="25">Function modules</tspan>
+    <tspan x="1059" dy="19">__main__.py · CLI entry and calibration reporting</tspan>
+    <tspan x="1059" dy="19">config.py · load, validate, atomic update</tspan>
+    <tspan x="1059" dy="19">timezones.py · parse and format offsets</tspan>
+    <tspan x="1059" dy="19">surfaces/mcp_main.py · 19 thin tool declarations</tspan>
+    <tspan x="1059" dy="19">Packages: confluence_connector · auth · domain</tspan>
+    <tspan x="1059" dy="19">remote · service · surfaces (each has __init__.py)</tspan>
+  </text>
 
   <path d="M303 235h55" class="line"/><path d="M303 420h55" class="line"/>
   <path d="M655 420h45v-170h5" class="line"/><path d="M1010 240h30" class="line"/>

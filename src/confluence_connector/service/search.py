@@ -194,9 +194,17 @@ class ContentSearch:
         _check_range("created", scope.created_after, scope.created_before, self._cql_timezone)
         _check_range("modified", scope.modified_after, scope.modified_before, self._cql_timezone)
         if scope.parent is not None:
-            scope.parent = (await self._links.resolve(scope.parent, expected_username=self._username)).page_id
+            reference = _page_scope_reference("parent", scope.parent)
+            resolved = await self._links.resolve(reference, expected_username=self._username)
+            if not _is_page_id(resolved.page_id):
+                raise InvalidRequest("Confluence returned an invalid page ID for scope.parent.")
+            scope.parent = resolved.page_id
         if scope.ancestor is not None:
-            scope.ancestor = (await self._links.resolve(scope.ancestor, expected_username=self._username)).page_id
+            reference = _page_scope_reference("ancestor", scope.ancestor)
+            resolved = await self._links.resolve(reference, expected_username=self._username)
+            if not _is_page_id(resolved.page_id):
+                raise InvalidRequest("Confluence returned an invalid page ID for scope.ancestor.")
+            scope.ancestor = resolved.page_id
         return scope
 
     def _resume(
@@ -302,6 +310,23 @@ def _scope_values(name: str, values: list[str]) -> list[str]:
     return normalized
 
 
+def _page_scope_reference(name: str, value: Any) -> str:
+    """Validate an untrusted public page reference before link resolution."""
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value.strip()) > 2_048
+        or any(not character.isprintable() for character in value)
+    ):
+        raise InvalidRequest(f"scope.{name} must be a page ID or supported page URL.")
+    return value.strip()
+
+
+def _is_page_id(value: Any) -> bool:
+    """Match the numeric, cursor-safe ID contract returned by page-reference resolution."""
+    return isinstance(value, str) and value.isdecimal() and len(value) <= MAX_SCOPE_VALUE_CHARS
+
+
 def _validate_resumed_scope(scope: SearchScope, cql_timezone: str | None) -> SearchScope:
     """Reapply scalar and collection validation to untrusted, self-contained cursor state."""
     scope = scope.model_copy(deep=True)
@@ -321,7 +346,7 @@ def _validate_resumed_scope(scope: SearchScope, cql_timezone: str | None) -> Sea
     _check_range("modified", scope.modified_after, scope.modified_before, cql_timezone)
     for name in ("parent", "ancestor"):
         value = getattr(scope, name)
-        if value is not None and (not value.isdecimal() or len(value) > 255):
+        if value is not None and not _is_page_id(value):
             raise InvalidRequest(f"The search cursor contains an invalid scope.{name}.")
     return scope
 

@@ -140,7 +140,7 @@ class AppContext:
             username=username,
             api=api,
             links=links,
-            spaces=SpaceService(self.settings, self.store, api, username),
+            spaces=SpaceService(self.store, api, username),
             search=ContentSearch(api, links, username, self.settings.get("cql_timezone")),
             users=UserSearch(api, username),
             tree=PageTree(api, links, username),
