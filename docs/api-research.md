@@ -382,3 +382,12 @@ Live, 2026-10-20: the successful restore response omitted expanded space and ver
 current-page read returned both, with version 1 unchanged after restoration. Applying placement from
 the sparse response therefore failed. The structure service now rereads current metadata after a
 confirmed restore before applying placement. The isolated diagnostic page was trashed afterwards.
+
+### 8.4 Acceptance completion
+
+Live, 2026-10-20: after the fixture and mapper corrections, full setup succeeded with four fixture pages,
+two attachments, two comments and a label. The opt-in runner with writes completed with 13 passes,
+zero failures and four prerequisite skips: timezone-derived filters, the two manual inline-comment
+checks and the unconfigured cross-space target. Same-space moves/order, drafts, labels, and all three
+delete policies plus restoration passed. The four reusable fixture pages remain; write-check scratch
+pages were returned to trash. This run does not establish the skipped capabilities.

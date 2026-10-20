@@ -12,7 +12,7 @@ Snapshot **2026-10-20**, from whole-project reviews of `e67b60d` and the unresol
 PRs #5–#9. An item that came from a review thread links it: resolve the thread, with a one-line reply
 naming the fixing commit, when the fix lands.
 
-Correctness pass **2026-10-20**, awaiting user review: all 18 bug entries below retain their original
+Correctness pass **2026-10-20**, awaiting user review: the 18 original bug entries retain their original
 context and now record implementation and offline coverage. The full suite ran 275 tests successfully
 (one platform skip); compilation and the probe CLI help check passed. No live requests or review
 requests were made. Broader refactoring, implementation of the decided move route and live verification remain open.
@@ -20,6 +20,15 @@ requests were made. Broader refactoring, implementation of the decided move rout
 ## Implementation
 
 ### Bugs
+
+#### Acceptance view-file parameter has the wrong type (P2)
+
+- **Seen live, 2026-10-20:** root creation returns HTTP 500 because the macro's `name` parameter is
+  filename text. Confluence tries to cast the string to `AttachmentResourceIdentifier`.
+- **Implemented, awaiting review:** the parameter now contains an `ri:attachment` element. A live
+  isolation test verified that form, and the offline fixture/write-path test checks its exact shape.
+  Full fixture setup and acceptance subsequently completed with the prerequisite skips listed below.
+
 
 #### Repeated acceptance downloads mistake collision-safe names for missing content (P2)
 
@@ -387,22 +396,26 @@ for the reads or writes it makes; record the dated result in the research record
 
 ### Acceptance run
 
-**Attempted 2026-10-20; blocked during setup.** Authentication succeeded. The personal-space key
-validation defect above was fixed, but creating the fixture root returned HTTP 500 with a JSON response.
-The connector correctly reported an uncertain write. Exact-title content-collection reads after
-inspection and a subsequent setup attempt found no current fixture pages. Isolation identified the fixture defect: `view-file` passed filename text where an attachment reference
-is required, causing a server `ClassCastException`. The reference form was verified live and the
-fixture is corrected with a regression on the parameter shape. A fresh full setup run is pending. The cross-space target and CQL timezone
-are still unset, and the manual inline-comment prerequisite is incomplete. The live runner completed with **1 pass (authentication), 0 failed checks and 16 skipped checks**
-because the fixture was absent after its bounded indexing wait. This is not an acceptance pass.
+**Live run completed 2026-10-20: 13 passed, 0 failed, 4 skipped.** Setup created four synthetic fixture
+pages, two attachments and two comments, and applied the fixture label in the personal space.
+The final run used `--run-live --allow-writes`; it passed search and non-date filters, paging/user
+resolution, trees and metadata, text/rich and historical reads, downloads/exports, concurrent reads,
+page/draft/label writes, move/order, and all delete/restore scenarios. Scratch pages were returned to
+trash; the four reusable fixture pages remain for later checks.
 
+Live execution found and fixed personal-space key punctuation, the malformed `view-file` attachment
+parameter, unordered position sentinels, sparse restore responses and the repeated-download check's
+use of local filenames instead of source IDs. Fixes and regressions remain above for user review.
+The earlier HTTP 500 was the fixture parameter's server-side `ClassCastException`; it was not an
+authentication failure. Offline checks after these fixes: 278 tests, one platform skip, compilation.
 
-The opt-in runner ([research toolkit](../research/README.md#synthetic-acceptance-fixture)) has never
-completed. The setup, callable handling, move assertions and scratch cleanup fixes above have offline
-coverage; their live verification is still pending. After review, run setup, add the one inline comment by
-hand, and run `--run-live --allow-writes`. It covers search modes and filters, paging, link and version
-resolution, page text, trees, metadata, exports, and every write path including conflicts, refusals,
-the content-loss check, cross-space moves and the three `delete_page` modes.
+Still needed to complete coverage:
+
+- Configure `cql_timezone` through a successful operator-run `status --check`, then rerun date filters.
+- Add one inline comment to the fixture root in the UI, then rerun marker and content-loss checks.
+- Configure a distinct authorized cross-space target, then rerun the cross-space move check.
+
+See the [research toolkit](../research/README.md#synthetic-acceptance-fixture) for the opt-in commands.
 
 ### Archived spaces
 
