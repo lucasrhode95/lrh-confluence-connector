@@ -41,9 +41,6 @@ Comment and attachment writes are not in the requirements and are not proposed h
 P2 review findings left open when their PR was merged, for the final pass. Group related items into
 design fixes rather than one patch each.
 
-- PR #5, `service/writes.py`: label compensation can undo a label that another client added after the
-  metadata snapshot, because Confluence's add-label response does not show whether this call caused
-  the transition. Compensate only transitions this call is known to have caused.
 - PR #5, `remote/confluence.py`: `list_drafts` can return a title-based `/display/…` or
   `resumedraft.action` URL that `PageLinkResolver` cannot resolve back to the draft. Return an
   ID-based supported URL, or resolve draft URLs.
@@ -130,7 +127,8 @@ in the personal space, including a rich-text sample page.
   should include hidden draft titles, and whether the 2,000,000-character body cap and draft-page
   bounds fit expected use. Verify application-level move failures appear as placement warnings, and
   account changes during multi-step writes preserve confirmed partial results without further writes.
-  Verify reverse compensation after definitive label failures and no compensation after uncertain outcomes.
+  Verify partial label results on the configured instance after definitive and uncertain failures;
+  successful operations remain visible and are not automatically reversed.
 
 ### Other live checks
 

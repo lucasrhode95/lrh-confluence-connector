@@ -387,9 +387,9 @@ def build_server(context: AppContext) -> FastMCP:
     ) -> dict[str, Any]:
         """Add or remove global labels on one published page; removals are destructive.
 
-        If a later change fails definitively, confirmed changes are compensated in reverse order when
-        safe. The result lists final changes, compensations, rollback failures, and unattempted labels.
-        Uncertain outcomes or account changes stop further writes without compensation.
+        Changes run sequentially and stop at the first failure. Prior successful operations remain
+        applied and are reported; the connector does not reverse them because Confluence does not
+        identify whether this request caused a label transition. Inspect partial results before retrying.
         """
         services = await context.services()
         result: LabelChangeResult = await services.writes.set_labels(
