@@ -26,6 +26,47 @@ def normalize_scope_time(name: str, value: str | None) -> str | None:
     return moment.astimezone(timezone.utc).isoformat()
 
 
+def date_range_is_inverted(after: str | None, before: str | None, cql_timezone: str | None) -> bool:
+    """Compare normalized bounds as instants, treating a date-only bound as its local calendar day.
+
+    Timestamp values are validated and normalized by ``normalize_scope_time``. Date-only values
+    represent the complete local day, so mixed bounds compare the timestamp's local date to that day.
+    If a mixed range has no timezone, defer validation because CQL construction will return the
+    actionable missing-timezone error for its timestamp bound.
+    """
+    if after is None or before is None:
+        return False
+
+    after_is_date = len(after) == 10
+    before_is_date = len(before) == 10
+    if after_is_date and before_is_date:
+        return date.fromisoformat(after) > date.fromisoformat(before)
+    if not after_is_date and not before_is_date:
+        after_instant = _parse_utc_timestamp(after)
+        before_instant = _parse_utc_timestamp(before)
+        return after_instant > before_instant
+    if cql_timezone is None:
+        return False
+
+    zone = parse_cql_timezone(cql_timezone)
+    if after_is_date:
+        after_day = date.fromisoformat(after)
+        before_day = _parse_utc_timestamp(before).astimezone(zone).date()
+        return after_day > before_day
+
+    after_day = _parse_utc_timestamp(after).astimezone(zone).date()
+    before_day = date.fromisoformat(before)
+    return after_day > before_day
+
+
+def _parse_utc_timestamp(value: str) -> datetime:
+    """Parse a normalized timestamp value as an aware UTC instant."""
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
 def cql_date_literal(
     name: str,
     value: str,

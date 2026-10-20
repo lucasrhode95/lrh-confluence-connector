@@ -16,6 +16,7 @@ from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
 from confluence_connector.service.metadata import PageMetadataService
+from confluence_connector.service.pages import PageTextService
 from confluence_connector.service.search import ContentSearch
 from confluence_connector.service.spaces import SpaceService
 from confluence_connector.service.timezone_calibration import (
@@ -38,6 +39,7 @@ class Services:
     users: UserSearch
     tree: PageTree
     metadata: PageMetadataService
+    pages: PageTextService
 
 
 class AppContext:
@@ -133,6 +135,7 @@ class AppContext:
             users=UserSearch(api, username),
             tree=PageTree(api, links, username),
             metadata=PageMetadataService(api, links, username),
+            pages=PageTextService(api, links, username, str(self.settings["base_url"])),
         )
 
     def _api(self) -> ConfluenceApi:

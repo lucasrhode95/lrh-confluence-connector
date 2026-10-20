@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1080" role="img" aria-labelledby="title desc">
   <title id="title">Confluence connector code map</title>
-  <desc id="desc">A package map of the CLI, six MCP tools, bootstrap, read services, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
+  <desc id="desc">A package map of the CLI, seven MCP tools, bootstrap, read services and page-text conversion, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#60758a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
@@ -24,15 +24,15 @@
   <text x="397" y="225" class="body"><tspan x="397">AppContext · Services</tspan><tspan x="397" dy="20">lazy service composition</tspan></text>
   <rect x="48" y="345" width="255" height="150" rx="15" class="box entry"/>
   <text x="70" y="378" class="head">surfaces/mcp_main.py</text>
-  <text x="70" y="405" class="body"><tspan x="70">build_server · serve_mcp</tspan><tspan x="70" dy="20">auth_status · list_spaces</tspan><tspan x="70" dy="20">search · users · tree · metadata</tspan><tspan x="70" dy="20">_logged</tspan></text>
+  <text x="70" y="405" class="body"><tspan x="70">build_server · serve_mcp</tspan><tspan x="70" dy="20">auth_status · list_spaces</tspan><tspan x="70" dy="20">search · users · tree · metadata</tspan><tspan x="70" dy="20">get_pages · _logged</tspan></text>
   <rect x="375" y="345" width="280" height="150" rx="15" class="box remote"/>
   <text x="397" y="378" class="head">service/</text>
-  <text x="397" y="405" class="body"><tspan x="397">spaces.py · SpaceService</tspan><tspan x="397" dy="20">search.py · users.py</tspan><tspan x="397" dy="20">tree.py · metadata.py</tspan></text>
+  <text x="397" y="405" class="body"><tspan x="397">spaces.py · SpaceService</tspan><tspan x="397" dy="20">search.py · users.py</tspan><tspan x="397" dy="20">tree.py · metadata.py</tspan><tspan x="397" dy="20">pages.py · page_text.py</tspan></text>
 
   <text x="710" y="144" class="section">Remote adapters</text>
   <rect x="710" y="165" width="300" height="150" rx="15" class="box remote"/>
   <text x="732" y="198" class="head">remote/confluence.py</text>
-  <text x="732" y="225" class="body"><tspan x="732">ConfluenceApi</tspan><tspan x="732" dy="20">current_user · spaces · search</tspan><tspan x="732" dy="20">quicknav · users · children · history</tspan></text>
+  <text x="732" y="225" class="body"><tspan x="732">ConfluenceApi</tspan><tspan x="732" dy="20">current_user · spaces · search</tspan><tspan x="732" dy="20">quicknav · users · children · history</tspan><tspan x="732" dy="20">page bodies · attachments · comments</tspan></text>
   <rect x="1050" y="165" width="370" height="180" rx="15" class="box remote"/>
   <text x="1072" y="198" class="head">remote/transport.py</text>
   <text x="1072" y="225" class="body"><tspan x="1072">ConfluenceTransport</tspan><tspan x="1072" dy="20">get_json · send_json · redirect_location</tspan><tspan x="1072" dy="20">retry/status mapping · account checks</tspan><tspan x="1072" dy="20">MAX_ATTEMPTS · MAX_JSON_BYTES</tspan></text>
@@ -49,7 +49,7 @@
   <text x="70" y="640" class="body"><tspan x="70">TokenStore</tspan><tspan x="70" dy="20">StoredCredential</tspan><tspan x="70" dy="20">encrypted persistence</tspan><tspan x="70" dy="20">CrossPlatLock</tspan></text>
   <rect x="390" y="580" width="430" height="210" rx="15" class="box domain"/>
   <text x="412" y="613" class="head">domain/</text>
-  <text x="412" y="640" class="body"><tspan x="412">models.py: auth/space models, search/user results,</tspan><tspan x="412" dy="20">page tree, metadata, versions and page references</tspan><tspan x="412" dy="26">errors.py: ConnectorError, AuthenticationRequired, AccountMismatch,</tspan><tspan x="412" dy="20">SecureStorageUnavailable, InvalidRequest, NotFound, Throttled,</tspan><tspan x="412" dy="20">Upstream, PermissionDenied, Conflict, UncertainWrite</tspan></text>
+  <text x="412" y="640" class="body"><tspan x="412">models.py: auth/space models, search/user results,</tspan><tspan x="412" dy="20">page tree, metadata, text, attachments, comments, references</tspan><tspan x="412" dy="26">errors.py: ConnectorError, AuthenticationRequired, AccountMismatch,</tspan><tspan x="412" dy="20">SecureStorageUnavailable, InvalidRequest, NotFound, Throttled,</tspan><tspan x="412" dy="20">Upstream, PermissionDenied, Conflict, UncertainWrite</tspan></text>
   <rect x="865" y="580" width="260" height="170" rx="15" class="box domain"/>
   <text x="887" y="613" class="head">config.py</text>
   <text x="887" y="640" class="body"><tspan x="887">load_config · add_config_argument</tspan><tspan x="887" dy="20">data_dir · product constants</tspan></text>

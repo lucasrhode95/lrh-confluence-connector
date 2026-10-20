@@ -18,7 +18,6 @@ writes were verified only through a browser session.
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `get_pages` | Read pages by ID or URL as text with attachment/macro markers, comments per parse scope, and short version metadata | Ready |
 | `download_attachments` | Save named attachments of a page locally; return paths | Ready |
 | `export_pages` | Pages and versions plus parse scope into one ZIP with text and attachment folders | Ready |
 | `create_page` | New page or new-page draft under a parent, in `rich` or `text` format | Ready |
@@ -38,9 +37,7 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 - Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
   mirrored by offline tests with synthetic fake responses.
-- Typed page and content models carrying source metadata and ordered references (page, version,
-  attachment, comment, macro) mapped from REST JSON and storage/`view` structure before rendering.
-- Remaining content routes and adapters for page text, attachments, exports and writes, including
+- Remaining content routes and adapters for attachments, exports and writes, including
   paging caps, CQL 400 details, 409 conflicts and Confluence 500 log referrals. The shared retry and uncertain-write policy is implemented and has
   offline tests; each later write capability still needs its own refusal and partial-failure coverage.
 
@@ -74,9 +71,9 @@ in the personal space, including a rich-text sample page.
   does not accept those filters. Merged first-page hits stay within the caller's result limit, preserving
   CQL order; only returned quick-navigation IDs affect continuation filtering. Search terms escape
   text-query syntax separately from CQL string quoting; verify metacharacter behavior on the configured
-  instance. User lookup continues to use the CQL search and exact `/rest/api/user?key=` lookup for former
+  instance. User lookup continues to use the CQL search and exact `/rest/api/user?username=` lookup for former
   users; quick navigation with `type=user` is known to fail.
-- `get_page_tree` uses `rest/api/space/{spaceKey}/content/page` for space-root pages and
+- `get_page_tree` uses `rest/api/space/{spaceKey}/content/page?depth=root` for space-root pages and
   `rest/api/content/{id}/child/page` for descendants. Verify space-root response order and paging on
   the configured instance. Page depth is 1–5 (default 3), counting the selected page as level 1;
   for a space root, top-level pages are level 1. A result is capped at 1,000 pages; the cap is
@@ -87,6 +84,17 @@ in the personal space, including a rich-text sample page.
   that cap truncates history. Metadata reports the current page and rejects versioned references;
   historical reads remain separate later work. Confirm the expansion fields, contributor mapping
   and version-list totals for the configured instance during acceptance.
+- `get_pages` reads `body.view`, optionally `body.storage`, `child/attachment?limit=500` and
+  `child/comment?depth=all&expand=body.view,history`. Verify actual attachment and comment counts, the
+  comment ancestry/inline-selection fields, and the page history field (if any) that reports total
+  versions. Confirm historical reads continue the selected page version after a later edit. Confirm
+  whether an authoritative source-position mapping is available for HTML macros when the view has no
+  macro wrapper. Until then, unmatched HTML macros are marked after the body; matching visible text or
+  script position is unsafe because neither establishes identity. Confirm stable identity mapping for
+  macros inside resolved includes; those wrappers do not consume the requested page's storage metadata.
+  Attachment and comment lists are fetched again by a continuation, so their content may change while
+  the page body remains version-pinned. Check whether either child route can exceed its 500-item
+  request limit on the configured instance.
 - `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
   Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
   1,000,000. Verify current and former-user results during acceptance.

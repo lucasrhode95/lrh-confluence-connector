@@ -16,7 +16,7 @@ credential store. Adapters are rebuilt when the stored username changes. The tok
 encrypted storage for every request, and the active account is checked again after each response.
 There is no daemon, scheduler, web surface, or persistent content store.
 
-The MCP surface currently exposes six read-only tools:
+The MCP surface currently exposes seven read-only tools:
 
 | Tool | Implemented behavior |
 |---|---|
@@ -26,8 +26,9 @@ The MCP surface currently exposes six read-only tools:
 | `find_users` | Current users by display-name query; former users by exact username |
 | `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
 | `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
+| `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
 
-Page text reads, comments, attachment downloads, exports and write tools are not implemented yet.
+Attachment downloads, exports and write tools are not implemented yet.
 
 ## 2. Modules and boundaries
 
@@ -40,12 +41,12 @@ Page text reads, comments, attachment downloads, exports and write tools are not
 - `src/confluence_connector/logs.py`: process-scoped rotating logs with credential redaction.
 - `src/confluence_connector/auth/store.py`: encrypted PAT and username persistence under
   `CrossPlatLock`.
-- `src/confluence_connector/domain/`: connector errors and typed status, space, search, user, tree and metadata results.
+- `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
 - `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
   checks; it never logs request URLs or payloads.
 - `src/confluence_connector/remote/confluence.py`: configured current-user, space and search routes;
-  quick navigation, user lookup, ordered children and page-history mapping.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and later page tools; it
+  quick navigation, user lookup, ordered children, page bodies, attachments, comments and history mapping.
+- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata and page reads; it
   refuses URLs outside the configured host and context path.
 - `src/confluence_connector/service/spaces.py`: offline auth status, verified status and space listing.
 - `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
@@ -57,6 +58,8 @@ Page text reads, comments, attachment downloads, exports and write tools are not
 - `src/confluence_connector/service/users.py`: display-name paging and exact username lookups.
 - `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
+- `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
+- `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
@@ -125,24 +128,64 @@ total suggests otherwise.
 Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
 `contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
 `include_archived` (true by default). Date-only values pass through as `yyyy/MM/dd` and mean that
-calendar day in Confluence's timezone. Timestamps with offsets are normalized to UTC; timestamps
+calendar day in Confluence's timezone; mixed date and timestamp bounds are ordered against that whole
+local day. Timestamps with offsets are normalized to UTC; timestamps
 without offsets are treated as UTC. Timestamp bounds require `cql_timezone`, convert to timezone-less
 `yyyy/MM/dd HH:mm`, and round lower bounds down and upper bounds up to preserve inclusive minutes.
 Repeated daylight-saving hours are conservatively widened because CQL literals cannot identify a
 fold; a rounded minute in a spring-forward gap moves to the next valid minute. Cursors store the
 original UTC instants and reconvert them on every page. If the setting is missing, date-only search
-continues to work and timestamp filters return an actionable `InvalidRequest`. Page/space trees keep
-the server's child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
+continues to work and timestamp filters return an actionable `InvalidRequest`. Space-root tree reads
+request `depth=root`, then child reads follow each page's direct-child route. Trees keep the server's
+child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
 Metadata accepts at most 20 references; experimental page versions are read in 200-item pages and
 capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
 historical metadata reads are not implemented. Results identify truncation or per-reference failures.
+
+`get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
+the shared transport caps all requests at six in flight. `body.view` supplies resolved text, while
+`body.storage` supplies Jira, PlantUML, HTML-macro and ordered reference metadata. The storage parser
+preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. When
+storage expansion is requested, the adapter requires a string `body.storage.value`; a missing or
+malformed requested value is an upstream error. Text output keeps headings, ordered-list numbering from
+`start` and `value`, unordered lists, code, panels, status, expand blocks, links and pipe tables; expand
+and panel content keep inline runs together and split around block children, with panel children quoted so
+paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
+indent continuation lines, including nested-list indentation through whitespace cleanup while keeping
+multiline nested items in one block. Pipe-table rows remain separate budget blocks and use single
+newlines to preserve Markdown table syntax. Complex table fallbacks emit one minimal-HTML block per outer
+row, preserving block boundaries within cells and preformatted code wrappers and whitespace. They retain
+image, macro and link markers with their typed references. Attachment and image identity is mapped from
+source fields before markers are rendered. Page-typed linked-resource anchors bypass attachment mapping;
+their source page IDs and visible labels are retained by the link mapper, with the current page as owner.
+Include and excerpt-include references also retain the current page as owner. Comment reads request
+`body.view`, and the adapter treats a missing or malformed requested value as an upstream error.
+Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
+marked after the rendered body because visible text and scripts are not reliable identity sources.
+Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
+HTML line breaks remain line breaks. Comment bodies share the page budget in both formats, while rich
+page text stays unchanged and structured comments accompany only selected comment blocks.
+Comments are converted from their own `view` bodies using the configured base URL for context-relative
+links, then threaded by source ancestry. Typed references remain alongside text so agents do not have
+to parse markers. A `rich` read returns the storage body verbatim. Both formats use block-boundary
+budgets. Cursors carry page ID, version and a stable next-block anchor and re-read the historical
+version when the current page has changed; the adapter requires the returned source version to exactly
+confirm a requested historical version. Body anchors use the pinned block order, while attachment and
+comment anchors use their source IDs. If a live section removes the next anchored item, continuation
+returns an actionable restart error. Text continuation keeps the separator preceding its first block so
+joining fragments reproduces the original text. Generic containers and blockquotes keep inline runs
+together and split them only around block-level children. Local root-relative links are normalized to
+the configured context path before they are emitted. An oversized continuation state is rejected
+instead of returning a cursor the decoder will refuse. Attachments and comments are read again on continuation, so those
+live sections can change while the page body remains pinned; stable item anchors prevent insertions before
+a continuation point from shifting the cursor.
 
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title
 inside their space, and a renamed title fails clearly. Short-link redirects are followed manually and
 must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
-comment focus are ignored. Search scope, page trees and metadata use this resolver for page references;
-page text reading is still open work.
+comment focus are ignored. Search scope, page trees, metadata and page text reads use this resolver for
+page references.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.

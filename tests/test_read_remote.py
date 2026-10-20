@@ -126,15 +126,17 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIn("type = user", seen[0].url.params["cql"])
         self.assertIn("user.fullname ~ 'Sample User'", seen[0].url.params["cql"])
         self.assertEqual(page.users[0].username, "sample-user")
-        self.assertEqual(seen[1].url.params["key"], "former-user")
+        self.assertEqual(seen[1].url.params["username"], "former-user")
         self.assertEqual(user.username, "former-user")
 
     async def test_space_root_route_and_version_paging_use_actual_size(self) -> None:
         starts: list[int] = []
         routes: list[str] = []
+        params: list[dict[str, str]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             routes.append(request.url.path)
+            params.append(dict(request.url.params))
             if request.url.path.endswith("/content/page"):
                 return httpx.Response(
                     200,
@@ -163,6 +165,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([version.number for version in versions], [1, 2, 3])
         self.assertFalse(truncated)
         self.assertEqual(routes[0], "/wiki/rest/api/space/SYNTH/content/page")
+        self.assertEqual(params[0]["depth"], "root")
 
     async def test_page_tree_uses_actual_child_size_and_ignores_next_url(self) -> None:
         starts: list[int] = []
@@ -253,6 +256,167 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata.contributors[0].user_key, "sample-user")
         self.assertEqual(metadata.ancestors[0].title, "Synthetic root")
         self.assertEqual(metadata.labels, ["reviewed"])
+
+    async def test_page_content_requests_a_pinned_historical_version(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "version": {"number": 4, "when": "2026-10-01T00:00:00Z"},
+                    "history": {"totalVersions": 9},
+                    "body": {
+                        "view": {"value": "<p>Rendered body</p>"},
+                        "storage": {"value": "<p>Stored body</p>"},
+                    },
+                },
+            )
+
+        content = await self.make_api(handler).get_page_content(
+            "55", version=4, expected_username="sample-user"
+        )
+        self.assertEqual(observed[0].url.params["status"], "historical")
+        self.assertEqual(observed[0].url.params["version"], "4")
+        self.assertEqual(content.view_body, "<p>Rendered body</p>")
+        self.assertEqual(content.storage_body, "<p>Stored body</p>")
+        self.assertEqual(content.version, 4)
+        self.assertEqual(content.total_versions, 9)
+
+    async def test_page_content_rejects_unconfirmed_historical_version(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "body": {"view": {"value": "Current body"}},
+                },
+            )
+
+        with self.assertRaisesRegex(Upstream, "did not confirm the requested historical page version"):
+            await self.make_api(handler).get_page_content(
+                "55", version=4, expected_username="sample-user"
+            )
+
+    async def test_page_content_can_skip_storage_expansion(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {"view": {"value": "<p>Rendered body</p>"}},
+                },
+            )
+
+        content = await self.make_api(handler).get_page_content(
+            "55", include_storage=False, expected_username="sample-user"
+        )
+        self.assertNotIn("body.storage", observed[0].url.params["expand"])
+        self.assertEqual(content.view_body, "<p>Rendered body</p>")
+        self.assertEqual(content.storage_body, "")
+
+    async def test_page_content_rejects_missing_requested_storage_body(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                    "body": {"view": {"value": "<p>Rendered body</p>"}},
+                },
+            )
+
+        with self.assertRaisesRegex(Upstream, "valid requested storage body"):
+            await self.make_api(handler).get_page_content("55", expected_username="sample-user")
+
+    async def test_page_children_map_attachment_identity_and_comment_source_fields(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            if request.url.path.endswith("/child/attachment"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "attachment-9",
+                                "title": "guide.txt",
+                                "mediaType": "text/plain",
+                                "fileSize": 42,
+                                "_links": {"download": "/wiki/download/attachments/55/guide.txt"},
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "comment-7",
+                            "type": "comment",
+                            "ancestors": [{"id": "comment-6", "type": "comment"}],
+                            "body": {"view": {"value": "<p>Synthetic comment</p>"}},
+                            "history": {
+                                "createdDate": "2026-10-01T00:00:00Z",
+                                "createdBy": {"username": "sample-user", "displayName": "Sample User"},
+                            },
+                            "extensions": {
+                                "location": "inline",
+                                "resolutionStatus": "resolved",
+                                "inlineProperties": {"originalSelection": "selected words"},
+                            },
+                        }
+                    ]
+                },
+            )
+
+        api = self.make_api(handler)
+        attachments = await api.list_page_attachments("55", expected_username="sample-user")
+        comments = await api.list_page_comments("55", expected_username="sample-user")
+        self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/55/child/attachment")
+        self.assertEqual(observed[0].url.params["limit"], "500")
+        self.assertEqual(observed[1].url.path, "/wiki/rest/api/content/55/child/comment")
+        self.assertEqual(observed[1].url.params["depth"], "all")
+        self.assertIn("history", observed[1].url.params["expand"])
+        self.assertEqual(attachments[0].attachment_id, "attachment-9")
+        self.assertEqual(
+            attachments[0].download_url,
+            "https://confluence.example.test/wiki/download/attachments/55/guide.txt",
+        )
+        self.assertEqual(comments[0].parent_comment_id, "comment-6")
+        self.assertEqual(comments[0].location, "inline")
+        self.assertEqual(comments[0].selected_text, "selected words")
+        self.assertEqual(comments[0].author.display_name, "Sample User")  # type: ignore[union-attr]
+
+    async def test_page_comments_reject_missing_or_malformed_requested_view_bodies(self) -> None:
+        for body in ({}, {"view": {"value": None}}, {"view": {"value": 5}}):
+            with self.subTest(body=body):
+                def handler(_: httpx.Request) -> httpx.Response:
+                    return httpx.Response(
+                        200,
+                        json={"results": [{"id": "comment-7", "body": body}]},
+                    )
+
+                with self.assertRaisesRegex(Upstream, "expanded view body"):
+                    await self.make_api(handler).list_page_comments(
+                        "55", expected_username="sample-user"
+                    )
 
     async def test_malformed_echoed_size_is_an_upstream_error(self) -> None:
         def handler(_: httpx.Request) -> httpx.Response:
