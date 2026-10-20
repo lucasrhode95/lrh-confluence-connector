@@ -287,6 +287,23 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content.version, 4)
         self.assertEqual(content.total_versions, 9)
 
+    async def test_page_content_rejects_unconfirmed_historical_version(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "55",
+                    "title": "Synthetic page",
+                    "type": "page",
+                    "body": {"view": {"value": "Current body"}},
+                },
+            )
+
+        with self.assertRaisesRegex(Upstream, "did not confirm the requested historical page version"):
+            await self.make_api(handler).get_page_content(
+                "55", version=4, expected_username="sample-user"
+            )
+
     async def test_page_content_can_skip_storage_expansion(self) -> None:
         observed: list[httpx.Request] = []
 

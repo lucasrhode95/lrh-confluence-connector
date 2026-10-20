@@ -180,6 +180,27 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertEqual(rendered.blocks[0].text, f"[Target]({target})")
         self.assertEqual(rendered.references[0].url, target)
 
+    def test_generic_container_keeps_direct_inline_children_in_one_block(self) -> None:
+        rendered = render_page_body(
+            "<div>Hello <span>world</span>!</div>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual([block.text for block in rendered.blocks], ["Hello world!"])
+
+    def test_generic_container_splits_inline_runs_around_block_children(self) -> None:
+        rendered = render_page_body(
+            "<div>Before <span>inline</span><p>Block paragraph</p> after.</div>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["Before inline", "Block paragraph", "after."],
+        )
+
     def test_unmatched_html_macro_does_not_claim_matching_visible_text(self) -> None:
         rendered = render_page_body(
             "<p>Unique HTML output.</p><p>Following paragraph.</p>",
@@ -275,6 +296,19 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertEqual(
             [block.text for block in rendered.blocks],
             ["4. Fourth", "9. Ninth", "10. Tenth", "-2. Negative"],
+        )
+
+    def test_ordered_lists_in_table_cells_honor_start_and_item_values(self) -> None:
+        rendered = render_page_body(
+            "<table><tr><td><ol start='4'><li>Fourth</li><li value='9'>Ninth</li>"
+            "<li>Tenth</li></ol></td></tr></table>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["| 4. Fourth<br>9. Ninth<br>10. Tenth |", "| --- |"],
         )
 
     def test_list_items_preserve_multiple_paragraph_boundaries(self) -> None:

@@ -618,10 +618,12 @@ def _page_content(
 ) -> RemotePageContent:
     """Map expanded page source fields before any body rendering takes place."""
     metadata = _page_metadata(payload, base_url=base_url)
-    version = metadata.version or requested_version
+    version = metadata.version
+    if requested_version is not None and version is None:
+        raise Upstream("Confluence did not confirm the requested historical page version.")
     if version is None:
         raise Upstream("Confluence returned page content without a version number.")
-    if requested_version is not None and metadata.version not in (None, requested_version):
+    if requested_version is not None and version != requested_version:
         raise Upstream("Confluence returned a different page version than the requested historical version.")
     body = payload.get("body")
     body = body if isinstance(body, dict) else {}

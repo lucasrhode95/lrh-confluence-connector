@@ -212,11 +212,31 @@ def _render_blocks(value: _Node | str, context: _RenderContext) -> list[PageText
         text, refs = _inline(value.children, context)
         return [_block(f"• {text.strip()}", refs)] if text.strip() else []
 
-    child_blocks = [block for child in value.children for block in _render_blocks(child, context)]
-    if child_blocks:
-        return child_blocks
-    text, refs = _inline(value.children, context)
-    return [_block(text.strip(), refs)] if text.strip() else []
+    return _render_container_content(value.children, context)
+
+
+def _render_container_content(children: list[_Node | str], context: _RenderContext) -> list[PageTextBlock]:
+    blocks: list[PageTextBlock] = []
+    inline_values: list[_Node | str] = []
+
+    def flush_inline() -> None:
+        if not inline_values:
+            return
+        text, references = _inline(inline_values, context)
+        if text.strip():
+            blocks.append(_block(text.strip(), references))
+        inline_values.clear()
+
+    for child in children:
+        if isinstance(child, str) and not child.strip():
+            continue
+        if not _is_block_content(child):
+            inline_values.append(child)
+            continue
+        flush_inline()
+        blocks.extend(_render_blocks(child, context))
+    flush_inline()
+    return blocks
 
 
 def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _RenderContext) -> list[PageTextBlock]:
@@ -342,6 +362,8 @@ def _is_block_content(value: _Node | str) -> bool:
         "h4",
         "h5",
         "h6",
+        "hr",
+        "li",
         "ol",
         "p",
         "pre",
@@ -554,12 +576,18 @@ def _inline(
             continue
         if tag in {"ul", "ol"} and cell_mode:
             list_items = [item for item in value.children if isinstance(item, _Node) and item.tag == "li"]
-            for index, item in enumerate(list_items):
+            ordered = tag == "ol"
+            next_number = _integer_attr(value.attrs.get("start"), default=1) if ordered else 1
+            for item_index, item in enumerate(list_items):
                 text, refs = _inline(item.children, context, cell_mode=True)
-                if index:
+                item_number = _integer_attr(item.attrs.get("value"), default=next_number) if ordered else 1
+                if item_index:
                     parts.append("<br>")
-                parts.append("• " + text.strip())
+                marker = f"{item_number}. " if ordered else "• "
+                parts.append(marker + text.strip())
                 references.extend(refs)
+                if ordered:
+                    next_number = item_number + 1
             continue
         text, refs = _inline(
             value.children,
