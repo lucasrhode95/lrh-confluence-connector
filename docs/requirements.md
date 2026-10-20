@@ -104,15 +104,17 @@ source-provided descriptions. Markers let an agent request a particular attachme
   It reads the `view` body, where includes, excerpts and expand sections are already resolved, and
   takes Jira keys, PlantUML source and HTML-macro identity from `storage`, because `view` loses them.
 - Output is Markdown-like: headings, lists, task lists, fenced code with language, panels as quoted
-  blocks (`> [Info] …`), `[Expand: title]`, `[Status: text]`, `@Display Name`, and links with page IDs
-  kept in the references. Tables of contents and generated heading numbering are dropped.
+  blocks (`> [Info] …`) whose paragraphs and list items remain budget boundaries, `[Expand: title]`,
+  `[Status: text]`, `@Display Name`, and links with page IDs kept in the references. Tables of contents
+  and generated heading numbering are dropped.
 - Ordered lists preserve their source `start` and item `value` numbers.
 - Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
 - Local root-relative page links include the configured Confluence context path in text and references.
-- Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, list items become `• item`,
-  and images and macros in cells use their normal markers. Merged cells repeat their value into each
-  covered cell, with a `[Table: merged cells repeated]` note. Only tables with nested tables or code
-  blocks in cells fall back to minimal HTML (`table/tr/th/td`, `colspan`, `rowspan`, text).
+- Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, unordered items use `• item`,
+  and ordered items retain their numbering. Images and macros in cells use their normal markers.
+  Merged cells repeat their value into each covered cell, with a `[Table: merged cells repeated]`
+  note. Only tables with nested tables or code blocks in cells fall back to minimal HTML, preserving
+  safe block tags and source list-number attributes within cells.
 - Markers sit where the item appears in the body: `[Image: filename — alt text]`, `[File: filename]`,
   `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source, and
   `[Unrendered macro: name]`. HTML-macro scripts are not emitted.
@@ -163,8 +165,10 @@ attachment deduplication is not required.
   400,000), returning pages in the order given. Whole pages are packed into the budget; the first is
   always returned. Pages that did not fit are listed in `remaining`, never dropped.
 - A page larger than the budget is cut at a block boundary (paragraph, list item, table row). Its
-  cursor carries page ID, version and offset; continuation reads that same version, through a
-  historical read if the page changed. Nothing is kept in process memory between calls.
+  cursor carries page ID, version and a stable next-block anchor; continuation reads that same
+  version through a historical read if the page changed. Mutable attachment and comment sections
+  resume by item identity. If the anchored item was removed, the connector asks the caller to restart
+  the read. Nothing is kept in process memory between calls.
 - Comment blocks use the same character budget in text and rich reads. Rich page text remains the
   unchanged storage body; structured comment records appear only when their block is selected, so
   full comment bodies are not repeated on earlier pages or continuations.

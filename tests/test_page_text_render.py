@@ -281,6 +281,19 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["> [Deployment] Panel text [Status: Approved]"],
         )
 
+    def test_unrecognized_macro_keeps_child_block_boundaries(self) -> None:
+        rendered = render_page_body(
+            '<div data-macro-name="custom"><p>First paragraph.</p><p>Second paragraph.</p></div>',
+            "",
+            page_id="55",
+            attachments=[],
+            macros_from_storage=False,
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["First paragraph.", "Second paragraph."],
+        )
+
     def test_storage_macro_cdata_bodies_are_preserved(self) -> None:
         rendered = render_page_body(
             '<div data-macro-name="plantuml"></div><div data-macro-name="code"></div>',
@@ -310,7 +323,19 @@ class PageTextRenderingChecks(unittest.TestCase):
         )
         self.assertEqual(
             [block.text for block in rendered.blocks],
-            ["> [Info] First paragraph.\n>\n> Second paragraph.\n>\n> • Alpha\n> • Beta"],
+            [
+                "> [Info] First paragraph.",
+                "> Second paragraph.",
+                "> • Alpha",
+                "> • Beta",
+            ],
+        )
+        self.assertEqual(
+            "".join(
+                (block.separator_before if index else "") + block.text
+                for index, block in enumerate(rendered.blocks)
+            ),
+            "> [Info] First paragraph.\n>\n> Second paragraph.\n>\n> • Alpha\n> • Beta",
         )
 
     def test_ordered_lists_honor_start_and_item_value_attributes(self) -> None:

@@ -33,7 +33,6 @@ from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
 from confluence_connector.service.page_text import (
     PageTextBlock,
-    html_to_text,
     render_page_body,
     storage_top_level_blocks,
 )
@@ -41,7 +40,6 @@ from confluence_connector.service.page_text import (
 MAX_PAGE_REFERENCES = 20
 DEFAULT_MAX_CHARS = 40_000
 MAX_MAX_CHARS = 400_000
-MAX_BLOCK_OFFSET = 1_000_000
 CURSOR_KIND = "get_pages"
 
 
@@ -68,7 +66,7 @@ class _LoadedPage:
 class _CursorState:
     current: _PageRequest
     version: int
-    offset: int
+    anchor: str
     pending: tuple[_PageRequest, ...]
     format: PageTextFormat
     max_chars: int
@@ -146,7 +144,7 @@ class PageTextService:
             page_format=state.format,
             max_chars=state.max_chars,
             parse_scope=state.parse_scope,
-            first_offset=state.offset,
+            first_anchor=state.anchor,
             pinned_first_version=state.version,
         )
 
@@ -158,7 +156,7 @@ class PageTextService:
         page_format: PageTextFormat,
         max_chars: int,
         parse_scope: PageParseScope,
-        first_offset: int = 0,
+        first_anchor: str | None = None,
         pinned_first_version: int | None = None,
     ) -> PageReadResult:
         records: list[PageReadRecord] = []
@@ -191,7 +189,7 @@ class PageTextService:
                     schedule(index + 2)
                     continue
 
-                start_offset = first_offset if index == 0 else 0
+                start_offset = _block_offset(loaded.blocks, first_anchor) if index == 0 and first_anchor else 0
                 selected, next_offset, chars, exceeded = _take_blocks(
                     loaded.blocks,
                     start=start_offset,
@@ -215,12 +213,15 @@ class PageTextService:
                     )
                 if next_offset is not None:
                     remaining = requests[index + 1 :]
+                    next_anchor = loaded.blocks[next_offset].cursor_key
+                    if next_anchor is None:
+                        raise Upstream("Confluence page content did not produce a stable continuation anchor.")
                     cursor = cursors.encode(
                         CURSOR_KIND,
                         page_id=request.page_id,
                         reference=request.page_id,
                         version=loaded.source.version,
-                        offset=next_offset,
+                        anchor=next_anchor,
                         pending=[_request_json(item) for item in remaining],
                         format=page_format,
                         max_chars=max_chars,
@@ -308,22 +309,38 @@ class PageTextService:
             base_url=self._base_url,
             macros_from_storage=parse_scope.macros_from_storage,
         )
-        comments = tuple(
-            PageComment(
-                comment_id=comment.comment_id,
-                parent_comment_id=comment.parent_comment_id,
-                author=comment.author,
-                created_at=comment.created_at,
-                body=html_to_text(comment.body_view, base_url=self._base_url),
-                location=comment.location,
-                resolution=comment.resolution,
-                selected_text=comment.selected_text,
+        comments_list: list[PageComment] = []
+        for comment in remote_comments:
+            rendered_comment = render_page_body(
+                comment.body_view,
+                "",
+                page_id=request.page_id,
+                attachments=attachments,
+                base_url=self._base_url,
+                macros_from_storage=False,
             )
-            for comment in remote_comments
-        )
+            comment_text = "".join(
+                (block.separator_before if index else "") + block.text
+                for index, block in enumerate(rendered_comment.blocks)
+            )
+            comments_list.append(
+                PageComment(
+                    comment_id=comment.comment_id,
+                    parent_comment_id=comment.parent_comment_id,
+                    author=comment.author,
+                    created_at=comment.created_at,
+                    body=comment_text,
+                    location=comment.location,
+                    resolution=comment.resolution,
+                    selected_text=comment.selected_text,
+                    references=list(rendered_comment.references),
+                )
+            )
+        comments = tuple(comments_list)
         references = list(converted.references)
         references.extend(_attachment_reference(item, request.page_id) for item in attachments)
         references.extend(_comment_reference(item, request.page_id) for item in comments)
+        references.extend(reference for comment in comments for reference in comment.references)
         extracted_at = _utc_now()
         header = _page_header(source, extracted_at) if parse_scope.header else None
         blocks = _page_blocks(
@@ -417,26 +434,43 @@ def _page_blocks(
     header: str | None,
 ) -> list[PageTextBlock]:
     if page_format == "rich":
-        blocks = [PageTextBlock(value) for value in storage_top_level_blocks(source.storage_body)]
+        blocks = [
+            PageTextBlock(value, cursor_key=f"body:{index}")
+            for index, value in enumerate(storage_top_level_blocks(source.storage_body))
+        ]
         if scope.comments:
             blocks.extend(_comment_blocks(comments, source.metadata.page_id))
         return blocks
     blocks: list[PageTextBlock] = []
     if header:
-        blocks.append(PageTextBlock(header))
-    blocks.extend(text_blocks)
+        blocks.append(PageTextBlock(header, cursor_key="header"))
+    blocks.extend(_cursor_blocks(text_blocks, "body"))
     if scope.attachments:
-        blocks.append(PageTextBlock("## Attachments"))
+        blocks.append(PageTextBlock("## Attachments", cursor_key="attachments:section"))
         for attachment in attachments:
             details = [attachment.media_type or "unknown type"]
             if attachment.file_size is not None:
                 details.append(f"{attachment.file_size} bytes")
             line = f"- {attachment.filename} ({', '.join(details)})"
-            blocks.append(_block(line, (_attachment_reference(attachment, source.metadata.page_id),)))
+            block = _block(line, (_attachment_reference(attachment, source.metadata.page_id),))
+            blocks.append(_cursor_block(block, f"attachment:{attachment.attachment_id}"))
     if scope.comments:
-        blocks.append(PageTextBlock("## Comments"))
+        blocks.append(PageTextBlock("## Comments", cursor_key="comments:section"))
         blocks.extend(_comment_blocks(comments, source.metadata.page_id))
     return blocks
+
+
+def _cursor_blocks(blocks: tuple[PageTextBlock, ...], section: str) -> list[PageTextBlock]:
+    return [_cursor_block(block, f"{section}:{index}") for index, block in enumerate(blocks)]
+
+
+def _cursor_block(block: PageTextBlock, key: str) -> PageTextBlock:
+    return PageTextBlock(
+        text=block.text,
+        references=block.references,
+        separator_before=block.separator_before,
+        cursor_key=key,
+    )
 
 
 def _comment_blocks(comments: tuple[PageComment, ...], page_id: str) -> list[PageTextBlock]:
@@ -467,9 +501,10 @@ def _comment_blocks(comments: tuple[PageComment, ...], page_id: str) -> list[Pag
         blocks.append(
             _block(
                 "\n".join(lines),
-                (_comment_reference(comment, page_id),),
+                (_comment_reference(comment, page_id), *comment.references),
             )
         )
+        blocks[-1] = _cursor_block(blocks[-1], f"comment:{comment.comment_id}")
     return blocks
 
 
@@ -535,12 +570,21 @@ def _take_blocks(
     return selected, None, used, False
 
 
+def _block_offset(blocks: tuple[PageTextBlock, ...], anchor: str) -> int:
+    matches = [index for index, block in enumerate(blocks) if block.cursor_key == anchor]
+    if len(matches) != 1:
+        raise InvalidRequest(
+            "A page section changed and the cursor item is no longer available. Start a new page read."
+        )
+    return matches[0]
+
+
 def _decode_cursor(cursor: str) -> _CursorState:
     state = cursors.decode(cursor, CURSOR_KIND)
     page_id = state.get("page_id")
     reference = state.get("reference")
     version = state.get("version")
-    offset = state.get("offset")
+    anchor = state.get("anchor")
     pending_value = state.get("pending")
     page_format = state.get("format")
     budget = state.get("max_chars")
@@ -555,9 +599,10 @@ def _decode_cursor(cursor: str) -> _CursorState:
         or not isinstance(version, int)
         or isinstance(version, bool)
         or version < 1
-        or not isinstance(offset, int)
-        or isinstance(offset, bool)
-        or not 1 <= offset <= MAX_BLOCK_OFFSET
+        or not isinstance(anchor, str)
+        or not anchor
+        or len(anchor) > 2_048
+        or any(ord(character) < 32 for character in anchor)
         or not isinstance(pending_value, list)
         or len(pending_value) > MAX_PAGE_REFERENCES - 1
         or not isinstance(page_format, str)
@@ -575,7 +620,7 @@ def _decode_cursor(cursor: str) -> _CursorState:
     return _CursorState(
         current=_PageRequest(reference, page_id, version),
         version=version,
-        offset=offset,
+        anchor=anchor,
         pending=pending,
         format=page_format,
         max_chars=budget,

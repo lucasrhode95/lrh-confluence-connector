@@ -29,6 +29,7 @@ class PageTextBlock:
     text: str
     references: tuple[PageReference, ...] = ()
     separator_before: str = "\n\n"
+    cursor_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -299,19 +300,28 @@ def _render_macro(node: _Node, name: str, macro: _Macro | None, context: _Render
         heading = name.capitalize()
         if name == "panel" and macro is not None:
             heading = macro.parameters.get("title", "Panel") or "Panel"
-        content, child_refs = _quoted_macro_content(node.children, context, heading)
-        return [_block(content, (*refs, *child_refs))]
-    text, child_refs = _inline(node.children, context)
+        return _quoted_macro_content(node.children, context, heading, refs)
+    child_blocks = _render_container_content(node.children, context)
+    text = "\n\n".join(block.text for block in child_blocks)
     if not text.strip() or _looks_unrendered(text):
         return [_block(f"[Unrendered macro: {name}]", refs)]
-    return [_block(text.strip(), (*refs, *child_refs))]
+    return [
+        _block(
+            block.text,
+            (*refs, *block.references) if index == 0 else block.references,
+            separator_before=block.separator_before,
+        )
+        for index, block in enumerate(child_blocks)
+    ]
 
 
 def _quoted_macro_content(
-    children: list[_Node | str], context: _RenderContext, heading: str
-) -> tuple[str, tuple[PageReference, ...]]:
-    groups: list[str] = []
-    references: list[PageReference] = []
+    children: list[_Node | str],
+    context: _RenderContext,
+    heading: str,
+    macro_references: tuple[PageReference, ...],
+) -> list[PageTextBlock]:
+    groups: list[tuple[list[PageTextBlock], str | None]] = []
     inline_values: list[_Node | str] = []
 
     def flush_inline() -> None:
@@ -319,8 +329,7 @@ def _quoted_macro_content(
             return
         text, inline_references = _inline(inline_values, context)
         if text.strip():
-            groups.append(text.strip())
-        references.extend(inline_references)
+            groups.append(([_block(text.strip(), inline_references)], "\n\n"))
         inline_values.clear()
 
     for child in children:
@@ -332,18 +341,44 @@ def _quoted_macro_content(
         flush_inline()
         child_blocks = _render_blocks(child, context)
         if child_blocks:
-            separator = "\n" if isinstance(child, _Node) and child.tag in {"ul", "ol", "table"} else "\n\n"
-            groups.append(separator.join(block.text for block in child_blocks).strip())
-            references.extend(reference for block in child_blocks for reference in block.references)
+            separator = (
+                "\n" if isinstance(child, _Node) and child.tag in {"ul", "ol"} else None
+            )
+            groups.append((child_blocks, separator))
     flush_inline()
 
-    content = f"[{heading}]"
-    if groups:
-        content += " " + groups[0]
-        if len(groups) > 1:
-            content += "\n\n" + "\n\n".join(group for group in groups[1:])
-    quoted = "\n".join(f"> {line}" if line else ">" for line in content.splitlines())
-    return quoted, _unique_references(references)
+    if not groups:
+        return [_block(f"> [{heading}]", macro_references)]
+
+    quoted_blocks: list[PageTextBlock] = []
+    for group_index, (group, group_separator) in enumerate(groups):
+        for block_index, block in enumerate(group):
+            lines = block.text.splitlines()
+            if group_index == 0 and block_index == 0:
+                lines[0] = f"[{heading}] {lines[0]}"
+            quoted = "\n".join(f"> {line}" if line else ">" for line in lines)
+            if group_index == 0 and block_index == 0:
+                separator_before = "\n\n"
+                references = (*macro_references, *block.references)
+            elif block_index > 0:
+                if group_separator is not None:
+                    separator_before = group_separator
+                elif block.separator_before == "\n\n":
+                    separator_before = "\n>\n"
+                else:
+                    separator_before = block.separator_before
+                references = block.references
+            else:
+                separator_before = "\n>\n"
+                references = block.references
+            quoted_blocks.append(
+                _block(
+                    quoted,
+                    references,
+                    separator_before=separator_before,
+                )
+            )
+    return quoted_blocks
 
 
 def _is_block_content(value: _Node | str) -> bool:

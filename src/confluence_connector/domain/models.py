@@ -289,6 +289,7 @@ class PageComment(BaseModel):
     location: str | None = None
     resolution: str | None = None
     selected_text: str | None = None
+    references: list[PageReference] = Field(default_factory=list)
 
 
 class RemotePageComment(BaseModel):

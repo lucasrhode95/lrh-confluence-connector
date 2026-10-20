@@ -162,12 +162,15 @@ page text stays unchanged and structured comments accompany only selected commen
 Comments are converted from their own `view` bodies using the configured base URL for context-relative
 links, then threaded by source ancestry. Typed references remain alongside text so agents do not have
 to parse markers. A `rich` read returns the storage body verbatim. Both formats use block-boundary
-budgets. Cursors carry page ID, version and block offset and
-re-read the historical version when the current page has changed; the adapter requires the returned
-source version to exactly confirm a requested historical version. Generic containers and blockquotes
-keep inline runs together and split them only around block-level children. Local root-relative links
-are normalized to the configured context path before they are emitted. Attachments and comments are read
-again on continuation, so those live sections can change while the page body remains pinned.
+budgets. Cursors carry page ID, version and a stable next-block anchor and re-read the historical
+version when the current page has changed; the adapter requires the returned source version to exactly
+confirm a requested historical version. Body anchors use the pinned block order, while attachment and
+comment anchors use their source IDs. If a live section removes the next anchored item, continuation
+returns an actionable restart error. Generic containers and blockquotes keep inline runs together and
+split them only around block-level children. Local root-relative links are normalized to the configured
+context path before they are emitted. Attachments and comments are read again on continuation, so those
+live sections can change while the page body remains pinned; stable item anchors prevent insertions before
+a continuation point from shifting the cursor.
 
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title

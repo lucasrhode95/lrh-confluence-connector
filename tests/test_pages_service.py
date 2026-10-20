@@ -157,6 +157,54 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIn("| Heading | Value |\n| --- | --- |\n| Row | 1 |", result.pages[0].text)
         self.assertNotIn("| Heading | Value |\n\n| --- |", result.pages[0].text)
 
+    async def test_panel_content_continues_at_quoted_block_boundaries(self) -> None:
+        page = _page(
+            "55",
+            1,
+            '<div data-macro-name="panel"><p>First paragraph.</p><p>Second paragraph.</p>'
+            "<ul><li>Third block.</li></ul></div>",
+            '<ac:structured-macro ac:name="panel"><ac:parameter ac:name="title">Panel</ac:parameter>'
+            "</ac:structured-macro>",
+        )
+        api = _ReadApi(pages={"55": page})
+        scope = {"header": False, "attachments": False, "comments": False}
+        first = await _service(api).get_pages("55", max_chars=len("> [Panel] First paragraph."), parse_scope=scope)
+
+        self.assertEqual(first.pages[0].text, "> [Panel] First paragraph.")
+        self.assertIsNotNone(first.next_cursor)
+        second = await _service(api).get_pages(cursor=first.next_cursor)
+        self.assertEqual(second.pages[0].text, "> Second paragraph.")
+        self.assertIsNotNone(second.next_cursor)
+        third = await _service(api).get_pages(cursor=second.next_cursor)
+        self.assertEqual(third.pages[0].text, "> • Third block.")
+
+    async def test_attachment_cursor_resumes_at_stable_item_after_insertions(self) -> None:
+        api = _ReadApi(
+            pages={"55": _page("55", 1, "<p>Body</p>", "")},
+            attachments={
+                "55": [
+                    PageAttachment(attachment_id="att-1", filename="first.txt", media_type="text/plain", file_size=1),
+                    PageAttachment(attachment_id="att-2", filename="second.txt", media_type="text/plain", file_size=2),
+                ]
+            },
+        )
+        first_text = "Body\n\n## Attachments\n\n- first.txt (text/plain, 1 bytes)"
+        first = await _service(api).get_pages(
+            "55",
+            max_chars=len(first_text),
+            parse_scope={"header": False, "comments": False, "macros_from_storage": False},
+        )
+        self.assertEqual(first.pages[0].text, first_text)
+        self.assertIsNotNone(first.next_cursor)
+
+        api.attachments["55"].insert(
+            1,
+            PageAttachment(attachment_id="att-new", filename="inserted.txt", media_type="text/plain"),
+        )
+        continued = await _service(api).get_pages(cursor=first.next_cursor)
+        self.assertEqual(continued.pages[0].text, "- second.txt (text/plain, 2 bytes)")
+        self.assertNotIn("inserted.txt", continued.pages[0].text)
+
     async def test_structured_comments_follow_the_selected_text_blocks(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>Body</p>", "")},
@@ -185,19 +233,40 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
     async def test_comment_page_links_keep_the_configured_context_path(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>Body</p>", "")},
+            attachments={
+                "55": [
+                    PageAttachment(
+                        attachment_id="att-9",
+                        filename="plot.png",
+                        media_type="image/png",
+                        file_size=5,
+                        download_url="https://confluence.example.test/wiki/download/plot.png",
+                    )
+                ]
+            },
             comments={
                 "55": [
                     RemotePageComment(
                         comment_id="comment-1",
-                        body_view='<p>See <a href="/spaces/SYNTH/pages/84/Target">target</a>.</p>',
+                        body_view=(
+                            '<p>See <a href="/spaces/SYNTH/pages/84/Target">target</a>. '
+                            '<img data-linked-resource-id="att-9" alt="Plot"> '
+                            '<a data-linked-resource-id="att-9">file</a></p>'
+                        ),
                     )
                 ]
             },
         )
-        result = await _service(api).get_pages("55", parse_scope={"header": False, "attachments": False})
+        result = await _service(api).get_pages("55", parse_scope={"header": False})
 
         self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].comments[0].body)
+        self.assertIn("[Image: plot.png — Plot]", result.pages[0].comments[0].body)
+        self.assertIn("[File: plot.png]", result.pages[0].comments[0].body)
         self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].text)
+        comment_references = result.pages[0].comments[0].references
+        self.assertEqual({reference.kind for reference in comment_references}, {"page", "image", "attachment"})
+        self.assertTrue(all(reference.owner_page_id == "55" for reference in comment_references))
+        self.assertTrue({reference.kind for reference in result.pages[0].references} >= {"page", "image", "attachment"})
 
     async def test_rich_cursor_budgets_comments_without_changing_storage_text(self) -> None:
         storage = "<p>Stored</p>"
