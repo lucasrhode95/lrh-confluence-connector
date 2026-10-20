@@ -41,9 +41,7 @@ Comment and attachment writes are not in the requirements and are not proposed h
 P2 review findings left open when their PR was merged, for the final pass. Group related items into
 design fixes rather than one patch each.
 
-- PR #5, `remote/confluence.py`: `list_drafts` can return a title-based `/display/…` or
-  `resumedraft.action` URL that `PageLinkResolver` cannot resolve back to the draft. Return an
-  ID-based supported URL, or resolve draft URLs.
+None open.
 
 ## Decisions
 

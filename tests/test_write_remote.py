@@ -10,6 +10,7 @@ import httpx
 
 from confluence_connector.domain.errors import Conflict, InvalidRequest, UncertainWrite, Upstream
 from confluence_connector.remote.confluence import ConfluenceApi
+from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
 from tests.fakes.credential_source import FakeCredentialSource
 from tests.fakes.settings import settings
@@ -96,7 +97,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                             "title": "Synthetic draft",
                             "space": {"key": "SYNTH", "name": "Synthetic space"},
                             "version": {"when": "2026-10-01T00:00:00Z"},
-                            "_links": {"webui": "/wiki/spaces/SYNTH/pages/301/Draft"},
+                            "_links": {"webui": "/wiki/display/SYNTH/Synthetic+draft"},
                         }
                     ],
                     "start": 10,
@@ -106,11 +107,15 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        page = await self.make_api(handler).list_drafts_page(
+        api = self.make_api(handler)
+        page = await api.list_drafts_page(
             space_key="SYNTH",
             start=10,
             limit=10,
             expected_username="sample-user",
+        )
+        resolved = await PageLinkResolver(settings(), api._transport, api).resolve(
+            str(page.drafts[0].url), expected_username="sample-user"
         )
 
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content")
@@ -118,6 +123,11 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].url.params["spaceKey"], "SYNTH")
         self.assertEqual(page.drafts[0].page_id, "301")
         self.assertEqual(page.drafts[0].space_name, "Synthetic space")
+        self.assertEqual(
+            page.drafts[0].url,
+            "https://confluence.example.test/wiki/spaces/SYNTH/pages/301",
+        )
+        self.assertEqual(resolved.page_id, "301")
         self.assertEqual((page.start, page.size, page.total_size), (10, 1, 11))
         self.assertTrue(page.has_more)
 
@@ -136,15 +146,29 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        page = await self.make_api(handler).list_drafts_page(
+        api = self.make_api(handler)
+        page = await api.list_drafts_page(
             space_key=None,
             start=10,
             limit=10,
             expected_username="sample-user",
         )
+        resolver = PageLinkResolver(settings(), api._transport, api)
+        resolved = [
+            await resolver.resolve(str(draft.url), expected_username="sample-user")
+            for draft in page.drafts
+        ]
 
         self.assertEqual(page.size, 2)
         self.assertFalse(page.has_more)
+        self.assertEqual(
+            [draft.url for draft in page.drafts],
+            [
+                "https://confluence.example.test/wiki/pages/viewpage.action?pageId=301",
+                "https://confluence.example.test/wiki/pages/viewpage.action?pageId=302",
+            ],
+        )
+        self.assertEqual([item.page_id for item in resolved], ["301", "302"])
 
     async def test_draft_content_read_uses_status_query_before_publication(self) -> None:
         observed: list[httpx.Request] = []
