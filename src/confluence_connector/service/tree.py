@@ -129,6 +129,8 @@ class PageTree:
         start = 0
         while state.complete:
             result = await fetch_page(start)
+            if result.start != start or result.size != len(result.hits):
+                raise Upstream("Confluence returned an inconsistent page-tree offset or size.")
             for index, hit in enumerate(result.hits):
                 if state.total_pages >= MAX_TREE_PAGES:
                     state.complete = False
@@ -149,9 +151,11 @@ class PageTree:
             if result.size == 0:
                 break
             more = (
-                next_start < result.total_size
-                if result.total_size is not None
-                else result.size == CHILD_PAGE_SIZE
+                result.has_more if result.has_more is not None else (
+                    next_start < result.total_size
+                    if result.total_size is not None
+                    else result.size == CHILD_PAGE_SIZE
+                )
             )
             if not more:
                 break

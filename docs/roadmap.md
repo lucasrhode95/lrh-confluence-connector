@@ -2,7 +2,7 @@
 
 Open work only. What the connector must do is in the [requirements](requirements.md); how it is built is
 in the [architecture](architecture.md); dated evidence is in the [research record](api-research.md).
-Delete an item once it is done.
+Items implemented in this pass remain here until the user reviews them.
 
 Work is split by what it needs: **implementation** is code still to write; **decisions** wait for the
 user; **live verification** checks built behavior against the real instance, and becomes implementation
@@ -31,6 +31,10 @@ minor.
   same assumption.
 - **Fix:** keep the continuation signal and advance on the returned `start + size`. Both listings send
   `_links.next` only while more results exist ([research §5.2](api-research.md#52-paging)).
+- **Implemented — awaiting review (2026-10-20):** Preserved the remote continuation signal for
+  content pages; trees and delete preflight use it and advance by actual `start + size`, without
+  following next URLs. Space listing does the same. Offline regressions cover short pages without
+  totals, wrong next URLs, and reading every descendant before the first trash write.
 
 #### Moving to the space root does nothing (P1)
 
@@ -42,6 +46,10 @@ minor.
   ([research §6.3](api-research.md#63-moves)).
 - **Fix:** move to the root with `movepage.action` and `position=topLevel`, which was verified, and change
   the test that asserts the empty ancestor list.
+- **Implemented — awaiting review (2026-10-20):** Root placement, `move_up` to a root, and restore
+  root recovery now use the verified move action; the content-update adapter refuses an empty-parent
+  update. A root action failure no longer reports its parent change as applied. Non-root moves
+  retain D7’s current route policy. Offline tests cover root actions and restore recovery.
 
 #### Every live acceptance run fails (P1)
 
@@ -62,6 +70,9 @@ minor.
   captured parent and space.
 - **Fix:** skip a child whose parent or space changed. Review thread:
   [PR #7](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234270).
+- **Implemented — awaiting review (2026-10-20):** Fresh child metadata must still match the captured
+  parent and space. Changed children receive `skipped` and are left alone. Offline cases cover both
+  parent and space changes.
 
 #### `restore_page` refuses display URLs (P2)
 
@@ -73,6 +84,9 @@ minor.
   `GET /rest/api/content?type=page&spaceKey=…&title=…&status=trashed`, which was verified
   ([research §6.4](api-research.md#64-trash-and-restore)). Review thread:
   [PR #7](https://github.com/lucasrhode95/lrh-confluence-connector/pull/7#discussion_r4328234259).
+- **Implemented — awaiting review (2026-10-20):** Added a trash resolution scope, carried through
+  short-link redirects. Display URLs use the content collection with `status=trashed`, space and
+  exact title. An offline route test checks the decoded title, scope and resolved ID.
 
 #### Punctuated search terms match either half (P2)
 
@@ -120,6 +134,10 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** the binary search assumes the sample's modification time does not change.
 - **Fix:** re-read the sample's timestamp afterwards and retry once or abandon on change
   ([`service/timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)).
+- **Implemented — awaiting review (2026-10-20):** Re-read the exact sample’s modification timestamp
+  after the binary search. A changed or unavailable sample retries once; repeated change fails
+  without returning an offset to persist. Offline tests cover a successful retry and bounded
+  abandonment.
 
 #### A malformed credential blocks sign-out (P2)
 
@@ -129,6 +147,10 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** sign-out decodes the record before clearing it
   ([`auth/store.py`](../src/confluence_connector/auth/store.py)).
 - **Fix:** clear without decoding, keeping encryption and the lock.
+- **Implemented — awaiting review (2026-10-20):** Sign-out checks the encrypted record’s presence
+  without decoding its JSON, then clears it under the existing lock. Reads/sign-in still fail closed
+  on malformed records. The regression exercises malformed load, explicit sign-out and subsequent
+  empty load.
 
 #### A malformed URL aborts a batch (P2)
 
@@ -137,6 +159,9 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** `urlsplit` raises before validation
   ([`remote/links.py`](../src/confluence_connector/remote/links.py)).
 - **Fix:** convert the error to `InvalidRequest`.
+- **Implemented — awaiting review (2026-10-20):** Converted URL parsing failures to
+  `InvalidRequest`. An offline metadata batch returns its valid page and a per-reference failure for
+  the malformed URL.
 
 #### Acceptance setup cannot create its fixture (P2)
 
@@ -173,12 +198,19 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** metadata reads only the first labels page, which holds 200
   ([research §5.3](api-research.md#53-labels)).
 - **Fix:** follow `_links.next` on `/label` before deciding a label is absent.
+- **Implemented — awaiting review (2026-10-20):** When the metadata label expansion has
+  continuation, read the full label collection using validated offsets and bounded paging before
+  computing changes. An integration regression removes a label absent from the expansion, using
+  actual returned sizes rather than the next URL offset.
 
 #### Definite failures are reported as `not_attempted` (P3)
 
 - **Seen:** a `delete_page` step that Confluence refused with 403 is reported as `not_attempted`.
 - **Expected:** `failed`, keeping `unknown` for uncertain outcomes and `not_attempted` for later steps.
 - **Fix:** add the status ([`service/structure.py`](../src/confluence_connector/service/structure.py)).
+- **Implemented — awaiting review (2026-10-20):** Added `failed` for definite operation errors,
+  keeping `unknown` for uncertain outcomes and `not_attempted` for subsequent steps. Updated domain
+  output and partial-failure tests.
 
 #### The timezone hint omits the restart (P3)
 
@@ -187,14 +219,21 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 - **Cause:** MCP processes cache the configuration.
 - **Fix:** add "then restart the MCP client" to the message
   ([`service/cql_dates.py`](../src/confluence_connector/service/cql_dates.py)).
+- **Implemented — awaiting review (2026-10-20):** The missing-timezone error now tells the user to
+  calibrate and restart the MCP client.
 
 #### Single-file exports lose owner-only permissions on POSIX (P3)
 
-- **Seen:** a single-page export is `0644` on Linux.
+- **Seen by inspection:** a staging file created under a typical POSIX umask can leave a single-page
+  export at `0644`; this was not reproduced on Linux.
 - **Expected:** `0600`, like every other output file.
 - **Cause:** the claimed file is replaced by a staging file written under the normal umask
   ([`service/exports.py`](../src/confluence_connector/service/exports.py)).
 - **Fix:** write the staging file with owner-only permissions.
+- **Implemented — awaiting review (2026-10-20):** Created staging files exclusively with mode
+  `0600`, so atomic replacement preserves owner-only file permissions. The single-export test
+  asserts mode on POSIX; this Windows run verifies bytes/layout but cannot execute that platform
+  assertion.
 
 ### Improvements
 

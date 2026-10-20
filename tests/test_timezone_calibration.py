@@ -29,6 +29,8 @@ class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
                 effective_cutoff = ref_minute + timedelta(minutes=expected_offset)
 
                 def respond(request: httpx.Request) -> httpx.Response:
+                    if request.url.path.endswith(f"/content/{_PAGE_ID}"):
+                        return httpx.Response(200, json=_page_row()["content"])
                     cql = request.url.params["cql"]
                     queries.append(cql)
                     if "lastmodified >=" not in cql:

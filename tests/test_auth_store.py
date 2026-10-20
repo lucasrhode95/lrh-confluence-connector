@@ -76,6 +76,14 @@ class TokenStoreChecks(unittest.TestCase):
         self.assertIsNone(self.store.load())
         self.assertEqual(self.persistence.value, "")
 
+    def test_sign_out_clears_malformed_encrypted_record_under_lock(self) -> None:
+        self.persistence.value = "{broken"
+        with self.assertRaises(SecureStorageUnavailable):
+            self.store.load()
+        self.assertTrue(self.store.sign_out())
+        self.assertIsNone(self.store.load())
+        self.assertTrue(self.locks[-1].entered)
+
     def test_sign_out_when_already_empty_is_safe(self) -> None:
         self.assertFalse(self.store.sign_out())
         self.assertIsNone(self.store.load())

@@ -32,16 +32,16 @@ class PageLinkResolver:
         self._origin = (base.scheme.casefold(), (base.hostname or "").casefold(), _port(base))
         self._base_path = base.path.rstrip("/")
 
-    async def resolve(self, reference: str, *, expected_username: str) -> ResolvedPageReference:
-        """Resolve one validated ID or URL to an ID and optional page version."""
+    async def resolve(self, reference: str, *, expected_username: str, status: str | None = None) -> ResolvedPageReference:
+        """Resolve a validated reference; internal callers may select the trashed title lookup."""
         value = reference.strip()
         if value.isdecimal():
             return ResolvedPageReference(page_id=value)
         parsed = self._parse_instance_url(value)
-        return await self._resolve_path(parsed.path, parsed.query, expected_username=expected_username)
+        return await self._resolve_path(parsed.path, parsed.query, expected_username=expected_username, status=status)
 
     async def _resolve_path(
-        self, path: str, query: str, *, expected_username: str, visited: frozenset[str] = frozenset()
+        self, path: str, query: str, *, expected_username: str, status: str | None = None, visited: frozenset[str] = frozenset()
     ) -> ResolvedPageReference:
         site_path = self._site_path(path)
         query_values = parse_qs(query, keep_blank_values=False)
@@ -58,7 +58,7 @@ class PageLinkResolver:
         if segments and segments[0] == "display" and len(segments) >= 3:
             space_key = unquote(segments[1])
             title = unquote("/".join(segments[2:]).replace("+", " "))
-            page_id = await self._api.find_page_by_title(space_key, title, expected_username=expected_username)
+            page_id = await self._api.find_page_by_title(space_key, title, expected_username=expected_username, status=status)
             return ResolvedPageReference(page_id=page_id, version=version)
         if len(segments) == 2 and segments[0] == "x":
             marker = "/".join((site_path, query))
@@ -79,12 +79,16 @@ class PageLinkResolver:
                 target.query,
                 expected_username=expected_username,
                 visited=visited | {marker},
+                status=status,
             )
             return resolved.model_copy(update={"version": version or resolved.version})
         raise InvalidRequest("Use a page ID or a supported Confluence page URL.")
 
     def _parse_instance_url(self, value: str):
-        parsed = urlsplit(value)
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            raise InvalidRequest("The page URL has an invalid host or port.") from None
         if not parsed.scheme or not parsed.netloc or parsed.username is not None or parsed.password is not None:
             raise InvalidRequest("Page URLs must be absolute URLs for the configured Confluence instance.")
         try:

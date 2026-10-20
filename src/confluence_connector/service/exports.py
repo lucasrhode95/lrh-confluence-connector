@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import os
 import re
 import tempfile
 import zipfile
@@ -278,9 +279,9 @@ class PageExports:
         )
         extension = ".txt" if page_format == "text" else ".html"
         outcome.staged_file = staging / f"page-{index:04d}{extension}"
-        outcome.staged_file.write_bytes(
-            _page_content(record, page_format, parse_scope).encode("utf-8")
-        )
+        descriptor = os.open(outcome.staged_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(_page_content(record, page_format, parse_scope).encode("utf-8"))
 
         if include_attachments:
             outcome.attachment_directory = staging / f"attachments-{index:04d}"
