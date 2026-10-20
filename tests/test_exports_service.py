@@ -172,6 +172,20 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(
                     all("/" not in name and ":" not in name for name in names)
                 )
+                self.assertTrue(all(name.endswith(" (55) v2.txt") for name in names))
+                self.assertTrue(all(len(name.encode("utf-8")) <= 240 for name in names))
+
+    async def test_multibyte_title_is_shortened_to_a_safe_filesystem_component(self) -> None:
+        pages = _Pages({"55": _record("55", "😀" * 130, "Synthetic page")})
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages("55")
+            filename = Path(result.path).name
+            self.assertLessEqual(len(filename.encode("utf-8")), 240)
+            self.assertLessEqual(len(filename.encode("utf-16-le")) // 2, 240)
 
 
 def _service(

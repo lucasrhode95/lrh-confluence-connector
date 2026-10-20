@@ -45,6 +45,7 @@ PAGE_READ_CONCURRENCY = 2
 ATTACHMENT_DOWNLOAD_CONCURRENCY = 6
 MAX_EXPORT_MEMBER_LENGTH = 180
 MAX_SINGLE_FILENAME_LENGTH = 160
+MAX_FILENAME_COMPONENT_UNITS = 240
 _BAD_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_WINDOWS_NAME = re.compile(
     r"^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]) *(?:\..*)?$", re.IGNORECASE
@@ -58,11 +59,17 @@ class _ReportItem:
     reason: str
 
 
+@dataclass(frozen=True)
+class _PageMetadata:
+    page_id: str
+    title: str
+    version: int
+
+
 @dataclass
 class _PageExport:
     reference: str
-    page_id: str | None = None
-    record: PageReadRecord | None = None
+    metadata: _PageMetadata | None = None
     staged_file: Path | None = None
     attachment_directory: Path | None = None
     failure: str | None = None
@@ -122,7 +129,7 @@ class PageExports:
             report_items = [
                 item for outcome in outcomes for item in outcome.report_items
             ]
-            exported_pages = sum(outcome.record is not None for outcome in outcomes)
+            exported_pages = sum(outcome.metadata is not None for outcome in outcomes)
             failed_pages = sum(outcome.failure is not None for outcome in outcomes)
             exported_attachments = sum(
                 outcome.downloaded_attachments for outcome in outcomes
@@ -133,7 +140,7 @@ class PageExports:
 
             if (
                 len(outcomes) == 1
-                and outcomes[0].record is not None
+                and outcomes[0].metadata is not None
                 and not include_file_bytes
                 and not report_items
             ):
@@ -213,7 +220,6 @@ class PageExports:
                     "The selected reference did not resolve to a numeric page ID."
                 )
             page_id = resolved.page_id
-            outcome.page_id = page_id
         except ConnectorError as exc:
             _raise_account_error(exc)
             outcome.failure = _error_text(exc)
@@ -262,7 +268,6 @@ class PageExports:
             )
             return outcome
 
-        outcome.record = record
         outcome.report_items.extend(
             _ReportItem(
                 "page section",
@@ -281,6 +286,11 @@ class PageExports:
             outcome.attachment_directory = staging / f"attachments-{index:04d}"
             outcome.attachment_directory.mkdir()
             await self._download_attachments(record, outcome)
+        outcome.metadata = _PageMetadata(
+            page_id=record.page_id,
+            title=record.title,
+            version=record.version,
+        )
         return outcome
 
     async def _download_attachments(
@@ -330,12 +340,14 @@ class PageExports:
         output_directory: Path,
         page_format: PageTextFormat,
     ) -> Path:
-        assert outcome.record is not None and outcome.staged_file is not None
+        assert outcome.metadata is not None and outcome.staged_file is not None
         prefix = f"{_timestamp()} - "
         page_name = _page_filename(
-            outcome.record,
+            outcome.metadata,
             page_format,
             maximum_length=MAX_SINGLE_FILENAME_LENGTH - len(prefix),
+            maximum_component_units=MAX_FILENAME_COMPONENT_UNITS
+            - _component_units(prefix),
         )
         filename = f"{prefix}{page_name}"
         target = localfiles.claim(output_directory, filename)
@@ -363,10 +375,10 @@ class PageExports:
                 target, "w", compression=zipfile.ZIP_DEFLATED
             ) as archive:
                 for outcome in outcomes:
-                    if outcome.record is None or outcome.staged_file is None:
+                    if outcome.metadata is None or outcome.staged_file is None:
                         continue
                     page_name = _unique_archive_name(
-                        _page_filename(outcome.record, page_format), used_names
+                        _page_filename(outcome.metadata, page_format), used_names
                     )
                     archive.write(outcome.staged_file, arcname=page_name)
                     if outcome.attachment_directory is None:
@@ -440,18 +452,27 @@ def _html_comments(comments: list[PageComment]) -> str:
 
 
 def _page_filename(
-    record: PageReadRecord,
+    metadata: _PageMetadata,
     page_format: PageTextFormat,
     *,
     maximum_length: int = MAX_EXPORT_MEMBER_LENGTH,
+    maximum_component_units: int = MAX_FILENAME_COMPONENT_UNITS,
 ) -> str:
     extension = ".txt" if page_format == "text" else ".html"
-    suffix = f" ({record.page_id}) v{record.version}{extension}"
-    title = _BAD_FILENAME.sub("_", record.title).strip().rstrip(" .") or "Untitled page"
+    suffix = f" ({metadata.page_id}) v{metadata.version}{extension}"
+    if len(suffix) >= maximum_length or _component_units(suffix) >= maximum_component_units:
+        raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
+    title = _BAD_FILENAME.sub("_", metadata.title).strip().rstrip(" .") or "Untitled page"
     if _RESERVED_WINDOWS_NAME.fullmatch(title):
         title = f"_{title}"
-    title = title[: max(1, maximum_length - len(suffix))].rstrip(" .") or "Page"
-    return f"{title}{suffix}"
+    title = title[: maximum_length - len(suffix)].rstrip(" .")
+    while title and _component_units(f"{title}{suffix}") > maximum_component_units:
+        title = title[:-1].rstrip(" .")
+    title = title or "Page"
+    filename = f"{title}{suffix}"
+    if len(filename) > maximum_length or _component_units(filename) > maximum_component_units:
+        raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
+    return filename
 
 
 def _unique_archive_name(filename: str, used_names: set[str]) -> str:
@@ -459,17 +480,43 @@ def _unique_archive_name(filename: str, used_names: set[str]) -> str:
         used_names.add(filename.casefold())
         return filename
     path = Path(filename)
+    match = re.search(r" \(\d+\) v\d+$", path.stem)
+    if match:
+        title = path.stem[: match.start()]
+        identity = path.stem[match.start() :]
+    else:
+        title = path.stem
+        identity = ""
     counter = 2
     while True:
         duplicate_suffix = f" ({counter})"
-        stem_limit = MAX_EXPORT_MEMBER_LENGTH - len(path.suffix) - len(duplicate_suffix)
-        candidate = (
-            f"{path.stem[:stem_limit].rstrip(' .')}{duplicate_suffix}{path.suffix}"
-        )
+        tail = f"{duplicate_suffix}{identity}{path.suffix}"
+        title_limit = MAX_EXPORT_MEMBER_LENGTH - len(tail)
+        candidate_title = title[: max(0, title_limit)].rstrip(" .")
+        while candidate_title and (
+            len(candidate_title + tail) > MAX_EXPORT_MEMBER_LENGTH
+            or _component_units(candidate_title + tail) > MAX_FILENAME_COMPONENT_UNITS
+        ):
+            candidate_title = candidate_title[:-1].rstrip(" .")
+        candidate_title = candidate_title or "Page"
+        candidate = f"{candidate_title}{tail}"
         if candidate.casefold() not in used_names:
+            if (
+                len(candidate) > MAX_EXPORT_MEMBER_LENGTH
+                or _component_units(candidate) > MAX_FILENAME_COMPONENT_UNITS
+            ):
+                raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
             used_names.add(candidate.casefold())
             return candidate
         counter += 1
+
+
+def _component_units(value: str) -> int:
+    """Measure both common filesystem limits: encoded bytes and UTF-16 code units."""
+    return max(
+        len(value.encode("utf-8", errors="surrogatepass")),
+        len(value.encode("utf-16-le", errors="surrogatepass")) // 2,
+    )
 
 
 def _export_report(items: list[_ReportItem]) -> str:

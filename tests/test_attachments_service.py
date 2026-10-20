@@ -38,6 +38,19 @@ class AttachmentDownloadChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.failures[0].attachment_id, "missing")
         self.assertEqual(api.downloaded_ids, [])
 
+    async def test_multibyte_attachment_filename_fits_common_filesystem_limits(self) -> None:
+        api = _AttachmentApi(
+            [PageAttachment(attachment_id="att-1", filename=f"{'😀' * 130}.txt")]
+        )
+        service = _service(api)
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "confluence_connector.config.data_dir", return_value=Path(directory)
+        ):
+            result = await service.download_attachments("55", ["att-1"])
+            filename = result.files[0].filename
+            self.assertLessEqual(len(filename.encode("utf-8")), 240)
+            self.assertLessEqual(len(filename.encode("utf-16-le")) // 2, 240)
+
     async def test_failed_download_removes_its_partial_file(self) -> None:
         api = _AttachmentApi(
             [PageAttachment(attachment_id="att-1", filename="report.txt")],

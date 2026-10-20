@@ -20,6 +20,8 @@ from confluence_connector.service import localfiles
 from confluence_connector.service.pages import _page_references
 
 MAX_ATTACHMENT_IDS = 500
+MAX_FILENAME_LENGTH = 180
+MAX_FILENAME_COMPONENT_UNITS = 240
 _BAD_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_WINDOWS_NAME = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]) *(?:\..*)?$", re.IGNORECASE)
 
@@ -161,11 +163,24 @@ def _safe_filename(value: str) -> str:
         filename = "attachment"
     if _RESERVED_WINDOWS_NAME.fullmatch(filename):
         filename = f"_{filename}"
-    if len(filename) > 180:
-        suffix = Path(filename).suffix[:20]
-        stem = filename[: -len(Path(filename).suffix)] if Path(filename).suffix else filename
-        filename = stem[: 180 - len(suffix)] + suffix
+    suffix = Path(filename).suffix[:20]
+    stem = filename[: -len(Path(filename).suffix)] if Path(filename).suffix else filename
+    stem = stem[: max(1, MAX_FILENAME_LENGTH - len(suffix))]
+    while stem and (
+        len(stem + suffix) > MAX_FILENAME_LENGTH
+        or _component_units(stem + suffix) > MAX_FILENAME_COMPONENT_UNITS
+    ):
+        stem = stem[:-1]
+    filename = f"{stem or 'attachment'}{suffix}"
     return filename
+
+
+def _component_units(value: str) -> int:
+    """Measure both common filesystem limits: encoded bytes and UTF-16 code units."""
+    return max(
+        len(value.encode("utf-8", errors="surrogatepass")),
+        len(value.encode("utf-16-le", errors="surrogatepass")) // 2,
+    )
 
 
 def _raise_account_error(error: ConnectorError) -> None:

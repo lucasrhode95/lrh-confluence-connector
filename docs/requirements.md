@@ -155,7 +155,8 @@ attachment deduplication is not required.
   else as one `.zip`. Setting `include_attachments: true` produces a ZIP even when the page has no
   attachments.
 - Each page is one file at the ZIP root named `<Title> (<page id>) v<version>`, with characters
-  Windows does not allow replaced and long titles shortened. Pages stay flat, with no tree folders.
+  Windows does not allow replaced and long titles shortened. Names fit within 180 characters and
+  240 filesystem bytes or UTF-16 code units. Pages stay flat, with no tree folders.
   Each file's header carries the ancestor breadcrumb (`Space › Parent › Page`); exports always include
   this provenance header even when `parse_scope.header` is false.
 - Attachment bytes are excluded by default. With `include_attachments: true`, all listed attachments

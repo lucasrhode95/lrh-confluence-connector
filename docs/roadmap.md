@@ -97,7 +97,8 @@ in the personal space, including a rich-text sample page.
   cap and per-file failure behavior fit expected use. `export_pages` excludes attachment bytes by
   default and includes them only when `include_attachments` is true. Confirm the single-file/ZIP
   boundary (including an empty attachment selection), forced provenance header, duplicate-name suffix,
-  attachment-list cap report and rich-comment section are clear to agents.
+  attachment-list cap report and rich-comment section are clear to agents. Verify the 240-byte/UTF-16
+  filename bound on supported filesystems.
 - `find_users` requires either a display-name `query` or exact `username`; the modes cannot be mixed.
   Name queries and usernames are capped at 255 characters, results at 100 per page and offsets at
   1,000,000. Verify current and former-user results during acceptance.

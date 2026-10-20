@@ -62,7 +62,7 @@ Write tools are not implemented yet.
 - `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
 - `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
 - `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
-- `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, flat ZIP packaging and failure reports.
+- `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
 - `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
@@ -214,7 +214,9 @@ folders beside their page files. `include_attachments` defaults to false; when t
 downloads all readable attachments for each page. `parse_scope.attachments` separately controls
 whether attachment names appear in text. Exports and their staging files live in an account-specific
 subfolder of `exports`; the shared local-file cleanup removes outputs older than seven days when the
-folder is next used.
+folder is next used. After staging a page body and its selected attachments, the service retains only
+page ID, title and version for archive naming so memory does not grow with the number of pages.
+Export names fit within 180 characters and 240 filesystem bytes or UTF-16 code units.
 
 Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
 quieted because URLs and response content can carry private data.
