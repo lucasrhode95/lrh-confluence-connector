@@ -15,7 +15,7 @@ naming the fixing commit, when the fix lands.
 Correctness pass **2026-10-20**, awaiting user review: all 18 bug entries below retain their original
 context and now record implementation and offline coverage. The full suite ran 275 tests successfully
 (one platform skip); compilation and the probe CLI help check passed. No live requests or review
-requests were made. Broader refactoring, the move-route decision and live verification remain open.
+requests were made. Broader refactoring, implementation of the decided move route and live verification remain open.
 
 ## Implementation
 
@@ -267,6 +267,21 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
   asserts mode on POSIX; this Windows run verifies bytes/layout but cannot execute that platform
   assertion.
 
+### One route for same-space moves
+
+**Decided 2026-10-20; implementation pending.** Use `movepage.action` for every same-space move,
+reparenting and positioning in one request without creating a page version. The user prefers avoiding
+unnecessary content versions. Dependence on the verified private route is accepted; do not fall back
+to the version-creating content update. D7 records this contract
+([requirements §10.4](requirements.md#104-routes-identity-and-placement-d7)).
+
+The current non-root move still updates `ancestors`, creating a version, then sends a second action
+for positioning. Replace that sequence and use the same action for `move_up` and restore placement.
+Keep root handling, sibling-order checks and uncertain-write reporting. Update offline tests to verify
+one action, no parent-update PUT and an unchanged page version; align the architecture when implemented.
+Live acceptance must independently verify parent, order and unchanged version
+([research §6.3](api-research.md#63-moves)).
+
 ### Improvements
 
 Working behavior that could be simpler, cheaper or better tested.
@@ -327,18 +342,7 @@ requirements ([requirements §4](requirements.md#4-non-goals)).
 
 ## Decisions
 
-### One route for same-space moves
-
-`move_page(page, parent_id="X")` defaults to `position: "last"`, so a same-space move makes two writes:
-the documented content update with new `ancestors` (which adds a page version), then `movepage.action`
-to place it last. If the second write fails, the result is a half-applied move. `movepage.action` alone
-reparents and positions in one call, without a new version
-([research §6.3](api-research.md#63-moves)), and root moves need it anyway (bug above).
-
-Options: use `movepage.action` for every move, which makes the private route required for all moves
-rather than for positions only; or keep the documented update for parent changes and send the move
-action only when a position other than `last` is requested. Decision D7 currently names the documented
-route for parent changes ([requirements §10.4](requirements.md#104-routes-identity-and-placement-d7)).
+None open. The same-space move route is decided and tracked under implementation.
 
 ## Live verification
 

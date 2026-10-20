@@ -404,6 +404,9 @@ Moves one current page under exactly one of `parent_id` or `space_key` (the root
   Confluence refuses the move, recreating the page in the target space and trashing the original is a
   separate plan that loses the page ID, history and comments.
 
+D7 now requires one move action without creating a page version. The two-step implementation described
+above has not yet been replaced; see the [implementation item](roadmap.md#one-route-for-same-space-moves).
+
 #### `delete_page`
 
 Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash` (requirements §10.5).
