@@ -101,6 +101,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                     "start": 10,
                     "size": 1,
                     "totalSize": 11,
+                    "_links": {"next": "/rest/api/content?start=20"},
                 },
             )
 
@@ -117,6 +118,32 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.drafts[0].page_id, "301")
         self.assertEqual(page.drafts[0].space_name, "Synthetic space")
         self.assertEqual((page.start, page.size, page.total_size), (10, 1, 11))
+        self.assertTrue(page.has_more)
+
+    async def test_draft_listing_preserves_explicit_final_page_signal(self) -> None:
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": "301", "type": "page", "status": "draft", "title": "Draft 301"},
+                        {"id": "302", "type": "page", "status": "draft", "title": "Draft 302"},
+                    ],
+                    "start": 10,
+                    "size": 2,
+                    "_links": {"self": "/rest/api/content?start=10"},
+                },
+            )
+
+        page = await self.make_api(handler).list_drafts_page(
+            space_key=None,
+            start=10,
+            limit=10,
+            expected_username="sample-user",
+        )
+
+        self.assertEqual(page.size, 2)
+        self.assertFalse(page.has_more)
 
     async def test_draft_content_read_uses_status_query_before_publication(self) -> None:
         observed: list[httpx.Request] = []

@@ -207,9 +207,13 @@ class PageWrites:
             expected_username=self._username,
         )
         next_start = page.start + page.size
-        server_has_more = page.size > 0 and (
-            next_start < page.total_size if page.total_size is not None else page.size == page_limit
-        )
+        if page.has_more is not None:
+            has_more = page.has_more
+        elif page.total_size is not None:
+            has_more = next_start < page.total_size
+        else:
+            has_more = page.size == page_limit
+        server_has_more = page.size > 0 and has_more
         more = server_has_more and next_start <= MAX_DRAFT_OFFSET
         next_cursor = (
             cursors.encode(

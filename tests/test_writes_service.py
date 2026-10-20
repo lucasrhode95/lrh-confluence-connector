@@ -189,6 +189,21 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(second.more_results_available)
         self.assertEqual(self.api.draft_calls, [("SYNTH", 0, 2), ("SYNTH", 2, 2)])
 
+    async def test_draft_cursor_trusts_explicit_no_next_link_without_total_size(self) -> None:
+        self.api.draft_page_override = RemoteDraftPage(
+            drafts=[DraftSummary(page_id="301", title="Draft 301"), DraftSummary(page_id="302", title="Draft 302")],
+            start=0,
+            size=2,
+            total_size=None,
+            has_more=False,
+        )
+
+        result = await self.service.list_drafts(limit=2)
+
+        self.assertFalse(result.more_results_available)
+        self.assertFalse(result.truncated)
+        self.assertIsNone(result.next_cursor)
+
     async def test_draft_cursor_rejects_added_scope(self) -> None:
         first = await self.service.list_drafts(limit=1)
         with self.assertRaisesRegex(InvalidRequest, "Pass only cursor"):

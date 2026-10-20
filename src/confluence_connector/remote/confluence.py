@@ -362,11 +362,21 @@ class ConfluenceApi:
         if actual_size != len(rows):
             raise Upstream("Confluence returned an inconsistent draft-list size.")
         total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
+        links = payload.get("_links")
+        has_more = None
+        if isinstance(links, dict):
+            next_link = links.get("next")
+            if next_link is not None and not isinstance(next_link, str):
+                raise Upstream("Confluence returned an invalid draft-list next link.")
+            has_more = bool(next_link)
+        elif links is not None:
+            raise Upstream("Confluence returned invalid draft-list links.")
         return RemoteDraftPage(
             drafts=[_draft_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
             start=actual_start,
             size=actual_size,
             total_size=total,
+            has_more=has_more,
         )
 
     async def publish_draft(

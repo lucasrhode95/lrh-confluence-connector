@@ -314,7 +314,9 @@ find-and-replace modes. Confluence-specific safeguards:
 - update_page takes a complete body and mandatory expected_version. It checks the version before the
   write, then sends the next version so Confluence's 409 also catches a concurrent edit.
 - list_drafts returns at most 100 rows per page (default 50) and uses a self-contained cursor.
-  The cursor offset is capped at 1,000,000; the result reports truncation if more drafts remain.
+  It follows Confluence's next-link signal when present, falling back to the reported total or page
+  size only when that signal is absent. The cursor offset is capped at 1,000,000; the result reports
+  truncation if more drafts remain.
   publish_draft publishes only new-page drafts and preserves their page ID. delete_draft permanently
   deletes a new-page draft and bypasses the trash.
 - set_labels takes explicit add and remove global-label lists. It skips already-satisfied changes

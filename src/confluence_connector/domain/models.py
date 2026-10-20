@@ -368,6 +368,7 @@ class RemoteDraftPage(BaseModel):
     start: int
     size: int
     total_size: int | None = None
+    has_more: bool | None = None
 
 
 class LabelChangeFailure(BaseModel):
