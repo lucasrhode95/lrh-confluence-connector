@@ -471,14 +471,6 @@ class LabelChangeFailure(BaseModel):
     error: str
 
 
-class LabelChangeCompensation(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    action: Literal["add", "remove"]
-    label: str
-    status: Literal["restored"] = "restored"
-
-
 class LabelChangeResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -488,8 +480,6 @@ class LabelChangeResult(BaseModel):
     unchanged: list[str] = Field(default_factory=list)
     failures: list[LabelChangeFailure] = Field(default_factory=list)
     not_attempted: list[LabelChangeFailure] = Field(default_factory=list)
-    compensated: list[LabelChangeCompensation] = Field(default_factory=list)
-    rollback_failures: list[LabelChangeFailure] = Field(default_factory=list)
 
 
 class PageComment(BaseModel):

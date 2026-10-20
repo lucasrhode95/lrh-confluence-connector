@@ -280,41 +280,26 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
 
         result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
 
-        self.assertEqual(result.added, [])
+        self.assertEqual(result.added, ["new"])
         self.assertEqual(result.removed, [])
         self.assertEqual(result.failures[0].label, "old")
         self.assertEqual(result.not_attempted[0].label, "another")
-        self.assertEqual([(item.action, item.label) for item in result.compensated], [("add", "new")])
-        self.assertEqual(result.rollback_failures, [])
-        self.assertEqual(self.api.label_calls[-1], ("remove", "55", "new"))
-
-    async def test_label_compensation_runs_in_reverse_order(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old"]
-        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
-
-        result = await self.service.set_labels(
-            "55", add=["new", "another"], remove=["old"]
+        self.assertEqual(
+            self.api.label_calls,
+            [("add", "55", "new"), ("remove", "55", "old")],
         )
 
-        self.assertEqual(result.added, [])
-        self.assertEqual([item.label for item in result.compensated], ["another", "new"])
+    async def test_successful_removal_is_not_reversed_after_a_later_failure(self) -> None:
+        self.api.pages["55"].metadata.labels = ["old", "another"]
+        self.api.label_errors[("remove", "another")] = Upstream("synthetic failure")
+
+        result = await self.service.set_labels("55", remove=["old", "another"])
+
+        self.assertEqual(result.removed, ["old"])
+        self.assertEqual(result.failures[0].label, "another")
         self.assertEqual(
-            self.api.label_calls[-2:],
-            [("remove", "55", "another"), ("remove", "55", "new")],
-        )
-
-    async def test_failed_label_compensation_keeps_the_applied_change_visible(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old"]
-        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
-        self.api.label_errors[("remove", "new")] = Upstream("synthetic rollback failure")
-
-        result = await self.service.set_labels("55", add=["new"], remove=["old"])
-
-        self.assertEqual(result.added, ["new"])
-        self.assertEqual(result.compensated, [])
-        self.assertEqual(
-            [(item.action, item.label) for item in result.rollback_failures],
-            [("remove", "new")],
+            self.api.label_calls,
+            [("remove", "55", "old"), ("remove", "55", "another")],
         )
 
     async def test_account_change_during_label_updates_preserves_partial_result(self) -> None:
@@ -326,18 +311,15 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.added, ["new"])
         self.assertEqual(result.failures[0].label, "old")
         self.assertEqual(result.not_attempted[0].label, "another")
-        self.assertEqual(result.compensated, [])
         self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
 
-    async def test_uncertain_label_failure_does_not_attempt_compensation(self) -> None:
+    async def test_uncertain_label_failure_preserves_prior_success_without_followup(self) -> None:
         self.api.pages["55"].metadata.labels = ["old"]
         self.api.label_errors[("remove", "old")] = UncertainWrite("Synthetic uncertain outcome.")
 
         result = await self.service.set_labels("55", add=["new"], remove=["old"])
 
         self.assertEqual(result.added, ["new"])
-        self.assertEqual(result.compensated, [])
-        self.assertEqual(result.rollback_failures, [])
         self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
 
     async def test_set_labels_skips_noops_and_rejects_overlap(self) -> None:
