@@ -1,303 +1,431 @@
-# Confluence connector architecture
+# Confluence Connector — Architecture
 
-[Architecture overview](diagrams/architecture.svg) · [Code map](diagrams/code-map.svg)
+**Inputs:** [Requirements](requirements.md) · [Roadmap](roadmap.md) · [API research](api-research.md)
 
-Current implementation. Intended capabilities are in [requirements](requirements.md); open work is in
-the [roadmap](roadmap.md).
+![Confluence connector architecture](diagrams/architecture.svg)
 
-## 1. Entry points and lifetime
+The classes and who calls whom, in more detail: [code map](diagrams/code-map.svg) (open it in a browser
+for the tooltips). The diagrams give the overview; this document records the rules and contracts the code
+and diagrams cannot show. *What* the connector must do is in the requirements; *why* each route was
+chosen is in the research.
 
-`confluence-connector` runs `confluence_connector.__main__:main`. Its commands are `auth`,
-`auth --sign-out`, `status [--check]`, and `mcp`. Exit codes are 0 for success, 1 for other errors,
-2 when authentication is required, and 130 for interruption.
+---
 
-Each MCP process has one lazy `bootstrap.AppContext`, one async HTTP/1.1 client, and one encrypted
-credential store. Adapters are rebuilt when the stored username changes. The token is read from
-encrypted storage for every request, and the active account is checked again after each response.
-There is no daemon, scheduler, web surface, or persistent content store.
+## 1. Principles
 
-The MCP surface exposes nine read tools, two local-file tools and eight write tools:
+1. **Remote first.** Confluence does the searching, rendering and paging. The connector keeps no index,
+   cache or copy of page content.
+2. **No always-on service.** Every entry point is a short-lived local process, started on demand, for
+   one user (§2).
+3. **Thin surface, one service.** MCP tools validate arguments, call one service method and return a
+   model. Domain decisions live in [`service/`](../src/confluence_connector/service/).
+4. **Protocol knowledge stays at the edge.** Only [`remote/`](../src/confluence_connector/remote/)
+   knows routes, Confluence JSON, paging and the private move action.
+5. **Documented first, gaps filled.** Documented REST routes wherever they work; the private
+   `movepage.action` and quick-navigation routes only for what REST cannot do (§6).
+6. **Libraries for generic problems.** HTML parsing and Markdown conversion use BeautifulSoup and
+   markdownify; the connector adds only Confluence-specific rules.
+7. **Current format only.** No migrations or compatibility shims ([AGENTS.md](../AGENTS.md)).
 
-| Tool | Implemented behavior |
+## 2. Process model
+
+There is no daemon. MCP runs only for its client session; `auth` and `status` are one-shot commands.
+
+| Command | Lifetime | Does |
+|---|---|---|
+| `confluence-connector mcp` | One stdio process per MCP client session | Serves the 19 tools (§8) |
+| `confluence-connector auth [--sign-out]` | One-shot | Prompts for a PAT, verifies and stores it, calibrates `cql_timezone`; or deletes the local token |
+| `confluence-connector status [--check]` | One-shot | Offline account status; `--check` verifies the token and checks `cql_timezone` |
+
+Every command accepts `--config PATH`. Exit codes: 0 success, 1 other errors, 2 sign-in required, 130
+interrupted.
+
+Consequences of short-lived processes:
+
+- **No in-memory state outlives a call.** Cursors are self-contained (the normalized request plus the
+  next offset or anchor) and survive a client restart.
+- **No background work:** no schedulers, sync loops or warm-up. Calibration runs only inside `auth` and
+  `status --check`, never on MCP startup or in a tool.
+- **Concurrency is cross-process.** Several MCP processes may run at once; the token store locks across
+  processes, and output files are claimed exclusively.
+- **Startup is cheap.** Nothing is built before the first tool call. MCP never prompts; only `auth`
+  asks for a token.
+
+## 3. Layers
+
+Surface → service → remote, as in the diagram. The import rules:
+
+- [`surfaces/`](../src/confluence_connector/surfaces/) imports [`bootstrap.py`](../src/confluence_connector/bootstrap.py)
+  and [`domain/`](../src/confluence_connector/domain/) only. It never calls `remote/`.
+- [`service/`](../src/confluence_connector/service/) imports `remote/` adapters, `domain/` and the
+  shared helpers. It never sees Confluence JSON.
+- [`remote/`](../src/confluence_connector/remote/) returns `domain/` models. The transport reads the
+  token through the `CredentialSource` port ([`remote/ports.py`](../src/confluence_connector/remote/ports.py)).
+- [`domain/`](../src/confluence_connector/domain/) imports nothing from the app.
+
+## 4. Repository layout
+
+The [code map](diagrams/code-map.svg) shows every package and class. Tests, with synthetic fixtures and
+fake HTTP responses only, are under [`tests/`](../tests/); the research probe and the acceptance scripts
+are under [`research/`](../research/README.md) and are never run as routine checks.
+
+## 5. Module responsibilities
+
+Only rules that the code layout does not make obvious are listed here. The per-tool contract is §8.
+
+### 5.1 [`auth/store.py`](../src/confluence_connector/auth/store.py)
+
+- `TokenStore` keeps one record, the PAT and its username, in `msal-extensions` encrypted persistence
+  under `CrossPlatLock`. No plaintext fallback: if encryption is unavailable, every command fails with
+  `SecureStorageUnavailable`.
+- `save` refuses a different username until `sign_out`. Every request loads the record again, so a
+  sign-out or account switch takes effect on the next request in every process.
+
+### 5.2 [`remote/transport.py`](../src/confluence_connector/remote/transport.py)
+
+- One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
+  timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
+  across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
+- **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
+  `Retry-After`, otherwise with short jittered backoff.
+- **Writes** are resent only when they provably never applied: the request was never sent, or the answer
+  was 429 or 503. A timeout after sending, an incomplete answer or a 504 raises `UncertainWrite` and is
+  never resent.
+- **Account checks.** The username is read before and after every exchange; if it changed, the result
+  is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`.
+- **401** raises `AuthenticationRequired` (run `auth`); **403** raises `PermissionDenied` for that page
+  or operation, never a sign-in problem. Error messages carry the status and Confluence's message, never
+  URLs or bodies.
+
+### 5.3 [`remote/confluence.py`](../src/confluence_connector/remote/confluence.py)
+
+- `ConfluenceApi` is the only code that knows routes and wire fields. Configured endpoint paths come from
+  the private settings, relative to `base_url` and its context path.
+- **Paging** advances on the returned `start + size`, never on the echoed `limit` or `content/search`'s
+  `next` link, which skip results (research §5.2). Space listing reads 500 per request; children 500;
+  versions 200, at most 5,000; drafts and trash 100.
+- **Page reads** are three parallel requests: bodies (`view`, optional `storage`, version, history),
+  `child/attachment?limit=500` and `child/comment?depth=all`. A requested body that is missing or
+  malformed raises `Upstream`.
+- **The private move action** is isolated in `position_page` and `move_page_action`: `POST
+  /pages/movepage.action` with `pageId`, `spaceKey`, `position`, `targetId` and `mode`. Application
+  errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise. Cross-space moves use
+  `ASYNC` and poll the documented `/rest/api/longtask/{id}` up to 40 times, at most 10 s; a task still
+  running then is `UncertainWrite`.
+- **Placement properties** (`get_page_property`, `set_page_property`, `remove_page_property`) store a
+  page's former parent and position in a content property before it is trashed (research §6.4).
+
+### 5.4 [`remote/links.py`](../src/confluence_connector/remote/links.py)
+
+`PageLinkResolver.resolve` turns a numeric ID or a same-instance URL into a page ID and optional
+version: `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=` directly; `/x/…` by following up to 5
+redirects that must stay on the configured HTTPS origin and context path; `/display/KEY/Title` by an
+exact-title CQL lookup in that space. Any other host or path is refused with `InvalidRequest`.
+
+### 5.5 [`domain/`](../src/confluence_connector/domain/)
+
+- Pydantic models are the only schema: FastMCP derives the tool schemas from them.
+- Errors: `AuthenticationRequired`, `AccountMismatch`, `SecureStorageUnavailable`, `InvalidRequest`,
+  `NotFound`, `PermissionDenied`, `Throttled`, `Upstream`, `Conflict` and `UncertainWrite`. Each has a
+  readable message; the surface returns it as a tool error.
+
+### 5.6 [`service/`](../src/confluence_connector/service/)
+
+Every input is validated once, at the service entry point, for every caller. Services are built per
+account by `AppContext` ([`bootstrap.py`](../src/confluence_connector/bootstrap.py)).
+
+**[`search.py`](../src/confluence_connector/service/search.py)** builds CQL from literal terms and
+validated scope only; terms escape text-query syntax separately from CQL string quoting. Title search
+replaces punctuation with spaces and, on an unscoped first page, merges up to 20 quick-navigation
+matches after the CQL hits, within `limit`. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py)
+converts UTC bounds to CQL minutes in `cql_timezone` (requirements §7).
+
+**[`timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)** takes the
+newest readable page and binary-searches `lastmodified >=` minute cutoffs within ±15 hours to find
+CQL's effective offset. The CLI calls it; `config.py` writes the result atomically under a lock.
+
+**[`tree.py`](../src/confluence_connector/service/tree.py)** reads space roots with `depth=root` and
+each page's children in server order, stopping at depth 5 or 1,000 pages with `complete: false`.
+
+**[`pages.py`](../src/confluence_connector/service/pages.py) and
+[`page_text.py`](../src/confluence_connector/service/page_text.py)** convert a body in three steps:
+
+1. Storage is parsed with BeautifulSoup for macro parameters (Jira keys, PlantUML source, titles,
+   include targets) and typed references (`ri:page`, `ri:attachment`, inline-comment markers).
+2. A BeautifulSoup pass over `view` replaces each `data-macro-name` wrapper with its marker, pairing
+   wrappers with storage macros by name and document order (wrappers inside a resolved include take no
+   local source); turns images and attachment links into markers with typed references; renders
+   mentions and tasks; makes same-instance links absolute; and drops scripts and styles.
+3. markdownify converts the result, with one table override (merged cells repeated; nested tables or
+   code fall back to minimal HTML). The text is split into blocks at blank lines outside fenced code.
+
+A `rich` read returns storage verbatim, split between top-level elements by the parser's source
+positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body
+anchors follow the pinned block order, attachment and comment anchors their IDs.
+
+**[`writes.py`](../src/confluence_connector/service/writes.py) and
+[`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: `to_storage` converts and
+checks `rich` input (requirements §10.1); `content_loss` compares inline-comment anchors, macro names
+and attachment references between the stored and new bodies.
+
+**[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
+as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.
+
+**[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
+folders, cleanup of files older than seven days when a folder is next used (tolerating files another
+process removed), exclusive name claims with ` (2)` suffixes, owner-only permissions on POSIX.
+
+### 5.7 [`surfaces/mcp_main.py`](../src/confluence_connector/surfaces/mcp_main.py)
+
+`build_server` declares the tools with their annotations and the server instructions; each tool calls
+`await context.services()` and one service method, and logs its name, outcome and duration.
+Annotations: reads are read-only and idempotent (`auth_status` also closed-world). Writes are never
+read-only, and all but `create_page` and `restore_page` are marked destructive. `download_attachments`
+and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
+outputs.
+
+### 5.8 [`config.py`](../src/confluence_connector/config.py) and [`logs.py`](../src/confluence_connector/logs.py)
+
+- `load_config` selects the file (`--config`, `CONFLUENCE_CONFIG`, repository root), refuses missing or
+  unknown keys before any prompt or request, and caches the result per process.
+- [`logs.py`](../src/confluence_connector/logs.py) is the same module as in the `lrh-*` Microsoft 365
+  connectors: one daily-rotated file per process, kept seven days, with a filter that redacts bearer
+  tokens and secrets. `httpx` and `httpcore`, which log URLs, are held at WARNING.
+
+## 6. Capability routing
+
+| Capability | Route | Documented |
+|---|---|---|
+| Token check | `GET /rest/api/user/current` | Yes |
+| Spaces | `GET /rest/api/space?status=current|archived` | Yes; status values not listed |
+| Content search, user search | `GET /rest/api/search` (CQL) | Yes |
+| Title matches | `GET /rest/quicknav/1/search` | **No** (research §4.3) |
+| Former users | `GET /rest/api/user?username=` | Yes |
+| Trees | `…/space/{key}/content/page?depth=root`, `…/content/{id}/child/page` | Yes |
+| Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
+| Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
+| Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
+| Create, update, publish, draft delete | `POST`, `PUT`, `DELETE /rest/api/content…` | Yes |
+| Labels | `POST`, `DELETE …/label` | Yes |
+| Same-space parent change | `PUT /rest/api/content/{id}` with `ancestors` | Yes |
+| Positions, cross-space moves | `POST /pages/movepage.action`, then `/rest/api/longtask/{id}` | **No** (research §6.3) |
+| Trash, restore, trash list | `DELETE …/content/{id}`, `PUT …?status=trashed`, `GET …?status=trashed` | Yes |
+| Saved placement | `…/content/{id}/property` | Yes |
+| Permission preflight | `expand=operations` | Yes |
+
+To adapt to another instance, rerun the probes and acceptance checks
+([research toolkit](../research/README.md)), record the results, and change the configured endpoints or
+the adapter. The service and surface stay unchanged.
+
+## 7. Data and identity
+
+- **Account:** the username stored with the token. Services are rebuilt when it changes, and every
+  response is checked against it (§5.2).
+- **Page key:** the page ID, unique on the instance and stable across renames and moves.
+- **Locations:** the data directory is `%USERPROFILE%\.lrh-confluence-connector` on Windows,
+  `$XDG_DATA_HOME/lrh-confluence-connector` (or `~/.local/share/…`) elsewhere, or
+  `CONFLUENCE_CONNECTOR_HOME`. It holds:
+  - `downloads/<account>/`: attachments saved by `download_attachments`;
+  - `exports/<account>/`: export files and their staging folders;
+  - `logs/<command>-<start time>-<process id>.log`: one file per process, rotated at midnight and kept
+    seven days. `CONFLUENCE_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
+
+  - `token-cache.bin`: the encrypted token record (§5.1).
+
+  Downloads and exports are removed after seven days.
+- **Settings:** the private `confluence_config.json` (§5.8; requirements §6).
+
+## 8. MCP tools
+
+The server (`lrh-confluence-connector`) exposes 19 tools, grouped below by task. The
+[README](../README.md#mcp-tools) lists them in a short table; this section gives each tool's inputs,
+results and caveats.
+
+### 8.1 Shared rules
+
+- **Page references.** Every `page`, `pages`, `parent_id`, `sibling` and `draft` input takes a numeric
+  ID or a same-instance URL (§5.4). A URL with `pageVersion` selects that version where a tool reads;
+  write and structure tools refuse it.
+- **Cursors.** Pass a returned cursor **alone**; it restores the original request. Cursors are
+  self-contained, at most 16,384 characters, and offsets stop at 1,000,000.
+- **Times.** Results carry the UTC timestamps REST returns. Date filters follow requirements §7.
+- **Writes are explicit.** Only the write tools change Confluence, and only the pages they name. No tool
+  purges the trash; `delete_draft` is the only permanent delete.
+- **Partial results.** Multi-step tools report each step: done, `unknown` (uncertain: inspect before
+  repeating) or `not_attempted`. Nothing completed is undone automatically.
+- **Sign-in.** If a tool reports that sign-in is required, run `confluence-connector auth` in a terminal.
+  An access-denied error concerns one page or operation, not the sign-in.
+
+### 8.2 Status
+
+#### `auth_status`
+
+Offline: the configured instance, whether a token is stored, and its account name. It does not prove
+that Confluence still accepts the token; `confluence-connector status --check` does.
+
+### 8.3 Spaces, search and people
+
+#### `list_spaces`
+
+Every current and archived space visible to the account, with ID, key, name, type, status and link.
+Read 500 at a time; `truncated` reports a cut.
+
+#### `search_content`
+
+Searches pages, blog posts, comments and attachments. `query` is literal text, up to 1,000 characters.
+`match` is `all` (default), `any` or `phrase`; `fields` is `all` (default) or `title`. `limit` is 1–100
+(default 25).
+
+- `scope`: `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
+  `contributor_usernames`, `created_after`/`created_before`, `modified_after`/`modified_before`,
+  `parent`, `ancestor` and `include_archived` (default true). Each list holds at most 50 values of at
+  most 255 characters.
+- Each hit has its ID, type, title, space, link, excerpt, modification time, parent and `sources`
+  (`cql`, `quicknav` or both). `queries_sent` shows the CQL sent, and `approximate_total` is the
+  server's estimate.
+- Title search on an unscoped first page adds quick-navigation matches; scoped title searches skip
+  them, because that route takes no filters.
+- A comment hit is the comment, not its page.
+
+#### `find_users`
+
+Current users by display-name `query` (up to 255 characters), or one exact `username`, the only way to
+find former users. Use one or the other. `limit` is 1–100 (default 25).
+
+### 8.4 Trees and metadata
+
+#### `get_page_tree`
+
+Ordered children of exactly one `page` or `space_key`, to `max_depth` 1–5 (default 3), counting the
+selected page as level 1 (for a space, its top-level pages). A page root also returns its ancestors.
+At most 1,000 pages; `complete: false` and a note report a cut.
+
+#### `get_page_metadata`
+
+For 1–20 `pages`: title, status, space, link, current version, created and modified times and authors,
+contributors, labels, ancestors, and the version list (at most 5,000 per page; `versions_truncated` marks
+a cut).
+Failures are listed per reference beside the successful pages. Versioned references are refused.
+
+### 8.5 Reading pages
+
+#### `get_pages`
+
+Reads 1–20 `pages` as `text` (default) or `rich` (unchanged storage). `max_chars` is 1–400,000 (default
+40,000). `parse_scope` turns on or off `header`, `macros_from_storage`, `attachments` and `comments`
+(all on by default).
+
+- Each page record has `text`, `references` (typed: kind, IDs, filename, media type, size, owner page),
+  the attachment list and structured comments for the selected blocks, `version`, `total_versions`
+  and `notes`.
+- Whole pages are packed; pages that did not fit are in `remaining`. An oversized page returns a
+  `next_cursor`; pass it alone to continue at the same version.
+- Attachments are listed, never downloaded.
+
+### 8.6 Local files
+
+#### `download_attachments`
+
+Saves 1–500 `attachment_ids` of one `page` to `downloads/<account>/`. The page's own attachment list is
+read first, so an ID from another page is refused. Returns a path per saved file and a failure per
+attachment that could not be saved; a partial file is removed.
+
+#### `export_pages`
+
+Writes 1–500 `pages` in full as `text` (default) or `rich`, and returns the path, size and counts.
+`include_attachments` (default false) adds each page's attachment bytes. Pages are read two at a time.
+
+- One page with nothing else is a single `.txt` or `.html`; otherwise one flat `.zip`: page files at
+  the root, each page's attachments in a folder named after its file.
+- File names: `<Title> (<page id>) v<version>`, within 180 characters and 240 bytes, with ` (2)`
+  suffixes for duplicates. Every file starts with the provenance header and breadcrumb.
+- Failures go to `_export-report.txt`; account and sign-in errors abort the export. Large exports take
+  minutes.
+
+### 8.7 Pages, drafts and labels
+
+#### `create_page`
+
+Creates a current page (default) or, with `status="draft"`, a new-page draft, under exactly one of
+`parent_id` or `space_key`. `title` up to 255 characters; `body` up to 2,000,000 in `format` `rich`
+(default) or `text` (requirements §10.1). `position` is `first`, `last` (default), `before` or `after`;
+the last two need `sibling` under the same parent.
+
+- A current page with the same title in the target space is refused, with its link, before anything is
+  written.
+- Position is a second write. If it fails, the page stays created, and the result's `warnings` says the
+  position was not applied.
+
+#### `update_page`
+
+Replaces the whole body of a published page, and the title if given. `expected_version` is required:
+a stale version is refused before writing, and a concurrent edit gets Confluence's 409. Neither is
+retried. Inline-comment anchors that would be lost are refused unless `allow_comment_loss: true`;
+removed macros and attachment references come back as `warnings`.
+
+#### `list_drafts`
+
+The account's new-page drafts, optionally for one `space_key`; `limit` 1–100 (default 50). Each draft has
+an ID-based link that page tools accept.
+
+#### `publish_draft`
+
+Publishes a new-page draft with its full body, space and parent; the page keeps its ID.
+
+#### `delete_draft`
+
+Deletes a new-page draft **permanently**: it bypasses the trash and cannot be restored.
+
+#### `set_labels`
+
+Adds and removes global labels on one published page, one request per change, in order, stopping at the
+first failure. Returns `added`, `removed`, `unchanged`, `failures` and `not_attempted`. Successful changes
+are never reversed; inspect an uncertain outcome before retrying.
+
+### 8.8 Moves, trash and restore
+
+#### `move_page`
+
+Moves one current page under exactly one of `parent_id` or `space_key` (the root), with the same
+`position` and `sibling` as `create_page`.
+
+- Within a space: the parent change is a documented content update, then the position goes through the
+  move action. If the position fails, the confirmed parent change stays, and `position_applied: false`
+  with a warning reports it.
+- Across spaces: one move action, waited on through the long-task route for at most 10 seconds. If
+  Confluence refuses the move, recreating the page in the target space and trashing the original is a
+  separate plan that loses the page ID, history and comments.
+
+#### `delete_page`
+
+Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash` (requirements §10.5).
+
+- The whole affected hierarchy is read first (at most 5,000 pages) and `delete` permission is checked
+  on every page before any write. `trash` refuses more than 100 pages, with the count.
+- Each trashed page's parent and position are saved first, best effort, for `restore_page`.
+- The result lists every affected page with its former parent and position and its status
+  (`trashed`, `moved_up`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
+  likely need a space administrator.
+
+#### `list_trash`
+
+Trashed pages of one `space_key` or every visible space: ID, title, space and last edit. `limit` 1–100
+(default 50). Confluence exposes no deletion time or author.
+
+#### `restore_page`
+
+Restores a trashed page, then places it: under the caller's `parent_id` or `space_key` (with
+`position` and `sibling`) when given, otherwise where the saved property says, otherwise at the space
+root. `placement_source` (`caller`, `saved_property` or `space_root`) and `placement_status` say which
+applied and whether it worked; a refused placement leaves the page at the root with a warning.
+
+## 9. Cross-cutting concerns
+
+| Concern | Rule |
 |---|---|
-| `auth_status` | Offline configured-instance, stored-token, and account-name status |
-| `list_spaces` | Current and archived visible spaces with IDs, keys, names, types, statuses and same-instance links |
-| `search_content` | Literal CQL search with structured scope, approximate totals, stateless cursors, and labelled quick-navigation title matches |
-| `find_users` | Current users by display-name query; former users by exact username |
-| `get_page_tree` | Ordered page children and ancestors from a page or space root, with bounded depth and result size |
-| `get_page_metadata` | One or more page histories, retained versions, labels, contributors and ancestors |
-| `get_pages` | Budgeted text or unchanged storage reads, typed references, optional attachment/comment sections, and version-pinned continuation |
-| `download_attachments` | Verify selected attachment IDs belong to one page, then save each file locally with per-file failures |
-| `export_pages` | Write up to 500 complete pages as a single file or flat ZIP, optionally including attachment bytes and reporting incomplete items |
-| `create_page` | Create a current page or new-page draft with validated placement, body conversion and a duplicate-title preflight |
-| `update_page` | Replace a page body with expected-version and content-loss checks |
-| `list_drafts` | List the signed-in user's new-page drafts with bounded paging and cursors |
-| `publish_draft` | Publish a new-page draft under the same page ID |
-| `delete_draft` | Permanently delete a new-page draft, bypassing the trash |
-| `set_labels` | Add or remove global labels with explicit partial-failure results |
-| `move_page` | Move a page between parents or spaces, then apply sibling position; cross-space moves poll the long task |
-| `delete_page` | Preflight delete operations, preserve placement, and trash a page, direct children or bounded subtree |
-| `list_trash` | Page through trashed pages for one space or all visible spaces |
-| `restore_page` | Restore at the space root, then best-effort apply caller or saved placement |
-
-## 2. Modules and boundaries
-
-- `src/confluence_connector/__main__.py`: CLI parsing, configuration selection, authentication and
-  process exit codes.
-- `src/confluence_connector/bootstrap.py`: lazy process composition and account-bound services.
-- `src/confluence_connector/config.py`: required private settings, optional CQL timezone, loader
-  precedence, atomic calibration updates, product constants and the per-user data directory.
-- `src/confluence_connector/timezones.py`: IANA/fixed-offset validation and measured-offset formatting.
-- `src/confluence_connector/logs.py`: process-scoped rotating logs with credential redaction.
-- `src/confluence_connector/auth/store.py`: encrypted PAT and username persistence under
-  `CrossPlatLock`.
-- `src/confluence_connector/domain/`: connector errors and typed status, search, page, attachment, comment and reference results.
-- `src/confluence_connector/remote/transport.py`: async HTTP, retries, response limits and account
-  checks, uncertain outcomes when account state changes after a write response, and bounded streaming
-  downloads; it never logs request URLs or payloads.
-- `src/confluence_connector/remote/confluence.py`: configured current-user, space, search, draft,
-  page-write, label, trash, restore, permission and content-property routes; quick navigation, user
-  lookup, ordered children, page bodies, attachments, comments and history mapping, plus the
-  fixture-only footer-comment write used by acceptance setup. The UI move action is isolated here,
-  reports application-level errors and polls documented cross-space tasks.
-- `src/confluence_connector/remote/links.py`: page ID and URL resolution for tree, metadata, page reads and writes; it
-  refuses URLs outside the configured host and context path.
-- `src/confluence_connector/service/spaces.py`: visible-space listing for the validated account.
-- `src/confluence_connector/service/search.py`: query and scope validation, literal CQL, title-source
-  merging and self-contained search cursors.
-- `src/confluence_connector/service/cql_dates.py`: UTC scope normalization, configured-zone conversion,
-  inclusive minute rounding and daylight-saving edge handling.
-- `src/confluence_connector/service/timezone_calibration.py`: bounded read-only CQL search that
-  measures the effective CQL offset against a page's UTC modification time.
-- `src/confluence_connector/service/users.py`: display-name paging and exact username lookups.
-- `src/confluence_connector/service/tree.py`: page/space roots, ordered child paging and depth/page caps.
-- `src/confluence_connector/service/metadata.py`: bounded batch resolution and per-page metadata failures.
-- `src/confluence_connector/service/pages.py`: page-reference validation, body/section reads, character budgets and version-pinned cursors.
-- `src/confluence_connector/service/attachments.py`: selected attachment validation, same-page ownership checks, safe local filenames and per-file results.
-- `src/confluence_connector/service/exports.py`: up to 500 resolved pages, full text/rich files, optional attachment downloads, bounded-memory flat ZIP packaging and failure reports.
-- `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors and partial results.
-- `src/confluence_connector/service/structure.py`: validated moves, bounded trash cursors, subtree and permission preflight, placement properties, restore fallbacks and exact partial delete results.
-- `src/confluence_connector/service/write_markup.py`: text escaping, safe rich-body conversions, active-content and 128-level nesting refusal, and source-reference loss detection.
-- `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
-- `src/confluence_connector/service/page_text.py`: storage parameters and references, the Confluence pre-pass over `view`, and markdownify-based conversion into budget blocks.
-- `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
-- `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
-- `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
-- `research/acceptance_fixtures.py`, `research/setup_acceptance.py` and
-  `research/run_acceptance.py`: deterministic synthetic fixtures, explicit fixture setup and
-  bounded opt-in live acceptance checks. See the research toolkit instructions for their flags.
-
-The HTTP adapter owns REST route spelling and wire formats. The service owns account-bound capability
-calls. MCP declarations stay thin and do not interpret page content.
-
-## 3. Configuration and authentication
-
-The required private JSON contains `base_url`, `query`, `form_auth_path`, and the configured endpoint
-paths. Optional `acceptance.personal_space_key` and `acceptance.cross_space_key` settings bound the
-manual acceptance scripts to approved spaces; missing values cause dependent checks to skip. The
-probe-only `query` and `form_auth_path` remain in the shared loader contract. `--config PATH`
-takes precedence over `CONFLUENCE_CONFIG`, followed by repository-root `confluence_config.json`,
-independent of the working directory. Missing or invalid settings fail before a prompt or network call.
-Settings are cached in each process; restart after edits or a CLI calibration writes `cql_timezone`.
-
-`APP_NAME`, `CLI_NAME`, `MCP_SERVER_NAME`, and the log-level environment variable are named in
-`config.py`. Local state lives at `%USERPROFILE%\.lrh-confluence-connector` on Windows, under the XDG
-data directory elsewhere, or at `CONFLUENCE_CONNECTOR_HOME` when explicitly overridden.
-
-The CLI prompts for a user-generated PAT without echoing it, checks it with the configured
-`/rest/api/user/current` endpoint, and only then stores the token and returned username together in an
-encrypted `msal-extensions` persistence record. `CrossPlatLock` coordinates reads, sign-in completion
-and sign-out. There is no plaintext fallback. A different username is refused until the user runs
-`auth --sign-out`, making account switching explicit. The Confluence credential is unrelated to
-Microsoft OAuth.
-
-`status` reads local state only. `auth` calibrates the CQL timezone after verifying and storing the
-candidate token; `status --check` verifies the stored token and then calibrates it. Calibration uses a
-newest readable page and a bounded binary search of `lastmodified` minute cutoffs. It runs only when a
-user invokes these CLI commands, never on MCP startup or a tool call. If `cql_timezone` is absent,
-`config.py` writes the measured fixed offset atomically under a cross-process lock, preserving other
-settings. If set, only `status --check` compares the configured zone's offset at the calibration
-instant and warns on a mismatch without overwriting it. The automatically written fixed offset does
-not follow daylight saving; users replace it with an IANA zone when needed. The MCP `auth_status` tool
-is offline and reports the stored account name; it does not claim that Confluence still accepts the
-token. Sign-out clears the local credential and does not revoke it remotely.
-
-The optional private `cql_timezone` setting accepts an IANA name or a fixed `UTC±HH:MM` offset. The
-example config leaves it `null` so the next user-run `auth` or `status --check` can measure it.
-
-## 4. HTTP, paging and links
-
-The process-scoped `httpx.AsyncClient` disables redirects and HTTP/2, permits up to six connections,
-and uses 10-second connect/pool and 30-second read/write timeouts. The transport limits in-flight
-requests to six. Reads retry up to three attempts for connection failures, timeouts, 429, 500, 502,
-503 and 504 responses, honoring `Retry-After` or using short jittered backoff. Writes retry only after
-a connection failure before sending or an explicit 429/503 response. A write timeout, incomplete
-response or 504 is reported as uncertain and is not resent.
-
-Space results request up to 500 entries for each status (`current` and `archived`). Paging advances
-using the returned `start + size`; the connector does not use the echoed `limit` or a server-provided
-`next` URL. Invalid offsets, sizes, totals and duplicate spaces fail with an upstream error instead
-of silently dropping entries.
-
-Search sends only CQL constructed from literal terms and validated scope values. `match=all` creates
-one `siteSearch` or `title` clause per term joined by AND; `any` sends the terms together; `phrase`
-preserves their order. Query punctuation is retained inside terms and stripped at their edges. Title
-search replaces punctuation with spaces and adds the observed quick-navigation source on the first
-page only when no scope filters are set; CQL hits keep their order and the merged page is capped at the
-requested limit. Each hit reports its source, and cursors remember only quick-navigation IDs included
-in the returned page. Quick-navigation failures leave CQL results usable, while account changes still
-fail the call. Cursors carry the normalized request and actual next offset, are revalidated on use, and
-do not depend on process memory. Full pages can have a continuation even when Confluence's approximate
-total suggests otherwise.
-
-Search scope uses `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
-`contributor_usernames`, `created_after/before`, `modified_after/before`, `parent`, `ancestor` and
-`include_archived` (true by default). Date-only values pass through as `yyyy/MM/dd` and mean that
-calendar day in Confluence's timezone; mixed date and timestamp bounds are ordered against that whole
-local day. Timestamps with offsets are normalized to UTC; timestamps
-without offsets are treated as UTC. Timestamp bounds require `cql_timezone`, convert to timezone-less
-`yyyy/MM/dd HH:mm`, and round lower bounds down and upper bounds up to preserve inclusive minutes.
-Repeated daylight-saving hours are conservatively widened because CQL literals cannot identify a
-fold; a rounded minute in a spring-forward gap moves to the next valid minute. Cursors store the
-original UTC instants and reconvert them on every page. If the setting is missing, date-only search
-continues to work and timestamp filters return an actionable `InvalidRequest`. Space-root tree reads
-request `depth=root`, then child reads follow each page's direct-child route. Trees keep the server's
-child order, advance by actual `start + size`, and stop at depth 5 or 1,000 returned pages.
-Metadata accepts at most 20 references; experimental page versions are read in 200-item pages and
-capped at 5,000 per page record. It describes the current page and refuses a versioned reference;
-historical metadata reads are not implemented. Results identify truncation or per-reference failures.
-
-`get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
-the shared transport caps all requests at six in flight. When storage expansion is requested, the
-adapter requires a string `body.storage.value`; comment reads request `body.view`. A missing or
-malformed requested value is an upstream error.
-
-`service/page_text.py` converts bodies in three steps. First, storage is parsed with BeautifulSoup for
-macro parameters (Jira keys, PlantUML source, titles, include targets) and typed references
-(`ri:page`, `ri:attachment`, inline-comment markers, non-text macros). Second, a BeautifulSoup pre-pass
-over `body.view` replaces each `data-macro-name` wrapper with its D3 marker, pairing wrappers with
-storage macros by name and document order; wrappers inside a resolved include take no local source.
-The same pass turns images and attachment links into markers with typed references (identity from
-`data-linked-resource-*` attributes and the attachment list), mentions into `@Name`, inline tasks into
-`[ ]`/`[x]`, normalizes same-instance links to absolute URLs under the configured context path, and
-drops scripts and styles. Third, markdownify converts the result, with one override for tables:
-merged cells are repeated, and tables containing nested tables or code fall back to minimal HTML.
-References are collected before conversion; marker text is never parsed back. Comments are converted
-the same way from their own `view` bodies and threaded by source ancestry.
-
-The converted text is split into blocks at blank lines outside fenced code, so paragraphs, whole
-lists, tables, panels and code blocks are budget units; a single oversized block is returned whole
-with a note. A `rich` read returns the storage body verbatim, split between top-level elements using
-the parser's source positions so the slices join back to the exact source. Comment bodies share the
-page budget in both formats, and structured comments accompany only selected comment blocks. Cursors
-carry page ID, version and a stable next-block anchor and re-read the historical version when the
-page has changed; the adapter requires the returned source version to confirm the requested one. Body
-anchors use the pinned block order, while attachment and comment anchors use their source IDs, so
-insertions before a continuation point do not shift it; a removed anchored item returns an
-actionable restart error. Text continuation keeps the separator before its first block so fragments
-join back to the original text, and an oversized continuation state is rejected instead of issuing a
-cursor the decoder would refuse.
-
-`PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
-`viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title
-inside their space, and a renamed title fails clearly. Short-link redirects are followed manually and
-must stay on the configured HTTPS origin and context path. `pageVersion` is preserved; anchors and
-comment focus are ignored. Search scope, page trees, metadata and page text reads use this resolver for
-page references.
-
-`download_attachments` accepts one page reference and up to 500 attachment IDs. The service lists that
-page's attachments before downloading, so an ID cannot select a file from another page. Files are
-streamed through the shared six-request transport limit into a per-account subfolder under the local
-`downloads` directory. Names replace Windows-invalid path characters; an existing name receives a
-numeric suffix. Failed downloads remove their partial file and are returned alongside successes.
-Output files older than seven days are removed when the folder is next used.
-On POSIX systems, output directories are owner-only and claimed files use owner read/write permissions.
-
-### Page, draft and structure management
-
-`create_page` accepts exactly one parent_id page reference or space root. It checks for a current duplicate title
-before creating the page, converts the body, and uses the configured REST content route. First/before/
-after positioning uses the isolated Confluence UI move action after creation; if that follow-up fails,
-the result says the page remains created and placement was not confirmed. A draft receives the same
-best-effort position request.
-
-`update_page` reads the current storage body and version, refuses a stale expected version before
-writing, then sends the next version so Confluence's 409 protects against a concurrent edit. The
-service compares inline-comment anchors, macro names and attachment references. Losing an inline
-comment anchor is refused unless the caller confirms with `allow_comment_loss`; confirmed losses
-and removed macros/attachment references are returned as warnings.
-
-`list_drafts` reads the documented content collection with `status=draft`, at most 100 rows per
-request, and cursors that carry the space filter and next offset. The offset cap is 1,000,000 and
-the result reports truncation if drafts remain. Draft links are built from the page ID using a
-resolver-supported URL, even when Confluence supplies a title-based link. Publishing verifies a
-new-page draft and sends its complete storage body, space and parent with version 1, retaining the ID.
-`delete_draft` verifies draft status before using `DELETE ?status=draft`; this is permanent and
-bypasses the trash. `set_labels` reads the current labels, skips already-satisfied changes, and
-sends one request per change. It stops at the first failure and reports prior successful responses,
-the failed operation and later operations that were not attempted. It never sends inverse label
-writes: Confluence does not report which client caused a label transition, so compensation could
-undo a concurrent client's change. Uncertain outcomes remain explicit for inspection.
-
-`move_page` validates one parent or space-root target. Same-space parent changes send a versioned
-content update with the new ancestors; first/last/before/after ordering uses the isolated move action.
-Cross-space moves use `position=append` for a parent or `position=topLevel` for a space root, then
-poll the documented long-task route for at most 10 seconds and 40 times. A confirmed parent change
-is retained when a separate same-space position step fails, and the result identifies that partial
-state.
-
-`delete_page` reads the direct children or full target subtree and checks `expand=operations` for
-every affected page before its first write. `refuse` reports direct children; `move_up` re-parents
-them in source order, then trashes the selected page; `trash` refuses more than 100 pages and
-trashes descendants bottom-up. The complete subtree count is bounded by a 5,000-page read safety
-cap. Former parent, sibling position and next sibling are saved on each page being trashed (the
-selected page in `move_up`) in a content property, on a best-effort basis. An unreadable space
-permission list adds a restore warning. Each
-write stops at its first failure; results distinguish completed, unknown and unattempted pages, and
-no completed write is automatically undone.
-
-`list_trash` uses the documented content collection with `type=page&status=trashed`, batches of up
-to 100, and stateless cursors bounded to offset 1,000,000. `restore_page` restores through the
-documented status update, then tries caller placement, the saved property, and finally the space
-root. Missing, invalid or unusable saved placement is logged and reported. If a same-space parent
-change succeeds but its requested sibling position is definitively refused, the connector returns
-the restored page to the space root; an uncertain recovery is reported for inspection. After a
-successful restore, the connector removes its property when possible.
-
-`export_pages` validates up to 500 references before any request, then reads two full pages at a time;
-the transport still caps total in-flight HTTP requests at six. It resolves each requested version and
-keeps the input order. Non-account page errors and attachment failures are written to
-`_export-report.txt`; authentication and account mismatches abort the export. Text files use the same
-unbudgeted `get_pages` renderer and always include the provenance header. Rich files start with that
-header in an HTML comment, preserve the storage body, and append escaped comments when comments are
-selected. Windows-invalid filename characters are replaced and duplicate page names receive suffixes.
-
-One successful page with no attachment bytes requested and no incomplete sections is written as a
-timestamped file. All other cases use a timestamped ZIP with page files at its root and attachment
-folders beside their page files. `include_attachments` defaults to false; when true, the tool lists and
-downloads all readable attachments for each page. `parse_scope.attachments` separately controls
-whether attachment names appear in text. Exports and their staging files live in an account-specific
-subfolder of `exports`; the shared local-file cleanup removes outputs older than seven days when the
-folder is next used. After staging a page body and its selected attachments, the service retains only
-page ID, title and version for archive naming so memory does not grow with the number of pages.
-Export names fit within 180 characters and 240 filesystem bytes or UTF-16 code units.
-
-Operational logs include tool names, outcomes, timings and counts only. HTTP library URL logging is
-quieted because URLs and response content can carry private data.
-
-## 5. Research and checks
-
-The probe supports anonymous, PAT, Basic, form-session and supplied OAuth-bearer modes. Form mode is a
-single interactive research request; OAuth transports an already obtained token and does not implement
-authorization. No probe runs on application startup.
-
-Run offline checks from the repository root:
-
-```powershell
-uv run python -m unittest discover -s tests
-uv run python -m compileall -q src research tests
-uv run python research/probe_auth.py --help
-```
-
-No live Confluence request is a routine check. See [API research](api-research.md) for dated evidence
-and [research/README.md](../research/README.md) for explicitly started probes.
+| Logging | Tool name, outcome, duration and counts. Never page content, queries, request URLs or tokens. |
+| Retries | Reads: 3 attempts on connection errors, timeouts, 429 and 5xx, honoring `Retry-After`. Writes: only when never sent or answered 429/503. |
+| Concurrency | Six requests in flight per process; page reads in parallel parts; exports two pages at a time. |
+| Bounds | Every list and read is bounded with a cursor or a cap reported in the result. Attachment bytes go to files, never into tool results. |
+| Errors | Domain errors with Confluence's status and message. 401 → `AuthenticationRequired`; 403 → `PermissionDenied`; changed account → `AccountMismatch`; uncertain write → `UncertainWrite`. |
+| Security | Configured host only; no arbitrary URL fetching; short links followed only on the configured origin; no browser cookies; tokens never in tool inputs or results. |
