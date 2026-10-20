@@ -361,3 +361,10 @@ automatically retried. Direct content-collection lookups by exact title and pers
 current fixture pages after inspection. A subsequent manually inspected setup attempt also returned
 500; final direct reads again found zero current fixture pages. This does not establish that REST
 creation is generally unavailable; the fixture body or instance-side processing still needs diagnosis.
+
+Isolation on 2026-10-20 confirmed the cause: the `view-file` macro's `name` parameter must contain
+`<ri:attachment ri:filename="synthetic.txt" />`, not filename text. Passing text made creation return
+500 (`java.lang.String` cannot cast to `AttachmentResourceIdentifier`). The reference form succeeded
+even with a nonexistent synthetic filename, and that page was trashed afterwards. Plain text and the
+other isolated macro groups also created successfully. The acceptance fixture now uses the reference
+form. This is a fixture defect, not an authentication failure or a general creation restriction.
