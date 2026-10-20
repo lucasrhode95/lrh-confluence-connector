@@ -229,8 +229,9 @@ and removed macros/attachment references are returned as warnings.
 
 `list_drafts` reads the documented content collection with `status=draft`, at most 100 rows per
 request, and cursors that carry the space filter and next offset. The offset cap is 1,000,000 and
-the result reports truncation if drafts remain. Publishing verifies a new-page
-draft and sends its complete storage body, space and parent with version 1, retaining the ID.
+the result reports truncation if drafts remain. Draft links are built from the page ID using a
+resolver-supported URL, even when Confluence supplies a title-based link. Publishing verifies a
+new-page draft and sends its complete storage body, space and parent with version 1, retaining the ID.
 `delete_draft` verifies draft status before using `DELETE ?status=draft`; this is permanent and
 bypasses the trash. `set_labels` reads the current labels, skips already-satisfied changes, and
 sends one request per change. It stops at the first failure and reports prior successful responses,
