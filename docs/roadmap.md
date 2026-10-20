@@ -61,6 +61,12 @@ Group related items into design fixes rather than one patch each.
   `_links.next` and traversal treats a page under 500 as final, so `children=trash` can report success
   while leaving descendants behind. Space listing has the same assumption. Keep the continuation
   signal and advance on actual `start + size` (`service/structure.py`, `remote/confluence.py`).
+  Live 2026-10-20: both listings send `_links.next` only when more results exist, with `start + size`.
+- [P1] Moving to the space root never moves: live 2026-10-20, `PUT` with `ancestors: []` returned 200
+  but left the parent and version unchanged, so `move_page`, restore placement and `move_up` can report
+  a root move that did not happen. `movepage.action` with `position=topLevel` did move the page to the
+  root (first, no new version); use it and change the test that asserts the empty list
+  (`remote/confluence.py`, `service/structure.py`).
 - [P1] Every live acceptance run fails: the authentication and fixture checks pass the coroutine
   `_pass()` where `AcceptanceReport.run` expects a callable, so both record a `TypeError` and the run
   exits 1. Pass `_pass` (`research/run_acceptance.py`, from PR #8).
@@ -70,21 +76,18 @@ Group related items into design fixes rather than one patch each.
   from PR #7).
 - [P2] `restore_page` cannot take a `/display/SPACE/Title` URL: the resolver looks the title up
   through CQL, which excludes trashed content, so it always fails with `NotFound` despite every URL
-  form being promised. Resolve it against the trash listing or require an ID-bearing URL and document
-  that (`service/structure.py`, `remote/links.py`, from PR #7).
+  form being promised. Live 2026-10-20: `GET /rest/api/content?type=page&spaceKey=…&title=…&status=trashed`
+  finds the trashed page; resolve display URLs through it for `restore_page` (`service/structure.py`,
+  `remote/links.py`, from PR #7).
 - [P2] Search: a term with inner punctuation (`ci-cd`, `release/notes`) is matched as either half,
   not as one term. Live 2026-10-20: `ci-cd` matched 2,160 pages, `"ci-cd"` 482. Quote such terms in
   `match: "all"` and `"any"` (`service/search.py`).
 - [P2] External attachment links can take a local attachment's identity: attachment classification
   and filename matching run before origin validation, and included-page attachments are ambiguous
   the same way. Validate origin and owner first (`service/page_text.py`).
-- [P2] `set_labels` can silently skip a removal when labels are paginated: metadata reads only the
-  first expanded labels page, so an unseen label counts as absent. Read the full label set or stop
-  claiming absence (`remote/confluence.py`).
-- [P2] Moving to the space root depends on the unverified `ancestors: []`; with position `first` and
-  no siblings it is the only write, so the result can claim a move that did not happen. Use
-  `movepage.action` with `topLevel`, or verify live first; the test asserting the empty list then
-  changes (`remote/confluence.py`, `service/structure.py`).
+- [P3] `set_labels` can silently skip a removal on a page with more than 200 labels: metadata reads
+  only the first expanded labels page (200, verified live 2026-10-20), so an unseen label counts as
+  absent. Follow `_links.next` on `/label` or stop claiming absence (`remote/confluence.py`).
 - [P2] Timezone calibration assumes the sample page is not edited during the search; one concurrent
   edit made a UTC instance measure `UTC+00:01`, which would then be written to the config. Re-read the
   sample's timestamp and retry or abandon on change (`service/timezone_calibration.py`).
@@ -118,7 +121,9 @@ Group related items into design fixes rather than one patch each.
 
 - Same-space moves make two writes by default: position defaults to `last`, so `movepage.action` runs
   after every documented parent change, adding a page version and a failure point. Use one route per
-  move (decide with the user, since D7 named the documented route for parent changes).
+  move (decide with the user, since D7 named the documented route for parent changes). Live
+  2026-10-20: `movepage.action` reparents and positions within a space in one call (`above`/`below`/
+  `append` with a `targetId` under the new parent, `topLevel` for the root) without a new version.
 - Unify page-reference validation, space-key validation, the current-page check, the account-error
   passthrough, filename sanitization (attachments and exports), `_cql_literal` and same-instance URL
   parsing (`remote/links.py`, `remote/confluence.py`, `service/page_text.py`). These are repeated
