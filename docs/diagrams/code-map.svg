@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Confluence connector code map</title>
+  <desc id="desc">A package map of the CLI, MCP tools, bootstrap, services, remote adapters, encrypted token store, domain models, configuration, and logging. Arrows show the primary callers.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#60758a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <style>
+      .title{font:700 32px system-ui,sans-serif;fill:#15283a}.section{font:700 19px system-ui,sans-serif;fill:#15283a}
+      .head{font:700 16px system-ui,sans-serif;fill:#15283a}.body{font:400 13px system-ui,sans-serif;fill:#52677b}
+      .small{font:600 12px system-ui,sans-serif;fill:#35536e}.box{fill:#fff;stroke:#c7d4df;stroke-width:1.4}
+      .entry{fill:#edf5fc;stroke:#8db8d8}.core{fill:#f6f3fb;stroke:#b8a9d1}.remote{fill:#eff7f3;stroke:#a8cbbb}
+      .secure{fill:#fff6e9;stroke:#d9bd87}.domain{fill:#f1f4f7;stroke:#bac7d2}.line{fill:none;stroke:#60758a;stroke-width:1.8;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1480" height="1080" rx="26" fill="#f6f8fb"/>
+  <text x="48" y="58" class="title">Package and call map</text>
+  <text x="48" y="88" class="body">Current foundation code only; later roadmap modules are not shown as implemented.</text>
+
+  <text x="48" y="144" class="section">Entry points and composition</text>
+  <rect x="48" y="165" width="255" height="140" rx="15" class="box entry"/>
+  <text x="70" y="198" class="head">__main__.py</text>
+  <text x="70" y="225" class="body"><tspan x="70">main · build_parser</tspan><tspan x="70" dy="20">_auth · _status</tspan></text>
+  <rect x="375" y="165" width="280" height="140" rx="15" class="box core"/>
+  <text x="397" y="198" class="head">bootstrap.py</text>
+  <text x="397" y="225" class="body"><tspan x="397">AppContext · Services</tspan><tspan x="397" dy="20">lazy service composition</tspan></text>
+  <rect x="48" y="345" width="255" height="150" rx="15" class="box entry"/>
+  <text x="70" y="378" class="head">surfaces/mcp_main.py</text>
+  <text x="70" y="405" class="body"><tspan x="70">build_server · serve_mcp</tspan><tspan x="70" dy="20">auth_status · list_spaces</tspan><tspan x="70" dy="20">_logged</tspan></text>
+  <rect x="375" y="345" width="280" height="150" rx="15" class="box remote"/>
+  <text x="397" y="378" class="head">service/spaces.py</text>
+  <text x="397" y="405" class="body"><tspan x="397">SpaceService</tspan><tspan x="397" dy="20">auth_status · check_auth_status</tspan><tspan x="397" dy="20">list_spaces</tspan></text>
+
+  <text x="710" y="144" class="section">Remote adapters</text>
+  <rect x="710" y="165" width="300" height="150" rx="15" class="box remote"/>
+  <text x="732" y="198" class="head">remote/confluence.py</text>
+  <text x="732" y="225" class="body"><tspan x="732">ConfluenceApi</tspan><tspan x="732" dy="20">current_user · list_spaces</tspan><tspan x="732" dy="20">find_page_by_title · mapping</tspan></text>
+  <rect x="1050" y="165" width="370" height="180" rx="15" class="box remote"/>
+  <text x="1072" y="198" class="head">remote/transport.py</text>
+  <text x="1072" y="225" class="body"><tspan x="1072">ConfluenceTransport</tspan><tspan x="1072" dy="20">get_json · send_json · redirect_location</tspan><tspan x="1072" dy="20">retry/status mapping · account checks</tspan><tspan x="1072" dy="20">MAX_ATTEMPTS · MAX_JSON_BYTES</tspan></text>
+  <rect x="710" y="360" width="300" height="150" rx="15" class="box remote"/>
+  <text x="732" y="393" class="head">remote/links.py</text>
+  <text x="732" y="420" class="body"><tspan x="732">PageLinkResolver</tspan><tspan x="732" dy="20">ID and URL validation</tspan><tspan x="732" dy="20">short links · legacy display URLs</tspan></text>
+  <rect x="1050" y="385" width="370" height="125" rx="15" class="box domain"/>
+  <text x="1072" y="418" class="head">remote/ports.py</text>
+  <text x="1072" y="445" class="body"><tspan x="1072">CredentialSource protocol</tspan><tspan x="1072" dy="20">TokenStore is the current provider</tspan></text>
+
+  <text x="48" y="560" class="section">Authentication, models and utilities</text>
+  <rect x="48" y="580" width="300" height="170" rx="15" class="box secure"/>
+  <text x="70" y="613" class="head">auth/store.py</text>
+  <text x="70" y="640" class="body"><tspan x="70">TokenStore</tspan><tspan x="70" dy="20">StoredCredential</tspan><tspan x="70" dy="20">encrypted persistence</tspan><tspan x="70" dy="20">CrossPlatLock</tspan></text>
+  <rect x="390" y="580" width="430" height="210" rx="15" class="box domain"/>
+  <text x="412" y="613" class="head">domain/</text>
+  <text x="412" y="640" class="body"><tspan x="412">models.py: CurrentUser, AuthStatus, SpaceSummary, SpaceList,</tspan><tspan x="412" dy="20">ResolvedPageReference</tspan><tspan x="412" dy="26">errors.py: ConnectorError, AuthenticationRequired, AccountMismatch,</tspan><tspan x="412" dy="20">SecureStorageUnavailable, InvalidRequest, NotFound, Throttled,</tspan><tspan x="412" dy="20">Upstream, PermissionDenied, Conflict, UncertainWrite</tspan></text>
+  <rect x="865" y="580" width="260" height="170" rx="15" class="box domain"/>
+  <text x="887" y="613" class="head">config.py</text>
+  <text x="887" y="640" class="body"><tspan x="887">load_config · add_config_argument</tspan><tspan x="887" dy="20">data_dir · product constants</tspan></text>
+  <rect x="1170" y="580" width="250" height="170" rx="15" class="box domain"/>
+  <text x="1192" y="613" class="head">logs.py</text>
+  <text x="1192" y="640" class="body"><tspan x="1192">configure_app_logging</tspan><tspan x="1192" dy="20">SecretRedactionFilter</tspan></text>
+
+  <text x="48" y="845" class="section">Primary call paths</text>
+  <rect x="48" y="867" width="1372" height="128" rx="16" fill="#fff" stroke="#c7d4df" stroke-width="1.4"/>
+  <text x="78" y="907" class="body"><tspan class="small">MCP:</tspan><tspan> mcp_main → AppContext → SpaceService → ConfluenceApi → ConfluenceTransport → Confluence DC</tspan></text>
+  <text x="78" y="943" class="body"><tspan class="small">Credential:</tspan><tspan> CLI / AppContext → TokenStore → encrypted persistence; transport reloads and checks the active username</tspan></text>
+  <text x="78" y="979" class="body"><tspan class="small">Page URLs:</tspan><tspan> PageLinkResolver → ConfluenceApi for display-title lookup, or ConfluenceTransport for short-link redirects</tspan></text>
+
+  <path d="M303 235h55" class="line"/><path d="M303 420h55" class="line"/>
+  <path d="M655 420h45v-170h5" class="line"/><path d="M1010 240h30" class="line"/>
+  <path d="M1170 345v28" class="line"/>
+  <path d="M510 305v32" class="line"/><path d="M250 305v30" class="line"/>
+  <path d="M850 360v-38" class="line"/>
+  <path d="M1010 400h25q15 0 15-15v-40" class="line"/>
+</svg>

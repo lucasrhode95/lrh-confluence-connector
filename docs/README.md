@@ -3,7 +3,7 @@
 | Document | Read it for |
 |---|---|
 | [Requirements](requirements.md) | Agreed capabilities, ownership and decisions |
-| [Architecture](architecture.md) | The current proof of concept and its implemented contracts |
+| [Architecture](architecture.md) | The current implementation and its implemented contracts |
 | [Roadmap](roadmap.md) | Open implementation, decisions and live verification |
 | [API research](api-research.md) | Dated authentication evidence and browser/private API findings |
 
