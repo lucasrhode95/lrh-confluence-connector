@@ -1,0 +1,23 @@
+<h1>Overview</h1>
+<p>Start <strong>carefully</strong>, run <code>sync_job.run()</code> and read <ac:link><ri:page ri:content-title="Target" ri:content-id="84" /></ac:link> or <a href="https://example.com/docs">the vendor docs</a>.<br />Second line.</p>
+<p>Ask <ac:link><ri:user ri:userkey="0000synthetic" /></ac:link>.</p>
+<ac:task-list><ac:task><ac:task-status>incomplete</ac:task-status><ac:task-body>pending step</ac:task-body></ac:task><ac:task><ac:task-status>complete</ac:task-status><ac:task-body>done step</ac:task-body></ac:task></ac:task-list>
+<ol start="3"><li>third</li><li>fourth<ol><li>nested</li></ol></li></ol>
+<ac:structured-macro ac:name="toc" ac:schema-version="1" ac:macro-id="m-1" />
+<ac:structured-macro ac:name="code" ac:schema-version="1" ac:macro-id="m-2"><ac:parameter ac:name="language">python</ac:parameter><ac:parameter ac:name="title">deploy.py</ac:parameter><ac:plain-text-body><![CDATA[def deploy(target_env):
+    return target_env < 2 and "ok"]]></ac:plain-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="info" ac:schema-version="1" ac:macro-id="m-3"><ac:rich-text-body><p>Keep the <strong>service</strong> online.</p><ul><li>check health</li></ul></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="expand" ac:schema-version="1" ac:macro-id="m-4"><ac:parameter ac:name="title">Rollback</ac:parameter><ac:rich-text-body><p>Revert the release.</p></ac:rich-text-body></ac:structured-macro>
+<p><ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="m-5"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">APPROVED</ac:parameter></ac:structured-macro> by the board.</p>
+<ac:structured-macro ac:name="jira" ac:schema-version="1" ac:macro-id="m-6"><ac:parameter ac:name="server">Synthetic Jira</ac:parameter><ac:parameter ac:name="key">OPS-7</ac:parameter></ac:structured-macro>
+<ac:structured-macro ac:name="plantuml" ac:schema-version="1" ac:macro-id="m-7"><ac:plain-text-body><![CDATA[@startuml
+Alice -> Bob : deploy
+@enduml]]></ac:plain-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="include" ac:schema-version="1" ac:macro-id="m-8"><ac:parameter ac:name=""><ac:link><ri:page ri:content-title="Shared Contacts" ri:content-id="91" /></ac:link></ac:parameter></ac:structured-macro>
+<p>Diagram: <ac:image ac:alt="release flow"><ri:attachment ri:filename="flow.png" /></ac:image></p>
+<p><ac:structured-macro ac:name="view-file" ac:schema-version="1" ac:macro-id="m-9"><ac:parameter ac:name="name"><ri:attachment ri:filename="checklist.pptx" /></ac:parameter></ac:structured-macro></p>
+<table><tbody><tr><th>Region</th><th>Item</th><th>Qty</th></tr><tr><td rowspan="2">North</td><td>a | b</td><td>1</td></tr><tr><td><p>first</p><p>second</p></td><td>2</td></tr><tr><td colspan="2">Total</td><td>3</td></tr></tbody></table>
+<table><tbody><tr><th>Step</th><th>Command</th></tr><tr><td>Restart</td><td><pre>systemctl restart app</pre></td></tr></tbody></table>
+<ac:structured-macro ac:name="mystery-plugin" ac:schema-version="1" ac:macro-id="m-10" />
+<ac:structured-macro ac:name="html" ac:schema-version="1" ac:macro-id="m-11"><ac:plain-text-body><![CDATA[<p>Injected <b>macro</b> output.</p><script>htmlMacro()</script>]]></ac:plain-text-body></ac:structured-macro>
+<p>End of <ac:inline-comment-marker ac:ref="inline-4">page</ac:inline-comment-marker>.</p>
