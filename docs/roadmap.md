@@ -39,9 +39,24 @@ Comment and attachment writes are not in the requirements and are not proposed h
   hierarchy caps, 409 conflicts and partial-failure results. Shared retry and uncertain-write
   behavior is implemented and has offline tests.
 
+### Deferred review findings
+
+P2 review findings left open when their PR was merged, for the final pass. Group related items into
+design fixes rather than one patch each.
+
+- PR #5, `service/writes.py`: label compensation can undo a label that another client added after the
+  metadata snapshot, because Confluence's add-label response does not show whether this call caused
+  the transition. Compensate only transitions this call is known to have caused.
+- PR #5, `remote/confluence.py`: `list_drafts` can return a title-based `/display/…` or
+  `resumedraft.action` URL that `PageLinkResolver` cannot resolve back to the draft. Return an
+  ID-based supported URL, or resolve draft URLs.
+
 ## Decisions
 
-None open. Settled decisions are in [requirements](requirements.md).
+- **Page text conversion:** whether to replace the hand-written HTML-to-text converter
+  (`service/page_text.py`) with a thin Confluence layer over an off-the-shelf HTML-to-Markdown library,
+  and restate D3 as faithful, readable text with documented limitations instead of a rule-by-rule
+  specification.
 
 ## Live verification
 
