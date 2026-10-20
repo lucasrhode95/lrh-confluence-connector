@@ -164,9 +164,9 @@ links, then threaded by source ancestry. Typed references remain alongside text 
 to parse markers. A `rich` read returns the storage body verbatim. Both formats use block-boundary
 budgets. Cursors carry page ID, version and block offset and
 re-read the historical version when the current page has changed; the adapter requires the returned
-source version to exactly confirm a requested historical version. Generic containers keep inline runs
-together and split them only around block-level children. Local root-relative links are normalized to
-the configured context path before they are emitted. Attachments and comments are read
+source version to exactly confirm a requested historical version. Generic containers and blockquotes
+keep inline runs together and split them only around block-level children. Local root-relative links
+are normalized to the configured context path before they are emitted. Attachments and comments are read
 again on continuation, so those live sections can change while the page body remains pinned.
 
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,

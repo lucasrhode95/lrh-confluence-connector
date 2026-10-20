@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from html import escape
 from html.parser import HTMLParser
-from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, urljoin, urlsplit, urlunsplit
 
 from confluence_connector.domain.models import PageAttachment, PageReference
 
@@ -198,8 +198,15 @@ def _render_blocks(value: _Node | str, context: _RenderContext) -> list[PageText
     if tag == "table":
         return _render_table(value, context)
     if tag == "blockquote":
-        children = [block for child in value.children for block in _render_blocks(child, context)]
-        return [_block("\n".join(f"> {line}" for line in block.text.splitlines()), block.references) for block in children]
+        children = _render_container_content(value.children, context)
+        return [
+            _block(
+                "\n".join(f"> {line}" for line in block.text.splitlines()),
+                block.references,
+                separator_before=block.separator_before,
+            )
+            for block in children
+        ]
     if tag == "hr":
         return [PageTextBlock("---")]
     if tag in {"a", "img"}:
@@ -747,8 +754,13 @@ def _link_reference(node: _Node, page_id: str, base_url: str | None) -> PageRefe
         return None
     target = node.attrs.get("data-content-id") or node.attrs.get("data-page-id")
     if target is None:
-        match = _PAGE_PATH.search(urlsplit(href).path)
-        target = match.group(1) if match else None
+        parsed_href = urlsplit(href)
+        match = _PAGE_PATH.search(parsed_href.path)
+        query_ids = parse_qs(parsed_href.query).get("pageId", [])
+        if match is not None:
+            target = match.group(1)
+        elif len(query_ids) == 1:
+            target = query_ids[0]
     if target and target.isdecimal():
         return PageReference(kind="page", page_id=target, owner_page_id=page_id, url=normalized_href)
     return None

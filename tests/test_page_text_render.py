@@ -201,6 +201,30 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["Before inline", "Block paragraph", "after."],
         )
 
+    def test_blockquote_keeps_inline_children_together_and_formats_them(self) -> None:
+        rendered = render_page_body(
+            "<blockquote>Hello <strong>world</strong>!<p>Next paragraph.</p></blockquote>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["> Hello **world**!", "> Next paragraph."],
+        )
+
+    def test_viewpage_query_link_keeps_its_typed_page_reference(self) -> None:
+        rendered = render_page_body(
+            '<p><a href="/pages/viewpage.action?pageId=123">Target</a></p>',
+            "",
+            page_id="55",
+            base_url="https://confluence.example.test/wiki",
+            attachments=[],
+        )
+        page_references = [reference for reference in rendered.references if reference.kind == "page"]
+        self.assertEqual(len(page_references), 1)
+        self.assertEqual(page_references[0].page_id, "123")
+
     def test_unmatched_html_macro_does_not_claim_matching_visible_text(self) -> None:
         rendered = render_page_body(
             "<p>Unique HTML output.</p><p>Following paragraph.</p>",
