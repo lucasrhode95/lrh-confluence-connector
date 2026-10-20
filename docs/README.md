@@ -2,13 +2,14 @@
 
 | Document | Read it for |
 |---|---|
-| [Requirements](requirements.md) | Agreed capabilities, ownership and decisions |
-| [Architecture](architecture.md) | The current implementation and its implemented contracts |
-| [Roadmap](roadmap.md) | Open implementation, decisions and live verification |
-| [API research](api-research.md) | Dated authentication evidence and browser/private API findings |
+| [Architecture](architecture.md) | How the connector is built: processes, layers, rules per module, routing, and the contract of every MCP tool (§8) |
+| [Requirements](requirements.md) | What the connector must do, and the decisions behind it (D1–D10) |
+| [Roadmap](roadmap.md) | Open work: implementation, decisions and live verification |
+| [API research](api-research.md) | Dated evidence of what Atlassian does not document: caps and paging, search tokenization, CQL dates, write, move and trash behavior, and the private web routes |
 
-Start with the [repository README](../README.md). Requirements describe the intended product;
-architecture describes what exists today. The roadmap lists only work still open.
+Diagrams: [architecture](diagrams/architecture.svg) (overview) and [code map](diagrams/code-map.svg)
+(classes and who calls whom; open it in a browser to see the tooltips).
 
-The [research toolkit](../research/README.md) holds executable probes and the
-[UI investigation runbook](../research/ui-runbook.md). Captures stay outside the repository.
+Start with the [repository README](../README.md), then the architecture. The research has one section per
+area, listed in its contents: read the section you need. Probes, the acceptance suite and the UI
+investigation runbook are in the [research tools](../research/README.md).

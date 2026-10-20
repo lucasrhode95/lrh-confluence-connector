@@ -1,61 +1,225 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1790" viewBox="0 0 2600 1790" role="img" aria-labelledby="title description">
   <title id="title">Confluence connector architecture</title>
-  <desc id="desc">The CLI and nineteen-tool MCP surface compose account-bound read, structure, write, export and local-file services through AppContext. Services call the Confluence REST adapter and shared transport. The transport reads the encrypted credential store for each request and uses a single async HTTP client.</desc>
+  <desc id="description">The MCP server (one stdio process per agent session) exposes nineteen tools over one service layer built per account by AppContext. The service validates every input once and calls the remote layer: ConfluenceApi for REST routes and the isolated private page-move action, PageLinkResolver for page references, and ConfluenceTransport for HTTP, retries and account checks. Selected attachments and exports are written to account-specific local folders. The personal access token is stored encrypted with msal-extensions and read for every request; private settings come from confluence_config.json.</desc>
   <defs>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1 11 6 1 11" fill="none" stroke="#61778d" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <style>
-      .title{font:700 32px system-ui,sans-serif;fill:#15283a}.head{font:700 18px system-ui,sans-serif;fill:#15283a}
-      .body{font:400 14px system-ui,sans-serif;fill:#52677b}.label{font:600 13px system-ui,sans-serif;fill:#35536e}
-      .box{fill:#fff;stroke:#c7d4df;stroke-width:1.5}.entry{fill:#edf5fc;stroke:#8db8d8}.core{fill:#f6f3fb;stroke:#b8a9d1}
-      .remote{fill:#eff7f3;stroke:#a8cbbb}.secure{fill:#fff6e9;stroke:#d9bd87}.cloud{fill:#f2f5f8;stroke:#a8b7c5}
-      .line{fill:none;stroke:#61778d;stroke-width:2;marker-end:url(#arrow)}
+      text { font-family: Arial, Helvetica, sans-serif; }
+      .title { fill: #183153; font-size: 50px; font-weight: 700; }
+      .subtitle { fill: #183153; font-size: 30px; }
+      .card-title { fill: #fff; font-size: 30px; font-weight: 700; }
+      .card-subtitle { fill: #c8d8e8; font-size: 20px; }
+      .section-title { fill: #183153; font-size: 24px; font-weight: 700; }
+      .detail { fill: #53677b; font-size: 21px; }
+      .muted { fill: #8496a8; font-size: 20px; font-style: italic; }
+      .code { font-family: "Courier New", Consolas, monospace; font-weight: 700; }
+      .badge { fill: #fff; font-size: 17px; font-weight: 700; }
+      .note-title { fill: #086d68; font-size: 23px; font-weight: 700; }
+      .flow-label { fill: #53677b; font-size: 20px; }
+      .call-flow { fill: none; stroke: #71869b; stroke-width: 2.6; stroke-linecap: square; stroke-linejoin: miter; marker-end: url(#arrow); }
+      .api-flow { fill: none; stroke: #4b7187; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#api-arrow); }
+      .local-flow { fill: none; stroke: #7650a4; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#purple-arrow); }
     </style>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#71869b"/></marker>
+    <marker id="api-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#4b7187"/></marker>
+    <marker id="purple-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#7650a4"/></marker>
   </defs>
-  <rect width="1280" height="760" rx="26" fill="#f6f8fb"/>
-  <text x="52" y="62" class="title">Process and request flow</text>
-  <text x="52" y="92" class="body">Each local MCP process owns one lazy context and one async client. Credentials are loaded only for a request.</text>
 
-  <rect x="55" y="142" width="218" height="132" rx="16" class="box entry"/>
-  <text x="78" y="180" class="head">CLI</text>
-  <text x="78" y="207" class="body"><tspan x="78">auth / sign-out</tspan><tspan x="78" dy="22">status / mcp</tspan></text>
+  <rect width="2600" height="1790" fill="#fff"/>
+  <text class="title" x="1300" y="70" text-anchor="middle">Confluence connector architecture</text>
+  <text class="subtitle" x="1300" y="110" text-anchor="middle">One Data Center account · documented REST first · explicit page writes · nothing indexed or cached</text>
 
-  <rect x="55" y="345" width="218" height="180" rx="16" class="box entry"/>
-  <text x="78" y="383" class="head">MCP surface</text>
-  <text x="78" y="410" class="body"><tspan x="78">auth · spaces · search · users</tspan><tspan x="78" dy="22">tree · metadata · get_pages · trash list</tspan><tspan x="78" dy="22">downloads · exports</tspan><tspan x="78" dy="22">page/draft/structure writes</tspan></text>
+  <!-- MCP surface. -->
+  <rect x="80" y="170" width="1020" height="346" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 244 V184 Q80 170 94 170 H1086 Q1100 170 1100 184 V244 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="203">MCP SERVER</text>
+  <text class="card-subtitle" x="100" y="227"><tspan class="code">confluence-connector mcp</tspan> · one stdio process per agent session</text>
+  <rect x="100" y="260" width="980" height="236" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="detail" x="120" y="292"><tspan class="code">surfaces/mcp_main.py</tspan>: 19 tools, thin declarations, timing logs</text>
+  <text class="detail" x="120" y="324" style="font-size:19px">Read: <tspan class="code">auth_status</tspan> · <tspan class="code">list_spaces</tspan> · <tspan class="code">search_content</tspan> · <tspan class="code">find_users</tspan> · <tspan class="code">get_page_tree</tspan></text>
+  <text class="detail" x="176" y="352" style="font-size:19px"><tspan class="code">get_page_metadata</tspan> · <tspan class="code">get_pages</tspan> · <tspan class="code">list_drafts</tspan> · <tspan class="code">list_trash</tspan></text>
+  <text class="detail" x="120" y="384" style="font-size:19px">Local files: <tspan class="code">download_attachments</tspan> · <tspan class="code">export_pages</tspan></text>
+  <text class="detail" x="120" y="416" style="font-size:19px">Write: <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan> · <tspan class="code">publish_draft</tspan> · <tspan class="code">delete_draft</tspan></text>
+  <text class="detail" x="181" y="444" style="font-size:19px"><tspan class="code">set_labels</tspan> · <tspan class="code">move_page</tspan> · <tspan class="code">delete_page</tspan> · <tspan class="code">restore_page</tspan></text>
+  <text class="muted" x="120" y="480">Started by Claude Code, Codex or Copilot on demand</text>
 
-  <rect x="359" y="235" width="250" height="164" rx="18" class="box core"/>
-  <text x="384" y="274" class="head">AppContext</text>
-  <text x="384" y="303" class="body"><tspan x="384">One account-bound service set</tspan><tspan x="384" dy="22">Rebuilt on username change</tspan><tspan x="384" dy="22">Lazy HTTP client lifecycle</tspan></text>
+  <!-- Design note. -->
+  <rect x="1140" y="170" width="560" height="346" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
+  <text class="note-title" x="1164" y="210">Local and explicit by design</text>
+  <text class="detail" x="1164" y="248">No browser UI, search index, content cache</text>
+  <text class="detail" x="1164" y="276">or background work. <tspan class="code">mcp</tspan>, <tspan class="code">auth</tspan> and <tspan class="code">status</tspan></text>
+  <text class="detail" x="1164" y="304">are short-lived processes. Confluence changes</text>
+  <text class="detail" x="1164" y="332">only when a write tool is called. Trashed</text>
+  <text class="detail" x="1164" y="360">pages stay restorable; <tspan class="code">delete_draft</tspan> is</text>
+  <text class="detail" x="1164" y="388">the only permanent delete. No browser</text>
+  <text class="detail" x="1164" y="416">cookies are reused.</text>
+  <text class="muted" x="1164" y="476">Live acceptance checks are opt-in.</text>
 
-  <rect x="691" y="142" width="250" height="180" rx="16" class="box remote"/>
-  <text x="716" y="180" class="head">Read, write and file services</text>
-  <text x="716" y="207" class="body"><tspan x="716">spaces · search · users</tspan><tspan x="716" dy="22">tree · page metadata · structure</tspan><tspan x="716" dy="22">pages · text · attachments · exports</tspan><tspan x="716" dy="22">page/draft/label writes</tspan></text>
+  <path class="call-flow" d="M590 516 V582"/>
+  <text class="flow-label" x="610" y="556">calls</text>
 
-  <rect x="691" y="345" width="250" height="132" rx="16" class="box remote"/>
-  <text x="716" y="383" class="head">ConfluenceApi</text>
-  <text x="716" y="410" class="body"><tspan x="716">Search, quicknav, user and tree routes</tspan><tspan x="716" dy="22">Maps REST JSON to typed models</tspan><tspan x="716" dy="22">Streams selected attachment downloads</tspan></text>
+  <!-- Service. -->
+  <rect x="80" y="586" width="1620" height="400" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 660 V600 Q80 586 94 586 H1686 Q1700 586 1700 600 V660 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="619">SERVICE</text>
+  <text class="card-subtitle" x="100" y="643"><tspan class="code">service/</tspan> · account-bound services built by <tspan class="code">AppContext</tspan> · every input is validated here, once</text>
 
-  <rect x="1013" y="235" width="220" height="164" rx="18" class="box cloud"/>
-  <text x="1038" y="274" class="head">Confluence DC</text>
-  <text x="1038" y="303" class="body"><tspan x="1038">Configured base URL</tspan><tspan x="1038" dy="22">REST API</tspan><tspan x="1038" dy="22">No cookie extraction</tspan></text>
+  <rect x="100" y="680" width="380" height="220" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="116" y="716">Find</text>
+  <text class="detail" x="116" y="751" style="font-size:19px">• <tspan class="code">search.py</tspan>: literal CQL, cursors</text>
+  <text class="detail" x="116" y="781" style="font-size:19px">• <tspan class="code">cql_dates.py</tspan>: UTC → CQL minutes</text>
+  <text class="detail" x="116" y="811" style="font-size:19px">• <tspan class="code">tree.py</tspan>: ordered, depth ≤ 5</text>
+  <text class="detail" x="116" y="841" style="font-size:19px">• <tspan class="code">metadata.py</tspan>: ≤ 20 pages</text>
+  <text class="detail" x="116" y="871" style="font-size:19px">• <tspan class="code">spaces.py</tspan> · <tspan class="code">users.py</tspan></text>
 
-  <rect x="359" y="535" width="250" height="132" rx="16" class="box secure"/>
-  <text x="384" y="573" class="head">TokenStore</text>
-  <text x="384" y="600" class="body"><tspan x="384">Encrypted PAT + username</tspan><tspan x="384" dy="22">CrossPlatLock</tspan></text>
+  <rect x="500" y="680" width="380" height="220" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="516" y="716">Read</text>
+  <text class="detail" x="516" y="751" style="font-size:19px">• <tspan class="code">pages.py</tspan>: budgets, pinned cursors</text>
+  <text class="detail" x="516" y="781" style="font-size:19px">• <tspan class="code">page_text.py</tspan>: BeautifulSoup</text>
+  <text class="detail" x="532" y="809" style="font-size:19px">+ markdownify, typed references</text>
+  <text class="detail" x="516" y="841" style="font-size:19px">• <tspan class="code">attachments.py</tspan>: same page</text>
+  <text class="detail" x="516" y="871" style="font-size:19px">• <tspan class="code">exports.py</tspan>: ≤ 500 pages, ZIP</text>
 
-  <rect x="691" y="535" width="250" height="132" rx="16" class="box core"/>
-  <text x="716" y="573" class="head">Transport</text>
-  <text x="716" y="600" class="body"><tspan x="716">HTTP/1.1, six connections</tspan><tspan x="716" dy="22">Bounded retries, streaming and account checks</tspan></text>
+  <rect x="900" y="680" width="380" height="220" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="916" y="716">Write</text>
+  <text class="detail" x="916" y="751" style="font-size:19px">• <tspan class="code">writes.py</tspan>: pages, drafts, labels</text>
+  <text class="detail" x="916" y="781" style="font-size:19px">• version check, duplicate titles</text>
+  <text class="detail" x="916" y="811" style="font-size:19px">• <tspan class="code">write_markup.py</tspan>: safe storage</text>
+  <text class="detail" x="916" y="841" style="font-size:19px">• content-loss check on update</text>
+  <text class="detail" x="916" y="871" style="font-size:19px">• stops at the first failed label</text>
 
-  <path d="M273 208h48q26 0 26 27v31" class="line"/>
-  <path d="M273 410h48q26 0 26-27v-27" class="line"/>
-  <path d="M609 280h48q26 0 26-27v-28" class="line"/>
-  <path d="M609 354h48q26 0 26 26v30" class="line"/>
-  <path d="M941 411h42q30 0 30-30v-30" class="line"/>
-  <path d="M609 601h42" class="line"/>
-  <path d="M816 477v34q0 24-25 24h-22" class="line"/>
-  <path d="M741 535v-30q0-28-29-28h-10" class="line"/>
-  <text x="312" y="220" class="label">compose</text>
-  <text x="612" y="521" class="label">credential per request</text>
-  <text x="958" y="399" class="label">HTTPS</text>
+  <rect x="1300" y="680" width="380" height="220" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="1316" y="716">Structure</text>
+  <text class="detail" x="1316" y="751" style="font-size:19px">• <tspan class="code">structure.py</tspan>: move, trash</text>
+  <text class="detail" x="1316" y="781" style="font-size:19px">• permission, subtree preflight</text>
+  <text class="detail" x="1316" y="811" style="font-size:19px">• placement saved as a property</text>
+  <text class="detail" x="1316" y="841" style="font-size:19px">• restore: caller → saved → root</text>
+  <text class="detail" x="1316" y="871" style="font-size:19px">• exact partial results, no undo</text>
+
+  <rect x="100" y="916" width="1580" height="50" fill="#eff8f6"/>
+  <text class="detail" x="118" y="949"><tspan class="code" fill="#086d68">domain/</tspan>: typed models and errors, including <tspan class="code" fill="#086d68">UncertainWrite</tspan>  ·  <tspan class="code" fill="#086d68">cursors.py</tspan>: stateless cursors  ·  <tspan class="code" fill="#086d68">localfiles.py</tspan>: output folders</text>
+
+  <path class="local-flow" d="M340 986 V1052"/>
+  <text class="flow-label" x="360" y="1026">selected files · exports</text>
+  <path class="call-flow" d="M1170 986 V1052"/>
+  <text class="flow-label" x="1190" y="1026">calls</text>
+
+  <!-- Local files. -->
+  <rect x="80" y="1056" width="520" height="340" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 1130 V1070 Q80 1056 94 1056 H586 Q600 1056 600 1070 V1130 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="1089">LOCAL FILES</text>
+  <text class="card-subtitle" x="100" y="1113">downloads and exports only</text>
+  <rect x="100" y="1146" width="480" height="230" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="detail" x="120" y="1181"><tspan class="code">downloads/&lt;account&gt;/</tspan></text>
+  <text class="detail" x="120" y="1211"><tspan class="code">exports/&lt;account&gt;/</tspan></text>
+  <text class="detail" x="120" y="1241">removed after seven days</text>
+  <text class="detail" x="120" y="1271">numbered on a name clash</text>
+  <text class="muted" x="120" y="1325">Not stored: page content, search</text>
+  <text class="muted" x="120" y="1353">results, an index or plaintext tokens</text>
+
+  <!-- Remote. -->
+  <rect x="640" y="1056" width="1060" height="340" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M640 1130 V1070 Q640 1056 654 1056 H1686 Q1700 1056 1700 1070 V1130 Z" fill="#183153"/>
+  <text class="card-title" x="660" y="1089">REMOTE</text>
+  <text class="card-subtitle" x="660" y="1113"><tspan class="code">remote/</tspan> · the only code that knows Confluence routes, JSON and paging</text>
+  <rect x="660" y="1146" width="340" height="230" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="676" y="1181" style="font-size:22px">transport.py</text>
+  <text class="detail" x="676" y="1215" style="font-size:19px"><tspan class="code">ConfluenceTransport</tspan></text>
+  <text class="detail" x="676" y="1243" style="font-size:19px">• HTTP/1.1 · 6 in flight</text>
+  <text class="detail" x="676" y="1269" style="font-size:19px">• reads: 3 attempts, Retry-After</text>
+  <text class="detail" x="676" y="1295" style="font-size:19px">• writes resent only if unsent</text>
+  <text class="detail" x="692" y="1321" style="font-size:19px">or answered 429 / 503</text>
+  <text class="detail" x="676" y="1347" style="font-size:19px">• account checked per response</text>
+  <rect x="1020" y="1146" width="360" height="230" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1036" y="1181" style="font-size:22px">confluence.py</text>
+  <text class="detail" x="1036" y="1215" style="font-size:19px"><tspan class="code">ConfluenceApi</tspan></text>
+  <text class="detail" x="1036" y="1243" style="font-size:19px">• REST routes → typed models</text>
+  <text class="detail" x="1036" y="1269" style="font-size:19px">• <tspan class="code">movepage.action</tspan>, isolated</text>
+  <text class="detail" x="1036" y="1295" style="font-size:19px">• long-task polling ≤ 10 s</text>
+  <text class="detail" x="1036" y="1321" style="font-size:19px">• placement content property</text>
+  <text class="detail" x="1036" y="1347" style="font-size:19px">• streamed attachment bytes</text>
+  <rect x="1400" y="1146" width="280" height="230" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1416" y="1181" style="font-size:22px">links.py</text>
+  <text class="detail" x="1416" y="1215" style="font-size:19px"><tspan class="code">PageLinkResolver</tspan></text>
+  <text class="detail" x="1416" y="1243" style="font-size:19px">• IDs and page URLs</text>
+  <text class="detail" x="1416" y="1269" style="font-size:19px">• <tspan class="code">/x/</tspan> links followed</text>
+  <text class="detail" x="1416" y="1295" style="font-size:19px">• <tspan class="code">/display/</tspan> by title</text>
+  <text class="detail" x="1416" y="1321" style="font-size:19px">• configured host and</text>
+  <text class="detail" x="1432" y="1347" style="font-size:19px">context path only</text>
+
+  <!-- Sign-in. -->
+  <rect x="80" y="1446" width="520" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 1520 V1460 Q80 1446 94 1446 H586 Q600 1446 600 1460 V1520 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="1479">SIGN-IN</text>
+  <text class="card-subtitle" x="100" y="1503"><tspan class="code">confluence-connector auth</tspan></text>
+  <rect x="100" y="1536" width="480" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="detail" x="120" y="1568">Hidden PAT prompt, verified before</text>
+  <text class="detail" x="120" y="1596">it is stored; then CQL timezone</text>
+  <text class="detail" x="120" y="1624">calibration. Tools never prompt.</text>
+  <path class="call-flow" d="M600 1590 H636"/>
+
+  <!-- Tokens and settings. -->
+  <rect x="640" y="1446" width="1060" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M640 1520 V1460 Q640 1446 654 1446 H1686 Q1700 1446 1700 1460 V1520 Z" fill="#183153"/>
+  <text class="card-title" x="660" y="1479">TOKEN AND SETTINGS</text>
+  <text class="card-subtitle" x="660" y="1503">encrypted per-user token · private configuration file · both read in every process</text>
+  <rect x="660" y="1536" width="520" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="676" y="1568" style="font-size:21px"><tspan class="code">auth/store.py</tspan> · <tspan class="code">TokenStore</tspan></text>
+  <text class="detail" x="676" y="1600" style="font-size:19px">PAT + username, <tspan class="code">msal-extensions</tspan></text>
+  <text class="detail" x="676" y="1628" style="font-size:19px"><tspan class="code">CrossPlatLock</tspan> · no plaintext fallback</text>
+  <rect x="1200" y="1536" width="480" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="1216" y="1568" style="font-size:21px"><tspan class="code">config.py</tspan></text>
+  <text class="detail" x="1216" y="1600" style="font-size:19px">private <tspan class="code">confluence_config.json</tspan></text>
+  <text class="detail" x="1216" y="1628" style="font-size:19px"><tspan class="code">cql_timezone</tspan> set by calibration</text>
+  <path class="call-flow" d="M830 1446 V1400"/>
+  <text class="flow-label" x="850" y="1430">token read for every request</text>
+
+  <!-- Confluence. -->
+  <rect x="1900" y="1056" width="620" height="610" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M1900 1130 V1070 Q1900 1056 1914 1056 H2506 Q2520 1056 2520 1070 V1130 Z" fill="#183153"/>
+  <text class="card-title" x="1920" y="1089">CONFLUENCE DATA CENTER</text>
+  <text class="card-subtitle" x="1920" y="1113">configured base URL · the user's personal access token</text>
+
+  <rect x="1920" y="1146" width="580" height="140" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1158" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="1954" y="1177" text-anchor="middle">R</text>
+  <text class="section-title" x="1980" y="1179">REST API (documented)</text>
+  <text class="detail" x="1940" y="1216" style="font-size:18px"><tspan class="code">/rest/api/content</tspan> · <tspan class="code">content/search</tspan> · <tspan class="code">space</tspan></text>
+  <text class="detail" x="1940" y="1244" style="font-size:18px"><tspan class="code">child/…</tspan> · <tspan class="code">label</tspan> · <tspan class="code">property</tspan> · <tspan class="code">longtask</tspan></text>
+  <text class="detail" x="1940" y="1272" style="font-size:18px"><tspan class="code">/download/attachments/…</tspan> · experimental versions</text>
+
+  <rect x="1920" y="1300" width="580" height="112" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1312" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1954" y="1331" text-anchor="middle">P</text>
+  <text class="section-title" x="1980" y="1333">Private web routes</text>
+  <text class="detail" x="1940" y="1366" style="font-size:18px"><tspan class="code">POST /pages/movepage.action</tspan> · moves</text>
+  <text class="detail" x="1940" y="1390" style="font-size:18px"><tspan class="code">/rest/quicknav/1/search</tspan> · title matches</text>
+
+  <rect x="1920" y="1536" width="580" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1548" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="1954" y="1567" text-anchor="middle">R</text>
+  <text class="section-title" x="1980" y="1569">Current user</text>
+  <text class="detail" x="1940" y="1604" style="font-size:18px"><tspan class="code">GET /rest/api/user/current</tspan></text>
+  <text class="detail" x="1940" y="1630" style="font-size:18px">at <tspan class="code">auth</tspan> and <tspan class="code">status --check</tspan></text>
+
+  <path class="api-flow" d="M1700 1216 H1916"/>
+  <text class="flow-label" x="1800" y="1204" text-anchor="middle" style="font-size:18px">REST calls</text>
+  <path class="api-flow" d="M1700 1352 H1916"/>
+  <text class="flow-label" x="1800" y="1340" text-anchor="middle" style="font-size:18px">moves, titles</text>
+  <path class="call-flow" d="M1700 1591 H1916"/>
+  <text class="flow-label" x="1800" y="1579" text-anchor="middle" style="font-size:18px">verify the PAT</text>
+
+  <!-- Legend. -->
+  <rect x="80" y="1716" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="96" y="1735" text-anchor="middle">R</text>
+  <text class="flow-label" x="122" y="1736">documented REST</text>
+  <rect x="320" y="1716" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="336" y="1735" text-anchor="middle">P</text>
+  <text class="flow-label" x="362" y="1736">private web route</text>
+  <path class="api-flow" d="M570 1729 H640"/>
+  <text class="flow-label" x="652" y="1736">API call over HTTPS</text>
+  <path class="local-flow" d="M900 1729 H970"/>
+  <text class="flow-label" x="982" y="1736">local write</text>
+  <path class="call-flow" d="M1150 1729 H1220"/>
+  <text class="flow-label" x="1232" y="1736">call / dependency (points to the callee)</text>
+  <text class="flow-label" x="1900" y="1736">The surface never calls <tspan class="code">remote/</tspan> directly.</text>
 </svg>
