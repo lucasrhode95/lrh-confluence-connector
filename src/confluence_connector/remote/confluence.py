@@ -46,6 +46,7 @@ DRAFT_PAGE_SIZE = 100
 TRASH_PAGE_SIZE = 100
 LONGTASK_MAX_POLLS = 40
 LONGTASK_POLL_INTERVAL_SECONDS = 0.25
+LONGTASK_MAX_WAIT_SECONDS = 10.0
 PLACEMENT_PROPERTY_KEY = "lrh-confluence-connector-placement"
 
 
@@ -685,11 +686,16 @@ class ConfluenceApi:
         if not has_task:
             raise UncertainWrite("Confluence accepted a move without a usable long-task ID; inspect the page.")
         try:
-            await self._wait_for_long_task(payload["longTaskId"], expected_username=expected_username)
+            async with asyncio.timeout(LONGTASK_MAX_WAIT_SECONDS):
+                await self._wait_for_long_task(payload["longTaskId"], expected_username=expected_username)
         except _LongTaskFailure:
             raise
         except UncertainWrite:
             raise
+        except TimeoutError:
+            raise UncertainWrite(
+                "Confluence's page move is still pending; inspect the page before retrying."
+            ) from None
         except ConnectorError:
             raise UncertainWrite(
                 "Confluence accepted the page move, but its completion could not be confirmed; inspect before retrying."

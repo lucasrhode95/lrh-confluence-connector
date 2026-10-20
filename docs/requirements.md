@@ -209,12 +209,12 @@ automatically download attachments.
 ## 6. Page and draft management
 
 Daily-use readiness requires search, full reads, tree access, page moves, and create/read/update/delete
-operations for drafts and published pages. Page and draft writes are implemented locally; page moves,
-trash operations and live acceptance remain open.
+operations for drafts and published pages. Page and draft management is implemented locally; live
+acceptance remains open.
 
 D5–D10 below settle body formats, edits, undocumented routes, placement, moves, deletion and the
-page/draft write interface. Drafts are new-page drafts only. Trash restore remains open
-([roadmap](roadmap.md)). Purge stays excluded. Test writes only against disposable synthetic pages.
+page/draft write interface. Drafts are new-page drafts only. Purge stays excluded. Test writes only
+against disposable synthetic pages.
 
 **Decided 2026-10-19 (D9), deleting a page with children:** `delete_page` moves pages to the trash
 with the documented `DELETE`, never purges, and takes `children`:
@@ -244,7 +244,16 @@ whether it was deleted through REST or the UI, and restoring needs space-admin r
   page stays at the space root. The property is removed after a successful restore where possible. The
   result states where each page ended up and why.
 - `list_trash` lists trashed pages per space or across all visible spaces (title, space, last edit,
-  page ID). Confluence does not expose when or by whom a page was deleted.
+  page ID). It accepts a page size from 1 to 100 and a stateless cursor bounded to offset 1,000,000.
+  Confluence does not expose when or by whom a page was deleted.
+- `delete_page` fully counts a subtree before `children=trash`, refuses more than 100 pages, and
+  refuses a hierarchy larger than the 5,000-page read safety cap before any write. For a refused
+  trash subtree between those limits, the error includes its exact page count. `move_up` preserves
+  direct-child order by reparenting in the order returned by Confluence.
+- Multi-step delete results list each affected page's former parent and numeric sibling position
+  when Confluence returns it. Status distinguishes completed trash or reparent operations, an
+  uncertain write, and steps not attempted after a failure. The connector never undoes completed
+  operations automatically.
 
 **Decided 2026-10-19 (D5), body formats**, mirroring the Outlook connector's text-or-HTML bodies:
 
