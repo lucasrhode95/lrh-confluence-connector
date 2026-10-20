@@ -36,12 +36,104 @@ Comment and attachment writes are not in the requirements and are not proposed h
 - Live acceptance for every page, draft and structure write remains pending. Shared retry and
   uncertain-write behavior is implemented and has offline tests.
 
-### Deferred review findings
+### Review findings (2026-10-20)
 
-P2 review findings left open when their PR was merged, for the final pass. Group related items into
-design fixes rather than one patch each.
+From whole-project reviews of `e67b60d` by Codex and Claude, plus PR #6's open review findings.
+Group related items into design fixes rather than one patch each.
 
-None open.
+**Bugs**, highest first:
+
+- [P1] Paging can stop before delete preflight reads the whole subtree: child-page mapping drops
+  `_links.next` and traversal treats a page under 500 as final, so `children=trash` can report success
+  while leaving descendants behind. Space listing has the same assumption. Keep the continuation
+  signal and advance on actual `start + size` (`service/structure.py`, `remote/confluence.py`).
+- [P2] Search: a term with inner punctuation (`ci-cd`, `release/notes`) is matched as either half,
+  not as one term. Live 2026-10-20: `ci-cd` matched 2,160 pages, `"ci-cd"` 482. Quote such terms in
+  `match: "all"` and `"any"` (`service/search.py`).
+- [P2] External attachment links can take a local attachment's identity: attachment classification
+  and filename matching run before origin validation, and included-page attachments are ambiguous
+  the same way. Validate origin and owner first (`service/page_text.py`).
+- [P2] `set_labels` can silently skip a removal when labels are paginated: metadata reads only the
+  first expanded labels page, so an unseen label counts as absent. Read the full label set or stop
+  claiming absence (`remote/confluence.py`).
+- [P2] Moving to the space root depends on the unverified `ancestors: []`; with position `first` and
+  no siblings it is the only write, so the result can claim a move that did not happen. Use
+  `movepage.action` with `topLevel`, or verify live first; the test asserting the empty list then
+  changes (`remote/confluence.py`, `service/structure.py`).
+- [P2] Timezone calibration assumes the sample page is not edited during the search; one concurrent
+  edit made a UTC instance measure `UTC+00:01`, which would then be written to the config. Re-read the
+  sample's timestamp and retry or abandon on change (`service/timezone_calibration.py`).
+- [P2] A malformed credential record also blocks `auth --sign-out`, because sign-out decodes the
+  record before clearing it. Let sign-out clear it, keeping encryption and locking (`auth/store.py`).
+- [P2] A malformed URL (`https://[broken`) raises `ValueError` from `urlsplit`, so one bad reference
+  aborts a whole batch. Convert it to `InvalidRequest` (`remote/links.py`).
+- [P2] Acceptance setup cannot create its root fixture: the fixture body includes the HTML macro,
+  which the write service refuses. Make the fixture match the write contract and handle refused
+  cases explicitly (`research/acceptance_fixtures.py`).
+- [P2] The live move and order check passes even when positioning fails: it reads the returned parent
+  but never the sibling order, and cross-space checks trust the service's reported target. Re-read
+  metadata and ordered children independently before cleanup (`research/run_acceptance.py`).
+- [P2] Page text, from PR #6: rendered Jira content becomes `[Unrendered macro: jira]` when there is
+  no storage key (storage disabled, or a macro in an included page); images with only
+  `data-linked-resource-filename` lose their filename; links whose ID is only in `data-page-id` lose
+  their page reference; a code line starting with ``` or `~~~` can split one code block into two
+  budget blocks (`service/page_text.py`).
+- [P3] `delete_page` reports definite failures as `not_attempted`; use `failed`, keeping `unknown`
+  for uncertain outcomes (`service/structure.py`).
+- [P3] The missing-`cql_timezone` error says to run `status --check`, but running MCP processes cache
+  the config; also say to restart the MCP client (`service/cql_dates.py`).
+- [P3, POSIX] A single-file export replaces the owner-only claimed file with a staging file written
+  under the normal umask, so it can end up `0644` (`service/exports.py`).
+
+**Simplification and efficiency:**
+
+- Same-space moves make two writes by default: position defaults to `last`, so `movepage.action` runs
+  after every documented parent change, adding a page version and a failure point. Use one route per
+  move (decide with the user, since D7 named the documented route for parent changes).
+- Unify page-reference validation, space-key validation, the current-page check, the account-error
+  passthrough, filename sanitization (attachments and exports), `_cql_literal` and same-instance URL
+  parsing (`remote/links.py`, `remote/confluence.py`, `service/page_text.py`). These are repeated
+  across services and already differ in control-character handling and errors.
+- Share placement resolution between create, move and restore (`_Placement`/`_create_placement` and
+  `PagePlacement`/`_resolve_placement`).
+- Replace the hand-written `HTMLParser` in `service/write_markup.py` (362 lines) with BeautifulSoup,
+  already a dependency, as was done for page text.
+- Parse storage once per page instead of separately for macros and references, and skip Markdown
+  conversion for `rich` reads, whose output is the storage body.
+- Merge the duplicated retry loop of `ConfluenceTransport.download_to` into `_exchange`.
+- Remove dead paths: the unused helper in `service/writes.py`, the unreachable ownership branch in
+  `bootstrap.py`, and the unneeded `async` on `_nodes_for_children`.
+- Add a lightweight undefined-name check (for example `pyflakes`) to the documented checks:
+  `service/pages.py` raises `Upstream` without importing it, which compilation does not catch.
+
+**Tests:**
+
+- Replace the acceptance-fixture tests that only check macro names with a fake-transport run of the
+  setup's real write path (it would have caught the fixture bug above).
+- Turn similar cases into tables: uncertain-write outcomes (timeout, oversized 2xx, oversized 5xx,
+  5xx) and account changes after a write (`test_remote.py`); label partial failures (ordinary,
+  account change, uncertain) and draft cursors (`test_writes_service.py`); config precedence
+  (`test_config.py`); MCP tool round-trips in `test_app.py`, moving the export attachment-reuse case
+  to the exports tests.
+- Remove the trash assertions duplicated in the omnibus route test (`test_write_remote.py` keeps its
+  focused trash test) and assertions that only inspect embedded constants, such as the fixture PNG's
+  signature.
+- Keep the golden renderer output, typed-reference checks, account-boundary checks and
+  uncertain-write checks.
+
+**Documentation:**
+
+- README: the architecture link points to a missing `#6-mcp-tools` anchor.
+- Requirements: historical reads are called later work although versioned body reads exist; the
+  transport decision says six requests per tool call and a client rebuilt on account change, while
+  the code shares one process-wide limit of six and keeps the transport.
+- Roadmap: token-lifecycle checks still wait on D1, which is built, and completed implementation is
+  repeated as open work. Validations mixes settled implementation choices with real live checks;
+  keep only what needs live verification and move contract details to the architecture.
+- `research/README.md` calls the configuration loader stdlib-only, but it now imports
+  `msal_extensions`.
+- Keep `requirements.md` (434 lines) direct and summarized: fold the dated restatements into the
+  current rules.
 
 ## Decisions
 
