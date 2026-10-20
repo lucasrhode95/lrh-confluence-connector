@@ -151,8 +151,8 @@ status, expand blocks, links and pipe tables; panel children are rendered as blo
 paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
 indent continuation lines, including nested-list indentation through whitespace cleanup. Pipe-table
 rows remain separate budget blocks and use single newlines to preserve Markdown table syntax. Complex
-table fallbacks emit one minimal-HTML block per outer row, preserving
-image, macro and link markers plus their typed references. Attachment and image identity is mapped from
+table fallbacks emit one minimal-HTML block per outer row, preserving block boundaries in cells and
+image, macro and link markers with their typed references. Attachment and image identity is mapped from
 source fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.

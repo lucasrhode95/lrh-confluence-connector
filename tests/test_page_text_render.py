@@ -70,14 +70,18 @@ class PageTextRenderingChecks(unittest.TestCase):
 
     def test_nested_table_or_code_cell_uses_minimal_html_fallback(self) -> None:
         rendered = render_page_body(
-            "<table><tr><th>Heading</th><td><pre><code>x &lt; y</code></pre></td></tr></table>",
+            "<table><tr><th>Heading</th><td><pre><code>x &lt; y</code></pre></td>"
+            "<td><p>First paragraph</p><p>Second paragraph</p></td></tr></table>",
             "",
             page_id="55",
             attachments=[],
         )
         self.assertEqual(
             [block.text for block in rendered.blocks],
-            ["<table><tr><th>Heading</th><td>x &lt; y</td></tr></table>"],
+            [
+                "<table><tr><th>Heading</th><td>x &lt; y</td>"
+                "<td><p>First paragraph</p><p>Second paragraph</p></td></tr></table>"
+            ],
         )
 
     def test_complex_table_fallback_preserves_image_and_macro_markers(self) -> None:
@@ -358,6 +362,25 @@ class PageTextRenderingChecks(unittest.TestCase):
             [block.text for block in rendered.blocks],
             ["• Parent", "  • Child first.", "    Child second."],
         )
+
+    def test_list_item_preserves_parent_content_order_around_nested_list(self) -> None:
+        rendered = render_page_body(
+            '<ul><li><p>Before</p><ul><li><a href="/spaces/SYNTH/pages/84/Target">Nested</a></li>'
+            '</ul><p>After</p></li></ul>',
+            "",
+            page_id="55",
+            base_url="https://confluence.example.test/wiki",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            [
+                "• Before",
+                "  • [Nested](/wiki/spaces/SYNTH/pages/84/Target)",
+                "  After",
+            ],
+        )
+        self.assertEqual(rendered.blocks[1].references[0].page_id, "84")
 
     def test_macros_inside_resolved_includes_do_not_consume_local_metadata(self) -> None:
         rendered = render_page_body(

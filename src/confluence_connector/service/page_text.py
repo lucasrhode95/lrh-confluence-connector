@@ -13,6 +13,9 @@ from confluence_connector.domain.models import PageAttachment, PageReference
 _VOID_TAGS = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 )
+_MINIMAL_BLOCK_TAGS = frozenset(
+    {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "ul"}
+)
 _WHITESPACE = re.compile(r"[\t\r\n\f\v ]+")
 _HORIZONTAL_WHITESPACE = re.compile(r"[\t\r\f\v ]+")
 _INTEGER_ATTRIBUTE = re.compile(r"[+-]?\d+\Z")
@@ -417,26 +420,41 @@ def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list
         if not isinstance(child, _Node) or child.tag != "li":
             blocks.extend(_render_blocks(child, context))
             continue
-        nested_lists = [item for item in child.children if isinstance(item, _Node) and item.tag in {"ol", "ul"}]
-        text, refs = _list_item_content(
-            [item for item in child.children if item not in nested_lists], context
-        )
         item_number = _integer_attr(child.attrs.get("value"), default=index) if ordered else index
         marker = f"{item_number}. " if ordered else "• "
-        if text.strip():
+        item_has_started = False
+        segment: list[_Node | str] = []
+
+        def flush_item_segment() -> None:
+            nonlocal item_has_started
+            if not segment:
+                return
+            text, references = _list_item_content(segment, context)
+            segment.clear()
+            if not text.strip():
+                return
             lines = text.strip().splitlines()
             continuation_indent = " " * len(marker)
-            item_text = marker + lines[0]
+            first_prefix = marker if not item_has_started else continuation_indent
+            item_text = first_prefix + lines[0]
             for line in lines[1:]:
                 item_text += "\n" + (continuation_indent + line if line else "")
-            blocks.append(_block(item_text, refs))
-        for nested in nested_lists:
-            nested_blocks = _render_list(nested, context, ordered=nested.tag == "ol")
-            blocks.extend(
-                _block("  " + line, item.references)
-                for item in nested_blocks
-                for line in item.text.splitlines()
-            )
+            blocks.append(_block(item_text, references))
+            item_has_started = True
+
+        for item_child in child.children:
+            if isinstance(item_child, _Node) and item_child.tag in {"ol", "ul"}:
+                flush_item_segment()
+                nested_blocks = _render_list(item_child, context, ordered=item_child.tag == "ol")
+                for nested_block in nested_blocks:
+                    blocks.extend(
+                        _block("  " + line, nested_block.references)
+                        for line in nested_block.text.splitlines()
+                    )
+                item_has_started = item_has_started or bool(nested_blocks)
+                continue
+            segment.append(item_child)
+        flush_item_segment()
         index = item_number + 1
     return blocks
 
@@ -882,12 +900,32 @@ def _minimal_cell_content(node: _Node, context: _RenderContext) -> tuple[str, tu
                 parts.append(escape(text))
                 references.extend(child_references)
             elif child.tag == "br":
-                parts.append(" ")
+                parts.append("<br>")
+            elif child.tag == "hr":
+                parts.append("<hr>")
+            elif child.tag in _MINIMAL_BLOCK_TAGS:
+                content, child_references = _minimal_cell_content(child, context)
+                attribute = _minimal_block_attribute(child)
+                parts.append(f"<{child.tag}{attribute}>{content}</{child.tag}>")
+                references.extend(child_references)
             else:
                 content, child_references = _minimal_cell_content(child, context)
                 parts.append(content)
                 references.extend(child_references)
     return "".join(parts).strip(), tuple(_unique_references(references))
+
+
+def _minimal_block_attribute(node: _Node) -> str:
+    if node.tag == "ol":
+        name = "start"
+    elif node.tag == "li":
+        name = "value"
+    else:
+        return ""
+    value = node.attrs.get(name)
+    if value is None or not _INTEGER_ATTRIBUTE.fullmatch(value.strip()):
+        return ""
+    return f' {name}="{escape(value.strip(), quote=True)}"'
 
 
 def _pipe_row(cells: list[str]) -> str:
