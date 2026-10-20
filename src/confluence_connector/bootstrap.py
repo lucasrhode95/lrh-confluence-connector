@@ -21,6 +21,7 @@ from confluence_connector.service.metadata import PageMetadataService
 from confluence_connector.service.pages import PageTextService
 from confluence_connector.service.search import ContentSearch
 from confluence_connector.service.spaces import SpaceService
+from confluence_connector.service.structure import PageStructure
 from confluence_connector.service.timezone_calibration import (
     CqlTimezoneCalibration,
     calibrate_cql_timezone as _calibrate_cql_timezone,
@@ -46,6 +47,7 @@ class Services:
     attachments: AttachmentDownloads
     exports: PageExports
     writes: PageWrites
+    structure: PageStructure
 
 
 class AppContext:
@@ -147,6 +149,7 @@ class AppContext:
             attachments=attachments,
             exports=PageExports(api, links, pages, attachments, username),
             writes=PageWrites(api, links, username, str(self.settings["base_url"])),
+            structure=PageStructure(api, links, username),
         )
 
     def _api(self) -> ConfluenceApi:

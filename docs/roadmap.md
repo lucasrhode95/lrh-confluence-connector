@@ -23,10 +23,6 @@ write tool also waits on V2, because writes were verified only through a browser
 | `publish_draft` | Publish a new-page draft, keeping its ID | Implemented locally; live acceptance pending |
 | `list_drafts` | The user's new-page drafts | Implemented locally; live acceptance pending |
 | `delete_draft` | Permanently delete a new-page draft (bypasses the trash) | Implemented locally; live acceptance pending |
-| `move_page` | Move to a target space, parent (or space root) and optional position, as one call | Ready |
-| `delete_page` | Trash a page after a per-page `delete` check, with `children`: refuse (default), `move_up` or `trash`; reports former placement and a one-way warning | Ready |
-| `list_trash` | Trashed pages per space or across visible spaces | Ready |
-| `restore_page` | Restore, then place: caller placement, else stored property (best effort), else space root | Ready |
 | `set_labels` | Add or remove page labels | Implemented locally; live acceptance pending |
 
 Comment and attachment writes are not in the requirements and are not proposed here.
@@ -35,9 +31,8 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 - Acceptance fixture setup script and live checks per [requirements §8](requirements.md#8-reliability-and-acceptance),
   mirrored by offline tests with synthetic fake responses.
-- Remaining move, delete, trash and restore routes and adapters, including long-task polling,
-  hierarchy caps, 409 conflicts and partial-failure results. Shared retry and uncertain-write
-  behavior is implemented and has offline tests.
+- Live acceptance for every page, draft and structure write remains pending. Shared retry and
+  uncertain-write behavior is implemented and has offline tests.
 
 ### Deferred review findings
 
@@ -89,6 +84,15 @@ in the personal space, including a rich-text sample page.
   for a space root, top-level pages are level 1. A result is capped at 1,000 pages; the cap is
   intended to prevent oversized MCP responses. Space keys accept letters, digits, underscores and
   hyphens, up to 255 characters.
+- Structure writes have offline coverage only. During user-run acceptance, verify same-space parent
+  changes, first/last and before/after ordering, cross-space long-task completion/failure, delete
+  operation preflight, trash permission warnings, property persistence across trash, and restore
+  placement fallbacks. The implementation reads up to 5,000 pages in a hierarchy or direct child
+  list before it stops without writing; confirm that read cap is practical on the configured
+  instance. Cross-space move status is polled up to 40 times at 250 ms intervals and a 10-second
+  wall-clock bound; confirm the instance's terminal long-task fields and that the wait is practical.
+  Trash listing uses 100 rows per request, a
+  1,000,000 offset cap and stateless cursors; confirm paging totals and visible-space coverage.
 - `get_page_metadata` accepts up to 20 references and returns successful records alongside per-page
   failures. Each record lists up to 5,000 experimental versions (200 per request) and reports when
   that cap truncates history. Metadata reports the current page and rejects versioned references;
