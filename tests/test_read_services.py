@@ -83,14 +83,14 @@ class PageTreeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.total_pages, 2)
 
     async def test_space_root_accepts_a_personal_space_key_prefix(self) -> None:
-        api = _ReadApi(space_roots={"~sample-user": [_hit("1", "Top")]})
+        api = _ReadApi(space_roots={"~sample.user@example.test": [_hit("1", "Top")]})
 
         result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(
-            space_key="~sample-user", max_depth=1
+            space_key="~sample.user@example.test", max_depth=1
         )  # type: ignore[arg-type]
 
         self.assertEqual([node.page_id for node in result.children], ["1"])
-        self.assertEqual(api.space_root_calls[0][0], "~sample-user")
+        self.assertEqual(api.space_root_calls[0][0], "~sample.user@example.test")
 
     async def test_invalid_tree_roots_fail_before_api_calls(self) -> None:
         api = _ReadApi()
