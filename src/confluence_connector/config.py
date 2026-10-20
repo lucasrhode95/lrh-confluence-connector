@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = ROOT / "confluence_config.json"
 CONFIG_PATH = Path(os.environ.get("CONFLUENCE_CONFIG", str(DEFAULT_CONFIG_PATH)))
 _selected_path = CONFIG_PATH.resolve()
+_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_-]{1,254})$")
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -92,9 +93,11 @@ def write_cql_timezone_if_missing(value: str, path: Path | None = None) -> bool:
 def _validate_settings(settings: object) -> None:
     """Validate configuration once at the file boundary before callers trust its values."""
     required = {"base_url", "query", "form_auth_path", "endpoints"}
-    if not isinstance(settings, dict) or set(settings) not in (required, required | {"cql_timezone"}):
+    optional = {"cql_timezone", "acceptance"}
+    if not isinstance(settings, dict) or not required <= set(settings) or set(settings) - required - optional:
         raise SystemExit(
-            "Configuration must contain base_url, query, form_auth_path, endpoints and optional cql_timezone."
+            "Configuration must contain base_url, query, form_auth_path, endpoints and only the optional "
+            "cql_timezone and acceptance settings."
         )
     cql_timezone = settings.get("cql_timezone")
     if cql_timezone is not None:
@@ -102,6 +105,13 @@ def _validate_settings(settings: object) -> None:
             parse_cql_timezone(cql_timezone)
         except ValueError:
             raise SystemExit("cql_timezone must be a valid IANA name or UTC±HH:MM fixed offset.") from None
+    acceptance = settings.get("acceptance")
+    if acceptance is not None:
+        if not isinstance(acceptance, dict) or set(acceptance) - {"personal_space_key", "cross_space_key"}:
+            raise SystemExit("acceptance may contain only personal_space_key and cross_space_key.")
+        for key, value in acceptance.items():
+            if value is not None and (not isinstance(value, str) or not _SPACE_KEY.fullmatch(value)):
+                raise SystemExit(f"acceptance.{key} must be a valid space key or null.")
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None
     if (

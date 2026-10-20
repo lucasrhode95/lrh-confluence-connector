@@ -31,6 +31,33 @@ Form mode makes one transient login attempt against the configured undocumented 
 cookie replay. Nothing persists and no login attempt is retried. Form mode requires authorization
 for that login; it is not part of routine checks or the product authentication path.
 
+## Synthetic acceptance fixture
+
+Both commands require `--config PATH`. Preview mode is offline. Setup only creates or refreshes
+synthetic fixture pages, attachments, a label and footer comments when passed `--apply`:
+
+```powershell
+uv run python research/setup_acceptance.py --config ./confluence_config.json --run-id deadbeef
+uv run python research/setup_acceptance.py --config ./confluence_config.json --run-id deadbeef --apply
+```
+
+The setup output includes a run ID. Add one inline comment to the root page in the Confluence UI,
+then preview and, when explicitly authorized, run the live checks with that same ID:
+
+```powershell
+uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef
+uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef --run-live
+uv run python research/run_acceptance.py --config ./confluence_config.json --run-id deadbeef --run-live --allow-writes
+```
+
+The fixture is restricted to `acceptance.personal_space_key`; cross-space checks require a distinct,
+visible `acceptance.cross_space_key`. Live checks download synthetic attachments and create local
+exports. Page, draft, label, move, trash and restore writes run only when `--allow-writes` is also
+passed. Inspect any partial fixture after an interrupted run before retrying. The runner reports
+fixed check labels, statuses, timings and exception types; it omits response text and page content.
+
+Do not run either live mode without explicit authorization for those configured requests.
+
 ## Investigation rules
 
 - Run live reads/writes only with explicit authorization for those actions and configured targets.
@@ -51,6 +78,21 @@ for that login; it is not part of routine checks or the product authentication p
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
 uv run python research/probe_auth.py --help
+uv run python research/setup_acceptance.py --help
+uv run python research/run_acceptance.py --help
 ```
 
 Tests use synthetic settings and fake HTTP responses; they never contact Confluence.
+
+The offline suite mirrors the live acceptance groups:
+
+| Acceptance area | Offline coverage |
+|---|---|
+| Fixture creation, explicit opt-in and sanitized reporting | `tests/test_acceptance_setup.py` |
+| Search modes, scope, date conversion, cursors and quick navigation | `tests/test_search.py`, `tests/test_cql_dates.py`, `tests/test_timezone_calibration.py` |
+| Spaces, users, page trees and metadata | `tests/test_read_services.py`, `tests/test_read_remote.py` |
+| Text/rich reads, comments, typed references, versions and continuations | `tests/test_page_text_render.py`, `tests/test_pages_service.py`, `tests/test_read_remote.py` |
+| Attachment downloads, export layout and local files | `tests/test_attachments_service.py`, `tests/test_exports_service.py`, `tests/test_localfiles.py` |
+| Page, draft and label writes, conflicts and content safeguards | `tests/test_writes_service.py`, `tests/test_write_remote.py`, `tests/test_write_markup.py` |
+| Move, ordering, trash and restore outcomes | `tests/test_structure_service.py`, `tests/test_write_remote.py` |
+| Retries, account isolation and concurrent request behavior | `tests/test_remote.py`, `tests/test_app.py`, `tests/test_auth_store.py` |
