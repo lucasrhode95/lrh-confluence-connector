@@ -159,7 +159,7 @@ uv run python -m compileall -q src research tests
 uv run python research/probe_auth.py --help
 ```
 
-Logs: each process writes a daily-rotated file under `<data directory>/logs/`, kept for seven days. Set
+Logs: each `mcp` process writes a daily-rotated file under `<data directory>/logs/`, kept for seven days. Set
 `CONFLUENCE_CONNECTOR_LOG_LEVEL=DEBUG` for more detail ([architecture §7](docs/architecture.md#7-data-and-identity)).
 
 Project references: [documentation index](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [API research](docs/api-research.md) · [open roadmap](docs/roadmap.md) · [research toolkit](research/README.md).
