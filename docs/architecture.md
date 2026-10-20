@@ -153,8 +153,8 @@ and panel content keep inline runs together and split around block children, wit
 paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
 indent continuation lines, including nested-list indentation through whitespace cleanup while keeping
 multiline nested items in one block. Pipe-table rows remain separate budget blocks and use single
-newlines to preserve Markdown table syntax. Complex
-table fallbacks emit one minimal-HTML block per outer row, preserving block boundaries in cells and
+newlines to preserve Markdown table syntax. Complex table fallbacks emit one minimal-HTML block per outer
+row, preserving block boundaries within cells and preformatted code wrappers and whitespace. They retain
 image, macro and link markers with their typed references. Attachment and image identity is mapped from
 source fields before markers are rendered. Page-typed linked-resource anchors bypass attachment mapping;
 their source page IDs and visible labels are retained by the link mapper, with the current page as owner.

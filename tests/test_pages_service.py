@@ -112,8 +112,8 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.content_calls[-1], ("55", 7))
 
     async def test_complex_table_cursor_continues_at_the_next_outer_row(self) -> None:
-        first_row = "<table><tr><td>first code</td><td>First row</td></tr></table>"
-        second_row = "<table><tr><td>second code</td><td>Second row</td></tr></table>"
+        first_row = "<table><tr><td><pre>first code</pre></td><td>First row</td></tr></table>"
+        second_row = "<table><tr><td><pre>second code</pre></td><td>Second row</td></tr></table>"
         page = _page(
             "55",
             4,

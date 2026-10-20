@@ -14,7 +14,7 @@ _VOID_TAGS = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 )
 _MINIMAL_BLOCK_TAGS = frozenset(
-    {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "ul"}
+    {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "pre", "ul"}
 )
 _WHITESPACE = re.compile(r"[\t\r\n\f\v ]+")
 _HORIZONTAL_WHITESPACE = re.compile(r"[\t\r\f\v ]+")
@@ -951,7 +951,12 @@ def _table_rows(node: _Node) -> list[_Node]:
     return rows
 
 
-def _minimal_cell_content(node: _Node, context: _RenderContext) -> tuple[str, tuple[PageReference, ...]]:
+def _minimal_cell_content(
+    node: _Node,
+    context: _RenderContext,
+    *,
+    preserve_whitespace: bool = False,
+) -> tuple[str, tuple[PageReference, ...]]:
     parts: list[str] = []
     references: list[PageReference] = []
     for child in node.children:
@@ -967,19 +972,30 @@ def _minimal_cell_content(node: _Node, context: _RenderContext) -> tuple[str, tu
                 parts.append(escape(text))
                 references.extend(child_references)
             elif child.tag == "br":
-                parts.append("<br>")
+                parts.append("\n" if preserve_whitespace else "<br>")
             elif child.tag == "hr":
                 parts.append("<hr>")
             elif child.tag in _MINIMAL_BLOCK_TAGS:
-                content, child_references = _minimal_cell_content(child, context)
+                content, child_references = _minimal_cell_content(
+                    child,
+                    context,
+                    preserve_whitespace=preserve_whitespace or child.tag == "pre",
+                )
                 attribute = _minimal_block_attribute(child)
                 parts.append(f"<{child.tag}{attribute}>{content}</{child.tag}>")
                 references.extend(child_references)
             else:
-                content, child_references = _minimal_cell_content(child, context)
+                content, child_references = _minimal_cell_content(
+                    child,
+                    context,
+                    preserve_whitespace=preserve_whitespace,
+                )
                 parts.append(content)
                 references.extend(child_references)
-    return "".join(parts).strip(), tuple(_unique_references(references))
+    content = "".join(parts)
+    if not preserve_whitespace:
+        content = content.strip()
+    return content, tuple(_unique_references(references))
 
 
 def _minimal_block_attribute(node: _Node) -> str:

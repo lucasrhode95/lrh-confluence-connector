@@ -120,7 +120,7 @@ source-provided descriptions. Markers let an agent request a particular attachme
   and ordered items retain their numbering. Images and macros in cells use their normal markers.
   Merged cells repeat their value into each covered cell, with a `[Table: merged cells repeated]`
   note. Only tables with nested tables or code blocks in cells fall back to minimal HTML, preserving
-  safe block tags and source list-number attributes within cells.
+  safe block tags, source list-number attributes, and preformatted code whitespace within cells.
 - Markers sit where the item appears in the body: `[Image: filename — alt text]`, `[File: filename]`,
   `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source, and
   `[Unrendered macro: name]`. HTML-macro scripts are not emitted.

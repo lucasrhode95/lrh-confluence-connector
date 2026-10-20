@@ -70,7 +70,7 @@ class PageTextRenderingChecks(unittest.TestCase):
 
     def test_nested_table_or_code_cell_uses_minimal_html_fallback(self) -> None:
         rendered = render_page_body(
-            "<table><tr><th>Heading</th><td><pre><code>x &lt; y</code></pre></td>"
+            "<table><tr><th>Heading</th><td><pre><code>  x &lt; y\n    second line\n</code></pre></td>"
             "<td><p>First paragraph</p><p>Second paragraph</p></td></tr></table>",
             "",
             page_id="55",
@@ -79,7 +79,7 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertEqual(
             [block.text for block in rendered.blocks],
             [
-                "<table><tr><th>Heading</th><td>x &lt; y</td>"
+                "<table><tr><th>Heading</th><td><pre>  x &lt; y\n    second line\n</pre></td>"
                 "<td><p>First paragraph</p><p>Second paragraph</p></td></tr></table>"
             ],
         )
