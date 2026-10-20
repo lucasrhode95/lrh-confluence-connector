@@ -418,7 +418,20 @@ class PageTextRenderingChecks(unittest.TestCase):
         )
         self.assertEqual(
             [block.text for block in rendered.blocks],
-            ["• Parent", "  • Child first.", "    Child second."],
+            ["• Parent", "  • Child first.\n\n    Child second."],
+        )
+
+    def test_nested_list_keeps_explicit_line_break_in_one_block(self) -> None:
+        rendered = render_page_body(
+            "<ul><li>Parent<ul><li>Child first<br>Child second</li></ul></li></ul>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["• Parent", "  • Child first\n    Child second"],
         )
 
     def test_list_item_preserves_parent_content_order_around_nested_list(self) -> None:

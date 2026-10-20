@@ -236,6 +236,11 @@ class PageTextService:
                         max_chars=max_chars,
                         parse_scope=parse_scope.model_dump(mode="json"),
                     )
+                    if len(cursor) > cursors.MAX_CURSOR_CHARS:
+                        raise InvalidRequest(
+                            "The get_pages continuation cursor exceeds the supported size; "
+                            "submit fewer pages or use a larger max_chars budget."
+                        )
                     return PageReadResult(
                         pages=records,
                         remaining=[request.page_id, *(item.reference for item in remaining)],

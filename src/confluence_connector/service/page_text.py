@@ -482,9 +482,15 @@ def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list
                 flush_item_segment()
                 nested_blocks = _render_list(item_child, context, ordered=item_child.tag == "ol")
                 for nested_block in nested_blocks:
-                    blocks.extend(
-                        _block("  " + line, nested_block.references)
-                        for line in nested_block.text.splitlines()
+                    indented_text = "\n".join(
+                        "  " + line if line else "" for line in nested_block.text.splitlines()
+                    )
+                    blocks.append(
+                        _block(
+                            indented_text,
+                            nested_block.references,
+                            separator_before=nested_block.separator_before,
+                        )
                     )
                 item_has_started = item_has_started or bool(nested_blocks)
                 continue

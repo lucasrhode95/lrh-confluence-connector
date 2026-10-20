@@ -312,6 +312,25 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.remaining, ["56"])
         self.assertIsNone(result.next_cursor)
 
+    async def test_oversized_generated_cursor_is_rejected(self) -> None:
+        long_page_ids = ["8" * 1_000 + f"{index:02}" for index in range(19)]
+        page_ids = ["55", *long_page_ids]
+        api = _ReadApi(
+            pages={page_id: _page(page_id, 1, "<p>first</p><p>second</p>", "") for page_id in page_ids}
+        )
+
+        with self.assertRaisesRegex(InvalidRequest, "cursor exceeds the supported size"):
+            await _service(api).get_pages(
+                page_ids,
+                max_chars=len("first"),
+                parse_scope={
+                    "header": False,
+                    "comments": False,
+                    "attachments": False,
+                    "macros_from_storage": False,
+                },
+            )
+
     async def test_successful_empty_body_is_returned_as_an_empty_page_record(self) -> None:
         api = _ReadApi(pages={"55": _page("55", 1, "", "")})
         result = await _service(api).get_pages(

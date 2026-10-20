@@ -108,6 +108,7 @@ source-provided descriptions. Markers let an agent request a particular attachme
   `[Status: text]`, `@Display Name`, and links with page IDs kept in the references. Tables of contents
   and generated heading numbering are dropped.
 - Ordered lists preserve their source `start` and item `value` numbers.
+- Nested list items retain their internal line breaks while continuation lines stay indented.
 - Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
 - Local root-relative page links include the configured Confluence context path in text and references.
 - Page links and include references keep their target page ID and current source page ID in typed
@@ -174,7 +175,9 @@ attachment deduplication is not required.
   version through a historical read if the page changed. Mutable attachment and comment sections
   resume by item identity. If the anchored item was removed, the connector asks the caller to restart
   the read. Text continuation fragments retain the separator before their first block, so joining
-  fragments preserves the original page text. Nothing is kept in process memory between calls.
+  fragments preserves the original page text. If the continuation state cannot fit the cursor limit,
+  the request fails instead of returning an unusable cursor. Nothing is kept in process memory between
+  calls.
 - Comment blocks use the same character budget in text and rich reads. Rich page text remains the
   unchanged storage body; structured comment records appear only when their block is selected, so
   full comment bodies are not repeated on earlier pages or continuations.
