@@ -314,7 +314,7 @@ class PageTextService:
                 parent_comment_id=comment.parent_comment_id,
                 author=comment.author,
                 created_at=comment.created_at,
-                body=html_to_text(comment.body_view),
+                body=html_to_text(comment.body_view, base_url=self._base_url),
                 location=comment.location,
                 resolution=comment.resolution,
                 selected_text=comment.selected_text,

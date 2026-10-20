@@ -80,6 +80,33 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["<table><tr><th>Heading</th><td>x &lt; y</td></tr></table>"],
         )
 
+    def test_complex_table_fallback_preserves_image_and_macro_markers(self) -> None:
+        rendered = render_page_body(
+            '<table><tr><td><table><tr><td>Inner</td></tr></table></td>'
+            '<td><img data-linked-resource-id="att-9" alt="Plot"></td>'
+            '<td><span data-macro-name="jira">Issue</span></td></tr></table>',
+            '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">OPS-5</ac:parameter>'
+            '</ac:structured-macro>',
+            page_id="55",
+            attachments=[
+                PageAttachment(
+                    attachment_id="att-9",
+                    filename="plot.png",
+                    media_type="image/png",
+                    file_size=5,
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            [
+                "<table><tr><td><table><tr><td>Inner</td></tr></table></td>"
+                "<td>[Image: plot.png — Plot]</td><td>[Jira: OPS-5]</td></tr></table>"
+            ],
+        )
+        self.assertEqual({reference.kind for reference in rendered.references}, {"image", "jira"})
+
     def test_nested_table_markup_is_sanitized_without_flattening_its_rows(self) -> None:
         rendered = render_page_body(
             "<table><tr><td>Outer<table><tr><td>Inner</td></tr></table></td></tr></table>",

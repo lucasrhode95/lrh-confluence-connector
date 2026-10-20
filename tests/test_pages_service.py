@@ -135,6 +135,23 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(third.pages[0].comments), 1)
         self.assertEqual(third.pages[0].comments[0].body, "Long comment body")
 
+    async def test_comment_page_links_keep_the_configured_context_path(self) -> None:
+        api = _ReadApi(
+            pages={"55": _page("55", 1, "<p>Body</p>", "")},
+            comments={
+                "55": [
+                    RemotePageComment(
+                        comment_id="comment-1",
+                        body_view='<p>See <a href="/spaces/SYNTH/pages/84/Target">target</a>.</p>',
+                    )
+                ]
+            },
+        )
+        result = await _service(api).get_pages("55", parse_scope={"header": False, "attachments": False})
+
+        self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].comments[0].body)
+        self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].text)
+
     async def test_rich_cursor_budgets_comments_without_changing_storage_text(self) -> None:
         storage = "<p>Stored</p>"
         api = _ReadApi(

@@ -147,12 +147,13 @@ def render_page_body(
     return RenderedPageBody(blocks=tuple(blocks), references=tuple(references))
 
 
-def html_to_text(value: str) -> str:
+def html_to_text(value: str, *, base_url: str | None = None) -> str:
     """Convert a comment's rendered HTML into compact plain text."""
     parser = _TreeParser()
     parser.feed(value)
     parser.close()
-    blocks = [block.text for child in parser.root.children for block in _render_blocks(child, _empty_context())]
+    context = _empty_context(base_url=base_url)
+    blocks = [block.text for child in parser.root.children for block in _render_blocks(child, context)]
     return "\n\n".join(block for block in blocks if block).strip()
 
 
@@ -363,7 +364,8 @@ def _render_table(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
     if not rows:
         return []
     if any(_contains(cell, {"table", "pre"}) for row in rows for cell in _cells(row)):
-        return [_block(_minimal_table(node), _references_in(node, context))]
+        table, references = _minimal_table(node, context)
+        return [_block(table, references)]
 
     rendered_rows: list[dict[int, tuple[str, tuple[PageReference, ...], str, int]]] = []
     merged = False
@@ -712,8 +714,9 @@ def _url_port(parts: SplitResult) -> int:
     return 443 if parts.scheme.casefold() == "https" else 80
 
 
-def _minimal_table(node: _Node) -> str:
+def _minimal_table(node: _Node, context: _RenderContext) -> tuple[str, tuple[PageReference, ...]]:
     rows = []
+    references: list[PageReference] = []
     for row in _table_rows(node):
         cells = []
         for cell in _cells(row):
@@ -723,9 +726,11 @@ def _minimal_table(node: _Node) -> str:
                 for name in ("colspan", "rowspan")
                 if cell.attrs.get(name)
             )
-            cells.append(f"<{tag}{attrs}>{_minimal_cell_content(cell)}</{tag}>")
+            content, cell_references = _minimal_cell_content(cell, context)
+            cells.append(f"<{tag}{attrs}>{content}</{tag}>")
+            references.extend(cell_references)
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    return "<table>" + "".join(rows) + "</table>"
+    return "<table>" + "".join(rows) + "</table>", tuple(_unique_references(references))
 
 
 def _table_rows(node: _Node) -> list[_Node]:
@@ -742,21 +747,28 @@ def _table_rows(node: _Node) -> list[_Node]:
     return rows
 
 
-def _minimal_cell_content(node: _Node) -> str:
+def _minimal_cell_content(node: _Node, context: _RenderContext) -> tuple[str, tuple[PageReference, ...]]:
     parts: list[str] = []
+    references: list[PageReference] = []
     for child in node.children:
         if isinstance(child, str):
             parts.append(escape(child))
         elif child.tag == "table":
-            parts.append(_minimal_table(child))
+            table, nested_references = _minimal_table(child, context)
+            parts.append(table)
+            references.extend(nested_references)
         elif child.tag not in {"script", "style", "noscript"}:
-            parts.append(_minimal_cell_content(child))
-    return "".join(parts).strip()
-
-
-def _references_in(node: _Node, context: _RenderContext) -> tuple[PageReference, ...]:
-    _, references = _inline([node], context)
-    return references
+            if child.tag == "img" or _macro_name(child) is not None:
+                text, child_references = _inline([child], context)
+                parts.append(escape(text))
+                references.extend(child_references)
+            elif child.tag == "br":
+                parts.append(" ")
+            else:
+                content, child_references = _minimal_cell_content(child, context)
+                parts.append(content)
+                references.extend(child_references)
+    return "".join(parts).strip(), tuple(_unique_references(references))
 
 
 def _pipe_row(cells: list[str]) -> str:
@@ -863,8 +875,8 @@ def _unique_references(values: list[PageReference]) -> list[PageReference]:
     return result
 
 
-def _empty_context() -> _RenderContext:
-    return _RenderContext("", None, {}, {}, {})
+def _empty_context(*, base_url: str | None = None) -> _RenderContext:
+    return _RenderContext("", base_url, {}, {}, {})
 
 
 class _StorageBlockParser(HTMLParser):

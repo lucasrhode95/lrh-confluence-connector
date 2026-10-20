@@ -148,16 +148,18 @@ the shared transport caps all requests at six in flight. `body.view` supplies re
 preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. Text
 output keeps headings, ordered-list numbering from `start` and `value`, unordered lists, code, panels,
 status, expand blocks, links and pipe tables; panel children are rendered as blocks before quoting so
-paragraphs and list markers remain distinct. Complex table cells use minimal HTML. Attachment and image
-identity is mapped from source fields before markers are rendered.
+paragraphs and list markers remain distinct. Complex table cells use minimal HTML while retaining
+image and macro markers in their source cells. Attachment and image identity is mapped from source
+fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
 Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
 HTML line breaks remain line breaks. Comment bodies share the page budget in both formats, while rich
 page text stays unchanged and structured comments accompany only selected comment blocks.
-Comments are converted from their own `view` bodies and threaded by source ancestry. Typed references
-remain alongside text so agents do not have to parse markers. A `rich` read returns the storage body
-verbatim. Both formats use block-boundary budgets. Cursors carry page ID, version and block offset and
+Comments are converted from their own `view` bodies using the configured base URL for context-relative
+links, then threaded by source ancestry. Typed references remain alongside text so agents do not have
+to parse markers. A `rich` read returns the storage body verbatim. Both formats use block-boundary
+budgets. Cursors carry page ID, version and block offset and
 re-read the historical version when the current page has changed. Local root-relative links are
 normalized to the configured context path before they are emitted. Attachments and comments are read
 again on continuation, so those live sections can change while the page body remains pinned.
