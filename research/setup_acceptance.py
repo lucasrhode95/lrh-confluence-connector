@@ -223,6 +223,14 @@ async def _ensure_page(
     elif parent_id is not None and position is not None:
         await services.structure.move_page(page_id, parent_id=parent_id, position=position)
     if _fixture_body_needs_refresh(current.storage_body, body):
+        # A parent move may have created a new version. Pin the fresh version before updating.
+        current = await services.api.get_page_content(
+            page_id, expected_username=services.username, include_storage=True
+        )
+        if fixture.marker not in current.storage_body:
+            raise SystemExit("The fixture ownership marker changed during setup; the body was not changed.")
+        if not _fixture_body_needs_refresh(current.storage_body, body):
+            return page_id
         await services.writes.update_page(
             page_id,
             body,

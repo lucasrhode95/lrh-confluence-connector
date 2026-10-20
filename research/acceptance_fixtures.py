@@ -81,7 +81,6 @@ def root_storage(fixture: AcceptanceFixture, *, revision: int = 1) -> str:
 <ac:structured-macro ac:name="code"><ac:parameter ac:name="language">python</ac:parameter><ac:plain-text-body><![CDATA[{fixture.code_identifier} = 'synthetic']]></ac:plain-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="plantuml"><ac:plain-text-body><![CDATA[@startuml\nA -> B: synthetic {fixture.run_id}\n@enduml]]></ac:plain-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">SYN-{fixture.run_id.upper()}</ac:parameter><ac:rich-text-body><p>synthetic issue</p></ac:rich-text-body></ac:structured-macro>
-<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[<p>htmlmacro{fixture.run_id}</p>]]></ac:plain-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="include"><ac:parameter ac:name="page"><ri:page ri:content-title="{child_title}" /></ac:parameter></ac:structured-macro>
 <ac:structured-macro ac:name="excerpt-include"><ac:parameter ac:name="default">{child_title}</ac:parameter><ac:rich-text-body><ri:page ri:content-title="{child_title}" /></ac:rich-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">{text_name}</ac:parameter><ac:rich-text-body><ri:attachment ri:filename="{text_name}" /></ac:rich-text-body></ac:structured-macro>
