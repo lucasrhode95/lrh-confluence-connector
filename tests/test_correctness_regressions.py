@@ -228,6 +228,12 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(written), 1)
         self.assertIn(fixture.marker, written[0])
         self.assertNotIn('ac:name="html"', written[0])
+        from bs4 import BeautifulSoup
+        macro = BeautifulSoup(written[0], "html.parser").find("ac:structured-macro", attrs={"ac:name": "view-file"})
+        parameter = macro.find("ac:parameter", attrs={"ac:name": "name"})
+        self.assertEqual(parameter.find("ri:attachment")["ri:filename"], fixture.text_filename)
+        self.assertEqual(parameter.get_text(strip=True), "")
+
 
     async def test_fixture_refresh_uses_the_version_after_a_parent_move(self):
         fixture = new_fixture("deadbeef")

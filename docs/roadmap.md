@@ -365,8 +365,9 @@ for the reads or writes it makes; record the dated result in the research record
 **Attempted 2026-10-20; blocked during setup.** Authentication succeeded. The personal-space key
 validation defect above was fixed, but creating the fixture root returned HTTP 500 with a JSON response.
 The connector correctly reported an uncertain write. Exact-title content-collection reads after
-inspection and a subsequent setup attempt found no current fixture pages. Diagnose fixture-body versus
-instance-side creation failure before another write attempt. The cross-space target and CQL timezone
+inspection and a subsequent setup attempt found no current fixture pages. Isolation identified the fixture defect: `view-file` passed filename text where an attachment reference
+is required, causing a server `ClassCastException`. The reference form was verified live and the
+fixture is corrected with a regression on the parameter shape. A fresh full setup run is pending. The cross-space target and CQL timezone
 are still unset, and the manual inline-comment prerequisite is incomplete. The live runner completed with **1 pass (authentication), 0 failed checks and 16 skipped checks**
 because the fixture was absent after its bounded indexing wait. This is not an acceptance pass.
 
