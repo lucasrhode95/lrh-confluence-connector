@@ -4,7 +4,7 @@
 
 Local MCP connector for one user's Confluence Data Center account. The current release provides
 encrypted token setup, account status, space listing, content search, user lookup, page trees and page
-metadata. The remaining product scope is in
+metadata, and budgeted page-text reads. The remaining product scope is in
 the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 
 | Document | Purpose |
@@ -29,8 +29,12 @@ the [requirements](docs/requirements.md) and [roadmap](docs/roadmap.md).
 - `get_page_tree` returns ordered children and ancestors from a page or space root with bounded depth.
 - `get_page_metadata` returns history, retained versions, labels, contributors and ancestors for up
   to 20 page references.
+- `get_pages` returns up to 20 page IDs or same-instance URLs as Markdown-like text or unchanged
+  storage markup. Text reads include typed references, attachment lists, and threaded comments by
+  default; attachments are not downloaded. A character budget packs whole pages and uses a
+  version-pinned cursor when the first page needs continuation.
 
-Page text reading, exports, attachment retrieval, and page or draft changes remain open work.
+Exports, attachment retrieval, and page or draft changes remain open work.
 Authentication is separate from Microsoft 365 sign-in.
 
 ## Setup
@@ -61,8 +65,9 @@ unavailable, the command fails without a plaintext fallback. To clear the local 
 `uv run confluence-connector auth --sign-out`; this does not revoke the token on the server.
 
 `search_content` accepts date-only values as calendar days in Confluence's timezone and ISO-8601
-timestamps as instants. Timestamps without offsets mean UTC; timestamp filters require a calibrated
-`cql_timezone` setting.
+timestamps as instants. Mixed date and timestamp bounds are checked against the full local calendar
+day. Timestamps without offsets mean UTC; timestamp filters require a calibrated `cql_timezone`
+setting.
 
 Configuration precedence is `--config PATH`, `CONFLUENCE_CONFIG`, then the repository-root
 `confluence_config.json`, independent of the working directory. Every command supports `--config`.

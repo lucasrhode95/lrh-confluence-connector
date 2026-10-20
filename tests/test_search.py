@@ -72,6 +72,44 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(len(api.search_calls), 1)
 
+    async def test_mixed_date_bounds_compare_their_effective_calendar_days(self) -> None:
+        api = _SearchApi(pages=[_hit("1", "first"), _hit("2", "second")], page_size=1, total_size=2)
+        service = ContentSearch(api, _Links(), "sample-user", "UTC+02:00")  # type: ignore[arg-type]
+        first = await service.search_content(
+            "roadmap",
+            limit=1,
+            scope={
+                "modified_after": "2026-10-19T12:00:00Z",
+                "modified_before": "2026-10-19",
+            },
+        )
+        self.assertIn("lastmodified >= '2026/10/19 14:00'", api.search_calls[0][0])
+        self.assertIn("lastmodified <= '2026/10/19'", api.search_calls[0][0])
+        await service.search_content(cursor=first.next_cursor)
+        self.assertEqual(len(api.search_calls), 2)
+
+        with self.assertRaisesRegex(InvalidRequest, "modified_after must not be later"):
+            await service.search_content(
+                "roadmap",
+                scope={
+                    "modified_after": "2026-10-19T23:00:00Z",
+                    "modified_before": "2026-10-19",
+                },
+            )
+
+    async def test_mixed_date_bounds_defer_to_timezone_error_when_unconfigured(self) -> None:
+        api = _SearchApi()
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(InvalidRequest, "status --check"):
+            await service.search_content(
+                "roadmap",
+                scope={
+                    "modified_after": "2026-10-19T12:00:00Z",
+                    "modified_before": "2026-10-19",
+                },
+            )
+        self.assertEqual(api.search_calls, [])
+
     async def test_cursor_keeps_utc_instants_and_reformats_them_for_each_page(self) -> None:
         api = _SearchApi(
             pages=[_hit("1", "one"), _hit("2", "two")], page_size=1, total_size=2

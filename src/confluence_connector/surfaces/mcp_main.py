@@ -14,6 +14,8 @@ from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
+    PageParseScope,
+    PageTextFormat,
     SearchFields,
     SearchMatch,
     SearchScope,
@@ -49,6 +51,10 @@ drafts, comments and attachment references; links to other products remain links
 - get_page_metadata accepts one or more page IDs or same-instance URLs and returns page history,
   retained versions, labels, contributors and ancestors. Per-reference failures are returned alongside
   successful pages.
+- get_pages reads up to 20 pages as Markdown-like text or unchanged storage markup. Text reads include
+  typed attachment references and, by default, attachment and threaded comment sections; they never
+  download attachment content. Use the returned cursor alone to continue an oversized page at its
+  original version. Page-read timestamps remain the UTC values returned by REST.
 - Authenticate or remove the local token with `confluence-connector auth` or
   `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
 - Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
@@ -89,7 +95,8 @@ def build_server(context: AppContext) -> FastMCP:
         For continuation, pass only the returned cursor. `match` is all, any or phrase; `fields`
         is all or title. Scope supports spaces, space type, content types, labels, creators,
         contributors, created/modified ranges, parent/ancestor and include_archived. Date-only values
-        mean a calendar day in Confluence's timezone. ISO-8601 timestamps with offsets are accepted;
+        mean a calendar day in Confluence's timezone, and mixed bounds are checked against that full
+        day. ISO-8601 timestamps with offsets are accepted;
         timestamps without offsets are treated as UTC. Timestamp filters require cql_timezone; run
         `confluence-connector status --check` if it is unset. Quick-navigation supplements apply only
         to unscoped title searches.
@@ -152,6 +159,34 @@ def build_server(context: AppContext) -> FastMCP:
         """Return history, versions, labels, contributors and ancestors for up to 20 page references."""
         services = await context.services()
         result = await services.metadata.get_page_metadata(pages)
+        return result.model_dump(mode="json")
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_logged
+    async def get_pages(
+        pages: list[str] | str | None = None,
+        format: PageTextFormat | None = None,
+        max_chars: int | None = None,
+        parse_scope: PageParseScope | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Read up to 20 page IDs or same-instance URLs as text or rich storage.
+
+        Text is the default. Rich returns storage body markup unchanged. The default parse_scope
+        includes header, storage macro identities, attachment lists and threaded comments. max_chars
+        defaults to 40000 and is capped at 400000. Comment bodies share the block budget, including
+        in rich format, and structured comment records accompany selected blocks only. Whole pages
+        are packed first; an oversized first page is returned at block boundaries with a version-pinned
+        cursor. Pass only that cursor to continue. Attachments are listed, never downloaded.
+        """
+        services = await context.services()
+        result = await services.pages.get_pages(
+            pages,
+            format=format,
+            max_chars=max_chars,
+            parse_scope=parse_scope,
+            cursor=cursor,
+        )
         return result.model_dump(mode="json")
 
     return mcp

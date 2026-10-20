@@ -96,8 +96,8 @@ scripts require an explicit private config file rather than embedded fallback se
 A local MCP connector for one user's Confluence Data Center account. Requirements include search,
 full page/tree reads, metadata, attachment retrieval, exports, and draft/page CRUD and moves.
 The current MCP surface implements `auth_status`, `list_spaces`, `search_content`, `find_users`,
-`get_page_tree` and `get_page_metadata`; do not describe roadmap work as implemented. Confluence
-credentials are separate from the Microsoft OAuth library.
+`get_page_tree`, `get_page_metadata` and `get_pages`; do not describe roadmap work as implemented.
+Confluence credentials are separate from the Microsoft OAuth library.
 
 - Documentation index: `docs/README.md`
 - What it must do: `docs/requirements.md`
