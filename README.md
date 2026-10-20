@@ -4,7 +4,7 @@ A local MCP server for one user's Confluence Data Center account.
 
 - Search pages and find users, then read page text, metadata and ordered trees.
 - Download selected attachments and export pages to local files.
-- Create and update pages, manage drafts and labels, move pages, and use the trash.
+- Create and update pages, manage drafts and labels, move pages, and trash or restore pages.
 - Keep authentication encrypted locally; the connector has no hosted service or background process.
 
 ## Requirements

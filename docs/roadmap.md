@@ -2,7 +2,7 @@
 
 Open work only. Settled requirements are in [requirements](requirements.md); the current implementation
 is in [architecture](architecture.md); dated evidence is in [API research](api-research.md).
-Delete items when complete. Snapshot **2026-10-19**.
+Delete items when complete. Snapshot **2026-10-20**.
 
 Work is split by what it needs: **implementation** is code still to write; **decisions** wait for the
 user; **live verification** checks something on the real instance before it is built or relied on.
