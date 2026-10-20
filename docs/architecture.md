@@ -73,7 +73,7 @@ The MCP surface exposes eight read tools, two local-file tools and five write to
 - `src/confluence_connector/service/writes.py`: validated create/update/publish/delete-draft/label operations, placement, duplicate-title checks, draft cursors, partial results and safe label compensation.
 - `src/confluence_connector/service/write_markup.py`: text escaping, safe rich-body conversions, active-content and 128-level nesting refusal, and source-reference loss detection.
 - `src/confluence_connector/service/localfiles.py`: shared seven-day output-folder cleanup, owner-only POSIX output permissions and collision-safe file claims.
-- `src/confluence_connector/service/page_text.py`: storage-source identity extraction and block-based HTML-to-text conversion.
+- `src/confluence_connector/service/page_text.py`: storage parameters and references, the Confluence pre-pass over `view`, and markdownify-based conversion into budget blocks.
 - `src/confluence_connector/service/cursors.py`: strict, process-independent cursor encoding and decoding.
 - `src/confluence_connector/surfaces/mcp_main.py`: annotated MCP tools and tool-call timing logs.
 - `research/probe_auth.py`: separate manual probe that reuses configuration but never persists secrets.
@@ -157,42 +157,35 @@ capped at 5,000 per page record. It describes the current page and refuses a ver
 historical metadata reads are not implemented. Results identify truncation or per-reference failures.
 
 `get_pages` reads each page body, attachment list and comment thread as up to three parallel requests;
-the shared transport caps all requests at six in flight. `body.view` supplies resolved text, while
-`body.storage` supplies Jira, PlantUML, HTML-macro and ordered reference metadata. The storage parser
-preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. When
-storage expansion is requested, the adapter requires a string `body.storage.value`; a missing or
-malformed requested value is an upstream error. Text output keeps headings, ordered-list numbering from
-`start` and `value`, unordered lists, code, panels, status, expand blocks, links and pipe tables; expand
-and panel content keep inline runs together and split around block children, with panel children quoted so
-paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
-indent continuation lines, including nested-list indentation through whitespace cleanup while keeping
-multiline nested items in one block. Pipe-table rows remain separate budget blocks and use single
-newlines to preserve Markdown table syntax. Complex table fallbacks emit one minimal-HTML block per outer
-row, preserving block boundaries within cells and preformatted code wrappers and whitespace. They retain
-image, macro and link markers with their typed references. Attachment and image identity is mapped from
-source fields before markers are rendered. Page-typed linked-resource anchors bypass attachment mapping;
-their source page IDs and visible labels are retained by the link mapper, with the current page as owner.
-Include and excerpt-include references also retain the current page as owner. Comment reads request
-`body.view`, and the adapter treats a missing or malformed requested value as an upstream error.
-Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
-marked after the rendered body because visible text and scripts are not reliable identity sources.
-Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
-HTML line breaks remain line breaks. Comment bodies share the page budget in both formats, while rich
-page text stays unchanged and structured comments accompany only selected comment blocks.
-Comments are converted from their own `view` bodies using the configured base URL for context-relative
-links, then threaded by source ancestry. Typed references remain alongside text so agents do not have
-to parse markers. A `rich` read returns the storage body verbatim. Both formats use block-boundary
-budgets. Cursors carry page ID, version and a stable next-block anchor and re-read the historical
-version when the current page has changed; the adapter requires the returned source version to exactly
-confirm a requested historical version. Body anchors use the pinned block order, while attachment and
-comment anchors use their source IDs. If a live section removes the next anchored item, continuation
-returns an actionable restart error. Text continuation keeps the separator preceding its first block so
-joining fragments reproduces the original text. Generic containers and blockquotes keep inline runs
-together and split them only around block-level children. Local root-relative links are normalized to
-the configured context path before they are emitted. An oversized continuation state is rejected
-instead of returning a cursor the decoder will refuse. Attachments and comments are read again on continuation, so those
-live sections can change while the page body remains pinned; stable item anchors prevent insertions before
-a continuation point from shifting the cursor.
+the shared transport caps all requests at six in flight. When storage expansion is requested, the
+adapter requires a string `body.storage.value`; comment reads request `body.view`. A missing or
+malformed requested value is an upstream error.
+
+`service/page_text.py` converts bodies in three steps. First, storage is parsed with BeautifulSoup for
+macro parameters (Jira keys, PlantUML source, titles, include targets) and typed references
+(`ri:page`, `ri:attachment`, inline-comment markers, non-text macros). Second, a BeautifulSoup pre-pass
+over `body.view` replaces each `data-macro-name` wrapper with its D3 marker, pairing wrappers with
+storage macros by name and document order; wrappers inside a resolved include take no local source.
+The same pass turns images and attachment links into markers with typed references (identity from
+`data-linked-resource-*` attributes and the attachment list), mentions into `@Name`, inline tasks into
+`[ ]`/`[x]`, normalizes same-instance links to absolute URLs under the configured context path, and
+drops scripts and styles. Third, markdownify converts the result, with one override for tables:
+merged cells are repeated, and tables containing nested tables or code fall back to minimal HTML.
+References are collected before conversion; marker text is never parsed back. Comments are converted
+the same way from their own `view` bodies and threaded by source ancestry.
+
+The converted text is split into blocks at blank lines outside fenced code, so paragraphs, whole
+lists, tables, panels and code blocks are budget units; a single oversized block is returned whole
+with a note. A `rich` read returns the storage body verbatim, split between top-level elements using
+the parser's source positions so the slices join back to the exact source. Comment bodies share the
+page budget in both formats, and structured comments accompany only selected comment blocks. Cursors
+carry page ID, version and a stable next-block anchor and re-read the historical version when the
+page has changed; the adapter requires the returned source version to confirm the requested one. Body
+anchors use the pinned block order, while attachment and comment anchors use their source IDs, so
+insertions before a continuation point do not shift it; a removed anchored item returns an
+actionable restart error. Text continuation keeps the separator before its first block so fragments
+join back to the original text, and an oversized continuation state is rejected instead of issuing a
+cursor the decoder would refuse.
 
 `PageLinkResolver` accepts numeric IDs and the documented `/spaces/KEY/pages/ID/…`,
 `viewpage.action?pageId=`, `/x/…`, and `/display/KEY/Title` forms. Display URLs resolve by exact title

@@ -111,28 +111,29 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("new current content", second.pages[0].text)
         self.assertEqual(api.content_calls[-1], ("55", 7))
 
-    async def test_complex_table_cursor_continues_at_the_next_outer_row(self) -> None:
-        first_row = "<table><tr><td><pre>first code</pre></td><td>First row</td></tr></table>"
-        second_row = "<table><tr><td><pre>second code</pre></td><td>Second row</td></tr></table>"
+    async def test_budget_cuts_fall_between_blocks_and_fragments_rejoin(self) -> None:
         page = _page(
             "55",
             4,
-            "<table><tr><td><pre>first code</pre></td><td>First row</td></tr>"
-            "<tr><td><pre>second code</pre></td><td>Second row</td></tr></table>",
+            "<p>First paragraph.</p>"
+            "<table><tr><td><pre>code</pre></td><td>Row</td></tr></table>"
+            '<div data-macro-name="panel"><p>Panel text.</p><p>More panel text.</p></div>',
             "",
         )
         api = _ReadApi(pages={"55": page}, versions={("55", 4): page})
-        first = await _service(api).get_pages(
-            "55",
-            max_chars=len(first_row) + 1,
-            parse_scope={"header": False, "attachments": False, "comments": False, "macros_from_storage": False},
-        )
+        scope = {"header": False, "attachments": False, "comments": False, "macros_from_storage": False}
+        first = await _service(api).get_pages("55", max_chars=len("First paragraph."), parse_scope=scope)
 
-        self.assertEqual(first.pages[0].text, first_row)
+        self.assertEqual(first.pages[0].text, "First paragraph.")
         self.assertIsNotNone(first.next_cursor)
         second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, "\n" + second_row)
-        self.assertEqual(first.pages[0].text + second.pages[0].text, first_row + "\n" + second_row)
+        self.assertTrue(second.pages[0].text.startswith("\n\n<table>"))
+        self.assertTrue(any("returned whole" in note for note in second.notes))
+        self.assertIsNotNone(second.next_cursor)
+        third = await _service(api).get_pages(cursor=second.next_cursor)
+        self.assertEqual(third.pages[0].text, "\n\n> [Panel]\n>\n> Panel text.\n>\n> More panel text.")
+        whole = await _service(api).get_pages("55", parse_scope=scope)
+        self.assertEqual(first.pages[0].text + second.pages[0].text + third.pages[0].text, whole.pages[0].text)
 
     async def test_pipe_table_rows_remain_adjacent_in_page_text(self) -> None:
         api = _ReadApi(
@@ -158,31 +159,6 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("| Heading | Value |\n| --- | --- |\n| Row | 1 |", result.pages[0].text)
         self.assertNotIn("| Heading | Value |\n\n| --- |", result.pages[0].text)
-
-    async def test_panel_content_continues_at_quoted_block_boundaries(self) -> None:
-        page = _page(
-            "55",
-            1,
-            '<div data-macro-name="panel"><p>First paragraph.</p><p>Second paragraph.</p>'
-            "<ul><li>Third block.</li></ul></div>",
-            '<ac:structured-macro ac:name="panel"><ac:parameter ac:name="title">Panel</ac:parameter>'
-            "</ac:structured-macro>",
-        )
-        api = _ReadApi(pages={"55": page})
-        scope = {"header": False, "attachments": False, "comments": False}
-        first = await _service(api).get_pages("55", max_chars=len("> [Panel] First paragraph."), parse_scope=scope)
-
-        self.assertEqual(first.pages[0].text, "> [Panel] First paragraph.")
-        self.assertIsNotNone(first.next_cursor)
-        second = await _service(api).get_pages(cursor=first.next_cursor)
-        self.assertEqual(second.pages[0].text, "\n>\n> Second paragraph.")
-        self.assertIsNotNone(second.next_cursor)
-        third = await _service(api).get_pages(cursor=second.next_cursor)
-        self.assertEqual(third.pages[0].text, "\n>\n> • Third block.")
-        self.assertEqual(
-            first.pages[0].text + second.pages[0].text + third.pages[0].text,
-            "> [Panel] First paragraph.\n>\n> Second paragraph.\n>\n> • Third block.",
-        )
 
     async def test_attachment_cursor_resumes_at_stable_item_after_insertions(self) -> None:
         api = _ReadApi(
@@ -269,10 +245,10 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         )
         result = await _service(api).get_pages("55", parse_scope={"header": False})
 
-        self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].comments[0].body)
+        self.assertIn("[target](https://confluence.example.test/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].comments[0].body)
         self.assertIn("[Image: plot.png — Plot]", result.pages[0].comments[0].body)
         self.assertIn("[File: plot.png]", result.pages[0].comments[0].body)
-        self.assertIn("[target](/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].text)
+        self.assertIn("[target](https://confluence.example.test/wiki/spaces/SYNTH/pages/84/Target)", result.pages[0].text)
         comment_references = result.pages[0].comments[0].references
         self.assertEqual({reference.kind for reference in comment_references}, {"page", "image", "attachment"})
         self.assertTrue(all(reference.owner_page_id == "55" for reference in comment_references))
