@@ -98,39 +98,42 @@ and resolved discussions by default. Place inline attachment/image markers at th
 append other attachment references after the body and before comments. Include filenames and useful
 source-provided descriptions. Markers let an agent request a particular attachment later.
 
-**Decided 2026-10-19 (D3), text and markers:**
+**Decided 2026-10-19 (D3), text and markers; restated 2026-10-20:**
 
-- Confluence renders macros but offers no plain-text output, so the connector converts HTML to text.
-  It reads the `view` body, where includes, excerpts and expand sections are already resolved, and
-  takes Jira keys, PlantUML source and HTML-macro identity from `storage`, because `view` loses them.
-- Output is Markdown-like: headings, lists, task lists, fenced code with language, panels as quoted
-  blocks (`> [Info] …`) whose paragraphs and list items remain budget boundaries, `[Expand: title]`,
-  `[Status: text]`, `@Display Name`, and links with page IDs kept in the references. Tables of contents
-  and generated heading numbering are dropped.
-- Ordered lists preserve their source `start` and item `value` numbers.
-- Nested list items retain their internal line breaks while continuation lines stay indented.
-- Explicit line breaks in rendered paragraphs, panels and comments remain line breaks in text.
-- Local root-relative page links include the configured Confluence context path in text and references.
-- Page links and include references keep their target page ID and current source page ID in typed
-  references; page-typed linked-resource anchors also keep their visible label.
+- Confluence renders macros but offers no plain-text output, so the connector converts the `view` body,
+  where includes, excerpts and expand sections are already resolved. It takes Jira keys, PlantUML
+  source, macro parameters and HTML-macro identity from `storage`, because `view` loses them.
+- The goal is faithful, readable text for agents, not an exact Markdown rendering. Generic HTML
+  conversion is delegated to an off-the-shelf HTML-to-Markdown library (markdownify); the connector
+  only adds Confluence-specific handling: macro markers, attachment and image markers, typed
+  references, link normalization to the configured instance, and the table rule below. Library
+  output is accepted as is where these rules are silent.
+- Markers sit where the item appears: `[Image: filename — alt text]`, `[File: filename]`,
+  `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source, `[Code: title]`
+  before titled code, `[Expand: title]`, `[Status: text]`, panels as quoted blocks (`> [Info] …`),
+  `@Display Name`, task items as `[ ]`/`[x]`, and `[Unrendered macro: name]` for anything else without
+  text. Code blocks are fenced with their language. Scripts, styles and tables of contents are
+  dropped. The HTML macro's output reaches `view` without any wrapper, so only its scripts are
+  dropped; storage identifies the macro, and a `[Unrendered macro: html]` marker is appended.
+- Tables are pipe tables. Merged cells repeat their value into each covered cell, with a
+  `[Table: merged cells repeated]` note. Tables with nested tables or code blocks in cells fall back to
+  minimal HTML.
+- Known limitations, accepted: exotic nesting (lists or panels inside table cells, mixed block and
+  inline runs in custom containers) follows the library's rendering, and list numbering, spacing and
+  indentation may differ from what Confluence displays.
 - When the request includes `body.storage`, the response must contain a string storage value; a missing
-  requested value is an upstream error rather than an empty body.
-- Comment reads request `body.view`; a missing or malformed requested view body is an upstream error.
-- Tables are pipe tables. Multi-paragraph cells are joined with `<br>`, unordered items use `• item`,
-  and ordered items retain their numbering. Images and macros in cells use their normal markers.
-  Merged cells repeat their value into each covered cell, with a `[Table: merged cells repeated]`
-  note. Only tables with nested tables or code blocks in cells fall back to minimal HTML, preserving
-  safe block tags, source list-number attributes, and preformatted code whitespace within cells.
-- Markers sit where the item appears in the body: `[Image: filename — alt text]`, `[File: filename]`,
-  `[Included from: title]`, `[Jira: KEY]`, `[Diagram: plantuml]` followed by its source, and
-  `[Unrendered macro: name]`. HTML-macro scripts are not emitted.
+  requested value is an upstream error rather than an empty body. Comment reads request `body.view`; a
+  missing or malformed requested view body is an upstream error.
 - Layout: a short header (title, link, version and total versions, last modified, extracted at), the
   body, `## Attachments` (all attachments with type and size), then `## Comments`, threaded with
   author, date, location, resolution and an inline comment's selected text. There are no in-body
   comment anchors for now. Search returns comment hits as comment results; the connector does not
   map them to their page.
-- A typed `references` list accompanies the text (kind, IDs, filename, media type, size, owner), so
-  agents never parse marker text.
+- A typed `references` list accompanies the text (kind, IDs, filename, media type, size, owner),
+  collected from `view` attributes and `storage` elements before conversion, so agents never parse
+  marker text.
+- Verification uses a few realistic synthetic pages with reviewed golden outputs, plus focused tests
+  for the Confluence-specific rules above, rather than one test per rendering detail.
 
 Extract metadata and ordered content references from source fields/structure before rendering. Carry
 them through typed models; never recover attachment identity or ownership from exported text markers.
@@ -179,7 +182,9 @@ attachment deduplication is not required.
 - `get_pages` takes up to 20 page IDs or URLs and a `max_chars` budget (default 40,000, maximum
   400,000), returning pages in the order given. Whole pages are packed into the budget; the first is
   always returned. Pages that did not fit are listed in `remaining`, never dropped.
-- A page larger than the budget is cut at a block boundary (paragraph, list item, table row). Its
+- A page larger than the budget is cut between blocks of the converted text (paragraphs, whole lists,
+  tables and fenced code blocks, which are separated by blank lines); a single block larger than the
+  budget is returned whole with a note. `rich` reads cut between top-level storage elements. Its
   cursor carries page ID, version and a stable next-block anchor; continuation reads that same
   version through a historical read if the page changed. Mutable attachment and comment sections
   resume by item identity. If the anchored item was removed, the connector asks the caller to restart
