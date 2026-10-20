@@ -329,6 +329,88 @@ class PageWriteResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PagePlacement(BaseModel):
+    """Validated target placement carried into move and restore operations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    space_key: str
+    parent_id: str | None = None
+    position: Literal["first", "last", "before", "after"] = "last"
+    sibling_id: str | None = None
+
+
+class PageMoveResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    space_key: str
+    parent_id: str | None = None
+    moved: bool
+    position_applied: bool | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PageStructureOutcome(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    former_space_key: str
+    former_parent_id: str | None = None
+    former_position: int | None = None
+    status: Literal["trashed", "moved_up", "not_attempted", "unknown"]
+    detail: str | None = None
+
+
+class PageDeleteResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    children_mode: Literal["refuse", "move_up", "trash"]
+    complete: bool
+    pages: list[PageStructureOutcome]
+    warnings: list[str] = Field(default_factory=list)
+    failure: str | None = None
+
+
+class TrashPageSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    space_key: str | None = None
+    space_name: str | None = None
+    url: str | None = None
+    modified_at: str | None = None
+
+
+class TrashListResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    pages: list[TrashPageSummary]
+    start: int
+    size: int
+    approximate_total: int | None = None
+    more_results_available: bool
+    truncated: bool = False
+    next_cursor: str | None = None
+
+
+class PageRestoreResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: str
+    title: str
+    space_key: str | None = None
+    parent_id: str | None = None
+    placement_source: Literal["caller", "saved_property", "space_root"]
+    placement_status: Literal["applied", "root", "partial", "unknown"]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class DraftSummary(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -365,6 +447,16 @@ class RemoteDraftPage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     drafts: list[DraftSummary]
+    start: int
+    size: int
+    total_size: int | None = None
+    has_more: bool | None = None
+
+
+class RemoteTrashPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    pages: list[TrashPageSummary]
     start: int
     size: int
     total_size: int | None = None

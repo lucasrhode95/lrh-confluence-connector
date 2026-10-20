@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
-from confluence_connector.domain.errors import InvalidRequest, NotFound, UncertainWrite, Upstream
+from confluence_connector.domain.errors import (
+    Conflict,
+    ConnectorError,
+    InvalidRequest,
+    NotFound,
+    UncertainWrite,
+    Upstream,
+)
 from confluence_connector.domain.models import (
     ContentSearchHit,
     CurrentUser,
@@ -22,9 +30,11 @@ from confluence_connector.domain.models import (
     PersonSummary,
     RemoteContentSearchPage,
     RemoteDraftPage,
+    RemoteTrashPage,
     RemoteUserSearchPage,
     SpaceList,
     SpaceSummary,
+    TrashPageSummary,
 )
 from confluence_connector.remote.transport import ConfluenceTransport
 
@@ -33,6 +43,15 @@ CHILD_PAGE_SIZE = 500
 VERSION_PAGE_SIZE = 200
 MAX_PAGE_VERSIONS = 5_000
 DRAFT_PAGE_SIZE = 100
+TRASH_PAGE_SIZE = 100
+LONGTASK_MAX_POLLS = 40
+LONGTASK_POLL_INTERVAL_SECONDS = 0.25
+LONGTASK_MAX_WAIT_SECONDS = 10.0
+PLACEMENT_PROPERTY_KEY = "lrh-confluence-connector-placement"
+
+
+class _LongTaskFailure(Conflict):
+    """A completed async move explicitly reported failure, rather than an unknown outcome."""
 
 
 class ConfluenceApi:
@@ -249,6 +268,183 @@ class ConfluenceApi:
         )
         return _page_metadata(payload, base_url=str(self._settings["base_url"]))
 
+    async def page_supports_delete(self, page_id: str, *, expected_username: str) -> bool:
+        """Read the current user's page operations; the caller validates ``page_id``."""
+        payload = await self._transport.get_json(
+            self._content_route(page_id),
+            params={"expand": "operations"},
+            expected_username=expected_username,
+        )
+        operations = payload.get("operations")
+        if not isinstance(operations, list):
+            raise Upstream("Confluence did not return page operations for the delete preflight.")
+        for operation in operations:
+            if isinstance(operation, dict) and operation.get("operation") == "delete":
+                return True
+        return False
+
+    async def space_permissions_readable(self, space_key: str, *, expected_username: str) -> bool:
+        """Check whether the account can read space permissions, without interpreting their policy."""
+        route = f"rest/api/space/{quote(space_key, safe='')}"
+        payload = await self._transport.get_json(
+            route,
+            params={"expand": "permissions"},
+            expected_username=expected_username,
+        )
+        if not isinstance(payload.get("permissions"), list):
+            raise Upstream("Confluence returned no readable space-permission list.")
+        return True
+
+    async def update_page_parent(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        next_version: int,
+        parent_id: str | None,
+        expected_username: str,
+    ) -> PageMetadata:
+        """Change a same-space page's ancestors through the documented content update."""
+        body: dict[str, Any] = {
+            "id": page_id,
+            "type": "page",
+            "title": title,
+            "version": {"number": next_version},
+            "ancestors": [{"id": parent_id}] if parent_id is not None else [],
+        }
+        payload = await self._transport.send_json(
+            "PUT", self._content_route(page_id), body=body, expected_username=expected_username
+        )
+        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def trash_page(self, page_id: str, *, expected_username: str) -> None:
+        """Move one validated page to the trash with the documented DELETE route."""
+        await self._transport.send_json(
+            "DELETE", self._content_route(page_id), expected_username=expected_username
+        )
+
+    async def restore_trashed_page(
+        self,
+        page_id: str,
+        *,
+        title: str,
+        space_key: str,
+        next_version: int,
+        expected_username: str,
+    ) -> PageMetadata:
+        """Restore one trashed page; Confluence places restored pages at the space root."""
+        payload = await self._transport.send_json(
+            "PUT",
+            self._content_route(page_id),
+            params={"status": "trashed"},
+            body={
+                "id": page_id,
+                "type": "page",
+                "title": title,
+                "status": "current",
+                "version": {"number": next_version},
+                "space": {"key": space_key},
+            },
+            expected_username=expected_username,
+        )
+        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
+
+    async def get_page_property(
+        self, page_id: str, key: str, *, expected_username: str
+    ) -> Any:
+        """Read one page property; the service validates its key and page reference."""
+        payload = await self._transport.get_json(
+            f"{self._content_route(page_id)}/property/{quote(key, safe='')}",
+            expected_username=expected_username,
+        )
+        if "value" not in payload:
+            raise Upstream("Confluence returned a page property without its value.")
+        return payload["value"]
+
+    async def set_page_property(
+        self, page_id: str, key: str, value: Mapping[str, Any], *, expected_username: str
+    ) -> None:
+        """Create or update a small JSON placement record without changing the page version."""
+        property_route = f"{self._content_route(page_id)}/property/{quote(key, safe='')}"
+        try:
+            existing = await self._transport.get_json(
+                property_route, expected_username=expected_username
+            )
+        except NotFound:
+            await self._transport.send_json(
+                "POST",
+                f"{self._content_route(page_id)}/property",
+                body={"key": key, "value": dict(value)},
+                expected_username=expected_username,
+            )
+            return
+        property_id = _identifier(existing.get("id"))
+        version = existing.get("version")
+        version_number = (
+            _optional_nonnegative_int(version.get("number")) if isinstance(version, dict) else None
+        )
+        if property_id is None or version_number is None or version_number < 1:
+            raise Upstream("Confluence returned an incomplete placement property for update.")
+        await self._transport.send_json(
+            "PUT",
+            property_route,
+            body={
+                "id": property_id,
+                "key": key,
+                "value": dict(value),
+                "version": {"number": version_number + 1},
+            },
+            expected_username=expected_username,
+        )
+
+    async def remove_page_property(self, page_id: str, key: str, *, expected_username: str) -> None:
+        """Remove the connector-owned placement property after a successful restore."""
+        await self._transport.send_json(
+            "DELETE",
+            f"{self._content_route(page_id)}/property/{quote(key, safe='')}",
+            expected_username=expected_username,
+        )
+
+    async def list_trash_page(
+        self,
+        *,
+        space_key: str | None,
+        start: int,
+        limit: int,
+        expected_username: str,
+    ) -> RemoteTrashPage:
+        """Read one bounded page of visible trashed pages from the content collection."""
+        params = {
+            "type": "page",
+            "status": "trashed",
+            "start": str(start),
+            "limit": str(limit),
+            "expand": "space,version",
+        }
+        if space_key is not None:
+            params["spaceKey"] = space_key
+        payload = await self._transport.get_json(
+            self._content_collection_route(), params=params, expected_username=expected_username
+        )
+        rows = payload.get("results")
+        if not isinstance(rows, list):
+            raise Upstream("Confluence returned an unexpected trash-list response.")
+        actual_start = _nonnegative_int(payload.get("start"), default=start)
+        actual_size = _nonnegative_int(payload.get("size"), default=len(rows))
+        if actual_start != start or actual_size != len(rows):
+            raise Upstream("Confluence returned an inconsistent trash-list page envelope.")
+        total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
+        pages = [_trash_summary(row, base_url=str(self._settings["base_url"])) for row in rows]
+        next_start = actual_start + actual_size
+        has_more = next_start < total if total is not None else _has_next_link(payload)
+        return RemoteTrashPage(
+            pages=pages,
+            start=actual_start,
+            size=actual_size,
+            total_size=total,
+            has_more=has_more,
+        )
+
     async def get_page_content(
         self,
         page_id: str,
@@ -455,21 +651,74 @@ class ConfluenceApi:
             skip_atlassian_token_check=True,
             expected_username=expected_username,
         )
-        if not isinstance(payload, dict):
-            raise Upstream("Confluence returned an unexpected page-position response.")
-        delegates = payload.get("commandDelegate")
-        responses = [payload]
-        if isinstance(delegates, dict):
-            responses.append(delegates)
-        if any(
-            response.get("validationErrors")
-            or response.get("actionErrors")
-            or response.get("errorMessage")
-            or response.get("success") is False
-            or response.get("successful") is False
-            for response in responses
-        ):
-            raise Upstream("Confluence rejected the requested page position.")
+        _raise_move_action_errors(payload)
+
+    async def move_page_action(
+        self,
+        page_id: str,
+        *,
+        space_key: str,
+        position: str,
+        target_id: str | None,
+        asynchronous: bool,
+        expected_username: str,
+    ) -> None:
+        """Run the isolated UI move action and, for cross-space moves, poll its long task."""
+        params = {
+            "pageId": page_id,
+            "spaceKey": space_key,
+            "position": position,
+            "mode": "ASYNC" if asynchronous else "LEGACY",
+        }
+        if target_id is not None:
+            params["targetId"] = target_id
+        payload = await self._transport.send_json(
+            "POST",
+            "pages/movepage.action",
+            params=params,
+            skip_atlassian_token_check=True,
+            expected_username=expected_username,
+        )
+        has_task = isinstance(payload, dict) and isinstance(payload.get("longTaskId"), str)
+        _raise_move_action_errors(payload, allow_pending=asynchronous and has_task)
+        if not asynchronous:
+            return
+        if not has_task:
+            raise UncertainWrite("Confluence accepted a move without a usable long-task ID; inspect the page.")
+        try:
+            async with asyncio.timeout(LONGTASK_MAX_WAIT_SECONDS):
+                await self._wait_for_long_task(payload["longTaskId"], expected_username=expected_username)
+        except _LongTaskFailure:
+            raise
+        except UncertainWrite:
+            raise
+        except TimeoutError:
+            raise UncertainWrite(
+                "Confluence's page move is still pending; inspect the page before retrying."
+            ) from None
+        except ConnectorError:
+            raise UncertainWrite(
+                "Confluence accepted the page move, but its completion could not be confirmed; inspect before retrying."
+            ) from None
+
+    async def _wait_for_long_task(self, task_id: str, *, expected_username: str) -> None:
+        """Poll a documented long-task route a bounded number of times after an accepted async move."""
+        route = f"rest/api/longtask/{quote(task_id, safe='')}"
+        for attempt in range(LONGTASK_MAX_POLLS):
+            payload = await self._transport.get_json(route, expected_username=expected_username)
+            if not isinstance(payload, dict):
+                raise UncertainWrite("Confluence returned an unreadable move status; inspect the page.")
+            successful = payload.get("successful")
+            finished = payload.get("finished")
+            if successful is True:
+                return
+            if finished is True:
+                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+            if successful is False and finished is not False:
+                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+            if attempt + 1 < LONGTASK_MAX_POLLS:
+                await asyncio.sleep(LONGTASK_POLL_INTERVAL_SECONDS)
+        raise UncertainWrite("Confluence's page move is still pending; inspect the page before retrying.")
 
     async def list_page_attachments(
         self, page_id: str, *, expected_username: str
@@ -806,6 +1055,42 @@ def _draft_summary(value: Any, *, base_url: str) -> DraftSummary:
         url=metadata.url,
         modified_at=metadata.modified_at,
     )
+
+
+def _trash_summary(value: Any, *, base_url: str) -> TrashPageSummary:
+    """Map one trashed page from source metadata, rejecting malformed or unrelated content."""
+    if not isinstance(value, dict):
+        raise Upstream("Confluence returned a malformed trashed-page entry.")
+    metadata = _page_metadata(value, base_url=base_url)
+    if metadata.content_type != "page" or metadata.status not in (None, "trashed"):
+        raise Upstream("Confluence returned content that was not a trashed page.")
+    return TrashPageSummary(
+        page_id=metadata.page_id,
+        title=metadata.title,
+        space_key=metadata.space_key,
+        space_name=metadata.space_name,
+        url=metadata.url,
+        modified_at=metadata.modified_at,
+    )
+
+
+def _raise_move_action_errors(payload: Any, *, allow_pending: bool = False) -> None:
+    """Translate application-level errors in a successful UI-move response."""
+    if not isinstance(payload, dict):
+        raise Upstream("Confluence returned an unexpected page-position response.")
+    delegates = payload.get("commandDelegate")
+    responses = [payload]
+    if isinstance(delegates, dict):
+        responses.append(delegates)
+    if any(
+        response.get("validationErrors")
+        or response.get("actionErrors")
+        or response.get("errorMessage")
+        or response.get("success") is False
+        or (not allow_pending and response.get("successful") is False)
+        for response in responses
+    ):
+        raise Upstream("Confluence rejected the requested page position.")
 
 
 def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:
