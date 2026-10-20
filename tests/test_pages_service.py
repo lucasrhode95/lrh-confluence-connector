@@ -132,6 +132,31 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         second = await _service(api).get_pages(cursor=first.next_cursor)
         self.assertEqual(second.pages[0].text, second_row)
 
+    async def test_pipe_table_rows_remain_adjacent_in_page_text(self) -> None:
+        api = _ReadApi(
+            pages={
+                "55": _page(
+                    "55",
+                    1,
+                    "<table><tr><th>Heading</th><th>Value</th></tr>"
+                    "<tr><td>Row</td><td>1</td></tr></table>",
+                    "",
+                )
+            }
+        )
+        result = await _service(api).get_pages(
+            "55",
+            parse_scope={
+                "header": False,
+                "attachments": False,
+                "comments": False,
+                "macros_from_storage": False,
+            },
+        )
+
+        self.assertIn("| Heading | Value |\n| --- | --- |\n| Row | 1 |", result.pages[0].text)
+        self.assertNotIn("| Heading | Value |\n\n| --- |", result.pages[0].text)
+
     async def test_structured_comments_follow_the_selected_text_blocks(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>Body</p>", "")},

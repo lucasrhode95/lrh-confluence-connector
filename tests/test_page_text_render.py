@@ -289,6 +289,18 @@ class PageTextRenderingChecks(unittest.TestCase):
             ["1. First paragraph.\n\n   Second paragraph."],
         )
 
+    def test_nested_list_indentation_survives_block_cleanup(self) -> None:
+        rendered = render_page_body(
+            "<ul><li>Parent<ul><li><p>Child first.</p><p>Child second.</p></li></ul></li></ul>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["• Parent", "  • Child first.", "    Child second."],
+        )
+
     def test_macros_inside_resolved_includes_do_not_consume_local_metadata(self) -> None:
         rendered = render_page_body(
             '<div data-macro-name="include"><div data-macro-name="jira">Included issue</div></div>'

@@ -149,7 +149,9 @@ preserves CDATA in plain-text macro bodies, including PlantUML source and code f
 output keeps headings, ordered-list numbering from `start` and `value`, unordered lists, code, panels,
 status, expand blocks, links and pipe tables; panel children are rendered as blocks before quoting so
 paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
-indent continuation lines. Complex table fallbacks emit one minimal-HTML block per outer row, preserving
+indent continuation lines, including nested-list indentation through whitespace cleanup. Pipe-table
+rows remain separate budget blocks and use single newlines to preserve Markdown table syntax. Complex
+table fallbacks emit one minimal-HTML block per outer row, preserving
 image, macro and link markers plus their typed references. Attachment and image identity is mapped from
 source fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are

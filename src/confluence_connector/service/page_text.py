@@ -25,6 +25,7 @@ class PageTextBlock:
 
     text: str
     references: tuple[PageReference, ...] = ()
+    separator_before: str = "\n\n"
 
 
 @dataclass(frozen=True)
@@ -452,11 +453,17 @@ def _render_table(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
     head_text = [head_cells[index][0] if index in head_cells else "" for index in range(width)]
     header_refs = tuple(reference for cell in head_cells.values() for reference in cell[1])
     lines.append(_block(_pipe_row(head_text), header_refs))
-    lines.append(PageTextBlock(_pipe_row(["---"] * width)))
+    lines.append(_block(_pipe_row(["---"] * width), (), separator_before="\n"))
     for row in rendered_rows[1:]:
         cells = [row[index] for index in range(width) if index in row]
         row_text = [row[index][0] if index in row else "" for index in range(width)]
-        lines.append(_block(_pipe_row(row_text), tuple(ref for cell in cells for ref in cell[1])))
+        lines.append(
+            _block(
+                _pipe_row(row_text),
+                tuple(ref for cell in cells for ref in cell[1]),
+                separator_before="\n",
+            )
+        )
     return lines
 
 
@@ -774,8 +781,12 @@ def _minimal_table(node: _Node, context: _RenderContext) -> tuple[str, tuple[Pag
 
 def _minimal_table_blocks(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
     return [
-        _block(f"<table>{row}</table>", references)
-        for row, references in _minimal_table_rows(node, context)
+        _block(
+            f"<table>{row}</table>",
+            references,
+            separator_before="\n\n" if index == 0 else "\n",
+        )
+        for index, (row, references) in enumerate(_minimal_table_rows(node, context))
     ]
 
 
@@ -918,17 +929,26 @@ def _integer_attr(value: str | None, *, default: int) -> int:
         return default
 
 
-def _block(text: str, references: tuple[PageReference, ...] | list[PageReference]) -> PageTextBlock:
-    return PageTextBlock(text=text, references=tuple(_unique_references(list(references))))
+def _block(
+    text: str,
+    references: tuple[PageReference, ...] | list[PageReference],
+    *,
+    separator_before: str = "\n\n",
+) -> PageTextBlock:
+    return PageTextBlock(
+        text=text,
+        references=tuple(_unique_references(list(references))),
+        separator_before=separator_before,
+    )
 
 
 def _nonempty_blocks(blocks: list[PageTextBlock]) -> list[PageTextBlock]:
     result: list[PageTextBlock] = []
     for block in blocks:
-        text = block.text.strip()
-        if not text:
+        text = block.text.rstrip()
+        if not text.strip():
             continue
-        result.append(_block(text, block.references))
+        result.append(_block(text, block.references, separator_before=block.separator_before))
     return result
 
 

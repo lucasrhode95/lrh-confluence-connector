@@ -492,7 +492,10 @@ def _record(
             if not any(reference.kind == "comment" for reference in block.references)
         )
     else:
-        text = "\n\n".join(block.text for block in blocks)
+        text = "".join(
+            (block.separator_before if index else "") + block.text
+            for index, block in enumerate(blocks)
+        )
     metadata = loaded.source.metadata
     return PageReadRecord(
         page_id=metadata.page_id,
@@ -517,9 +520,9 @@ def _take_blocks(
 ) -> tuple[list[PageTextBlock], int | None, int, bool]:
     selected: list[PageTextBlock] = []
     used = 0
-    separator = "" if page_format == "rich" else "\n\n"
     for index in range(start, len(blocks)):
         block = blocks[index]
+        separator = "" if page_format == "rich" else block.separator_before
         addition = len(block.text) + (len(separator) if selected else 0)
         if used + addition > budget:
             if not selected:
