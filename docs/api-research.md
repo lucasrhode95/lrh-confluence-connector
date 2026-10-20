@@ -375,3 +375,10 @@ Live, 2026-10-20: newly created synthetic pages and their expanded ancestors rep
 with extension position `"none"`. These mean no explicit position, not malformed page metadata.
 The adapter maps these position-only sentinels to null; counts and version numbers stay strict.
 This also blocked metadata reads during fixture setup after the macro fix.
+
+### 8.3 Restore response metadata
+
+Live, 2026-10-20: the successful restore response omitted expanded space and version fields. A fresh
+current-page read returned both, with version 1 unchanged after restoration. Applying placement from
+the sparse response therefore failed. The structure service now rereads current metadata after a
+confirmed restore before applying placement. The isolated diagnostic page was trashed afterwards.
