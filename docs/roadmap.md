@@ -38,7 +38,8 @@ Comment and attachment writes are not in the requirements and are not proposed h
 
 ### Review findings (2026-10-20)
 
-From whole-project reviews of `e67b60d` by Codex and Claude, plus PR #6's open review findings.
+From whole-project reviews of `e67b60d` by Codex and Claude, plus the unresolved review threads on
+PRs #5–#9 that are still open in the code.
 Group related items into design fixes rather than one patch each.
 
 **Bugs**, highest first:
@@ -47,6 +48,17 @@ Group related items into design fixes rather than one patch each.
   `_links.next` and traversal treats a page under 500 as final, so `children=trash` can report success
   while leaving descendants behind. Space listing has the same assumption. Keep the continuation
   signal and advance on actual `start + size` (`service/structure.py`, `remote/confluence.py`).
+- [P1] Every live acceptance run fails: the authentication and fixture checks pass the coroutine
+  `_pass()` where `AcceptanceReport.run` expects a callable, so both record a `TypeError` and the run
+  exits 1. Pass `_pass` (`research/run_acceptance.py`, from PR #8).
+- [P2] `delete_page` with `children: "move_up"` can undo a concurrent reparent: each child's fresh
+  metadata is checked only for being current, then moved under the deleted page's former parent.
+  Skip a child whose parent or space no longer matches the captured node (`service/structure.py`,
+  from PR #7).
+- [P2] `restore_page` cannot take a `/display/SPACE/Title` URL: the resolver looks the title up
+  through CQL, which excludes trashed content, so it always fails with `NotFound` despite every URL
+  form being promised. Resolve it against the trash listing or require an ID-bearing URL and document
+  that (`service/structure.py`, `remote/links.py`, from PR #7).
 - [P2] Search: a term with inner punctuation (`ci-cd`, `release/notes`) is matched as either half,
   not as one term. Live 2026-10-20: `ci-cd` matched 2,160 pages, `"ci-cd"` 482. Quote such terms in
   `match: "all"` and `"any"` (`service/search.py`).
@@ -73,6 +85,10 @@ Group related items into design fixes rather than one patch each.
 - [P2] The live move and order check passes even when positioning fails: it reads the returned parent
   but never the sibling order, and cross-space checks trust the service's reported target. Re-read
   metadata and ordered children independently before cleanup (`research/run_acceptance.py`).
+- [P2] A successful `--allow-writes` acceptance run leaves restored scratch pages current: the
+  `move_up` parent and the three subtree pages are restored but never re-trashed, so they accumulate
+  in the personal space and a reused run ID hits duplicate titles. Re-trash them after their
+  assertions (`research/run_acceptance.py`, from PR #8).
 - [P2] Page text, from PR #6: rendered Jira content becomes `[Unrendered macro: jira]` when there is
   no storage key (storage disabled, or a macro in an included page); images with only
   `data-linked-resource-filename` lose their filename; links whose ID is only in `data-page-id` lose
