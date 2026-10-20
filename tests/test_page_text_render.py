@@ -84,10 +84,12 @@ class PageTextRenderingChecks(unittest.TestCase):
         rendered = render_page_body(
             '<table><tr><td><table><tr><td>Inner</td></tr></table></td>'
             '<td><img data-linked-resource-id="att-9" alt="Plot"></td>'
-            '<td><span data-macro-name="jira">Issue</span></td></tr></table>',
+            '<td><span data-macro-name="jira">Issue</span></td>'
+            '<td><a href="/spaces/SYNTH/pages/84/Target">Target</a></td></tr></table>',
             '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">OPS-5</ac:parameter>'
             '</ac:structured-macro>',
             page_id="55",
+            base_url="https://confluence.example.test/wiki",
             attachments=[
                 PageAttachment(
                     attachment_id="att-9",
@@ -102,10 +104,16 @@ class PageTextRenderingChecks(unittest.TestCase):
             [block.text for block in rendered.blocks],
             [
                 "<table><tr><td><table><tr><td>Inner</td></tr></table></td>"
-                "<td>[Image: plot.png — Plot]</td><td>[Jira: OPS-5]</td></tr></table>"
+                "<td>[Image: plot.png — Plot]</td><td>[Jira: OPS-5]</td>"
+                "<td>[Target](/wiki/spaces/SYNTH/pages/84/Target)</td></tr></table>"
             ],
         )
-        self.assertEqual({reference.kind for reference in rendered.references}, {"image", "jira"})
+        self.assertEqual({reference.kind for reference in rendered.references}, {"image", "jira", "page"})
+        page_reference = next(reference for reference in rendered.references if reference.kind == "page")
+        self.assertEqual(
+            (page_reference.page_id, page_reference.url),
+            ("84", "/wiki/spaces/SYNTH/pages/84/Target"),
+        )
 
     def test_nested_table_markup_is_sanitized_without_flattening_its_rows(self) -> None:
         rendered = render_page_body(
@@ -267,6 +275,18 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertEqual(
             [block.text for block in rendered.blocks],
             ["4. Fourth", "9. Ninth", "10. Tenth", "-2. Negative"],
+        )
+
+    def test_list_items_preserve_multiple_paragraph_boundaries(self) -> None:
+        rendered = render_page_body(
+            "<ol><li><p>First paragraph.</p><p>Second paragraph.</p></li></ol>",
+            "",
+            page_id="55",
+            attachments=[],
+        )
+        self.assertEqual(
+            [block.text for block in rendered.blocks],
+            ["1. First paragraph.\n\n   Second paragraph."],
         )
 
     def test_macros_inside_resolved_includes_do_not_consume_local_metadata(self) -> None:

@@ -110,6 +110,28 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("new current content", second.pages[0].text)
         self.assertEqual(api.content_calls[-1], ("55", 7))
 
+    async def test_complex_table_cursor_continues_at_the_next_outer_row(self) -> None:
+        first_row = "<table><tr><td>first code</td><td>First row</td></tr></table>"
+        second_row = "<table><tr><td>second code</td><td>Second row</td></tr></table>"
+        page = _page(
+            "55",
+            4,
+            "<table><tr><td><pre>first code</pre></td><td>First row</td></tr>"
+            "<tr><td><pre>second code</pre></td><td>Second row</td></tr></table>",
+            "",
+        )
+        api = _ReadApi(pages={"55": page}, versions={("55", 4): page})
+        first = await _service(api).get_pages(
+            "55",
+            max_chars=len(first_row) + 1,
+            parse_scope={"header": False, "attachments": False, "comments": False, "macros_from_storage": False},
+        )
+
+        self.assertEqual(first.pages[0].text, first_row)
+        self.assertIsNotNone(first.next_cursor)
+        second = await _service(api).get_pages(cursor=first.next_cursor)
+        self.assertEqual(second.pages[0].text, second_row)
+
     async def test_structured_comments_follow_the_selected_text_blocks(self) -> None:
         api = _ReadApi(
             pages={"55": _page("55", 1, "<p>Body</p>", "")},

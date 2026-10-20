@@ -332,7 +332,52 @@ def _is_block_content(value: _Node | str) -> bool:
             "tip",
             "warning",
         }
-    return value.tag in {"blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ol", "p", "pre", "table", "ul"}
+    return value.tag in {
+        "blockquote",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ol",
+        "p",
+        "pre",
+        "table",
+        "ul",
+    }
+
+
+def _list_item_content(
+    children: list[_Node | str], context: _RenderContext
+) -> tuple[str, tuple[PageReference, ...]]:
+    groups: list[str] = []
+    references: list[PageReference] = []
+    inline_values: list[_Node | str] = []
+
+    def flush_inline() -> None:
+        if not inline_values:
+            return
+        text, inline_references = _inline(inline_values, context)
+        if text.strip():
+            groups.append(text.strip())
+        references.extend(inline_references)
+        inline_values.clear()
+
+    for child in children:
+        if isinstance(child, str) and not child.strip():
+            continue
+        if not _is_block_content(child):
+            inline_values.append(child)
+            continue
+        flush_inline()
+        child_blocks = _render_blocks(child, context)
+        if child_blocks:
+            groups.append("\n\n".join(block.text for block in child_blocks).strip())
+            references.extend(reference for block in child_blocks for reference in block.references)
+    flush_inline()
+    return "\n\n".join(groups).strip(), _unique_references(references)
 
 
 def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list[PageTextBlock]:
@@ -343,11 +388,18 @@ def _render_list(node: _Node, context: _RenderContext, *, ordered: bool) -> list
             blocks.extend(_render_blocks(child, context))
             continue
         nested_lists = [item for item in child.children if isinstance(item, _Node) and item.tag in {"ol", "ul"}]
-        text, refs = _inline([item for item in child.children if item not in nested_lists], context)
+        text, refs = _list_item_content(
+            [item for item in child.children if item not in nested_lists], context
+        )
         item_number = _integer_attr(child.attrs.get("value"), default=index) if ordered else index
         marker = f"{item_number}. " if ordered else "• "
         if text.strip():
-            blocks.append(_block(marker + text.strip(), refs))
+            lines = text.strip().splitlines()
+            continuation_indent = " " * len(marker)
+            item_text = marker + lines[0]
+            for line in lines[1:]:
+                item_text += "\n" + (continuation_indent + line if line else "")
+            blocks.append(_block(item_text, refs))
         for nested in nested_lists:
             nested_blocks = _render_list(nested, context, ordered=nested.tag == "ol")
             blocks.extend(
@@ -364,8 +416,7 @@ def _render_table(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
     if not rows:
         return []
     if any(_contains(cell, {"table", "pre"}) for row in rows for cell in _cells(row)):
-        table, references = _minimal_table(node, context)
-        return [_block(table, references)]
+        return _minimal_table_blocks(node, context)
 
     rendered_rows: list[dict[int, tuple[str, tuple[PageReference, ...], str, int]]] = []
     merged = False
@@ -715,10 +766,26 @@ def _url_port(parts: SplitResult) -> int:
 
 
 def _minimal_table(node: _Node, context: _RenderContext) -> tuple[str, tuple[PageReference, ...]]:
-    rows = []
-    references: list[PageReference] = []
+    rows = _minimal_table_rows(node, context)
+    markup = "<table>" + "".join(row for row, _ in rows) + "</table>"
+    references = [reference for _, row_references in rows for reference in row_references]
+    return markup, tuple(_unique_references(references))
+
+
+def _minimal_table_blocks(node: _Node, context: _RenderContext) -> list[PageTextBlock]:
+    return [
+        _block(f"<table>{row}</table>", references)
+        for row, references in _minimal_table_rows(node, context)
+    ]
+
+
+def _minimal_table_rows(
+    node: _Node, context: _RenderContext
+) -> list[tuple[str, tuple[PageReference, ...]]]:
+    rendered_rows: list[tuple[str, tuple[PageReference, ...]]] = []
     for row in _table_rows(node):
         cells = []
+        references: list[PageReference] = []
         for cell in _cells(row):
             tag = "th" if cell.tag == "th" else "td"
             attrs = "".join(
@@ -729,8 +796,9 @@ def _minimal_table(node: _Node, context: _RenderContext) -> tuple[str, tuple[Pag
             content, cell_references = _minimal_cell_content(cell, context)
             cells.append(f"<{tag}{attrs}>{content}</{tag}>")
             references.extend(cell_references)
-        rows.append("<tr>" + "".join(cells) + "</tr>")
-    return "<table>" + "".join(rows) + "</table>", tuple(_unique_references(references))
+        row_markup = "<tr>" + "".join(cells) + "</tr>"
+        rendered_rows.append((row_markup, tuple(_unique_references(references))))
+    return rendered_rows
 
 
 def _table_rows(node: _Node) -> list[_Node]:
@@ -758,7 +826,7 @@ def _minimal_cell_content(node: _Node, context: _RenderContext) -> tuple[str, tu
             parts.append(table)
             references.extend(nested_references)
         elif child.tag not in {"script", "style", "noscript"}:
-            if child.tag == "img" or _macro_name(child) is not None:
+            if child.tag in {"a", "img"} or _macro_name(child) is not None:
                 text, child_references = _inline([child], context)
                 parts.append(escape(text))
                 references.extend(child_references)

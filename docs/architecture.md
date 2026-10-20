@@ -148,9 +148,10 @@ the shared transport caps all requests at six in flight. `body.view` supplies re
 preserves CDATA in plain-text macro bodies, including PlantUML source and code fallback content. Text
 output keeps headings, ordered-list numbering from `start` and `value`, unordered lists, code, panels,
 status, expand blocks, links and pipe tables; panel children are rendered as blocks before quoting so
-paragraphs and list markers remain distinct. Complex table cells use minimal HTML while retaining
-image and macro markers in their source cells. Attachment and image identity is mapped from source
-fields before markers are rendered.
+paragraphs and list markers remain distinct. Multi-paragraph list items keep block boundaries and
+indent continuation lines. Complex table fallbacks emit one minimal-HTML block per outer row, preserving
+image, macro and link markers plus their typed references. Attachment and image identity is mapped from
+source fields before markers are rendered.
 Recognized HTML-macro wrappers are marked inline; storage HTML macros without a matching wrapper are
 marked after the rendered body because visible text and scripts are not reliable identity sources.
 Macro wrappers inside resolved includes do not consume the requested page's storage metadata. Explicit
