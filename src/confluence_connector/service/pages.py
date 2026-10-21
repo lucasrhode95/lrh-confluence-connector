@@ -34,8 +34,8 @@ from confluence_connector.service import cursors
 from confluence_connector.service.errors import raise_account_error
 from confluence_connector.service.page_text import (
     PageTextBlock,
+    parse_storage,
     render_page_body,
-    storage_top_level_blocks,
 )
 
 MAX_PAGE_REFERENCES = 20
@@ -345,6 +345,14 @@ class PageTextService:
                 if len(remote_comments) == 500:
                     notes.append("The comment list reached its 500-item request limit and may be incomplete.")
 
+        parsed_storage = None
+        if page_format == "rich" or parse_scope.macros_from_storage:
+            parsed_storage = parse_storage(
+                source.storage_body,
+                page_id=request.page_id,
+                include_metadata=parse_scope.macros_from_storage,
+                include_top_level_blocks=page_format == "rich",
+            )
         converted = render_page_body(
             source.view_body,
             source.storage_body,
@@ -352,6 +360,8 @@ class PageTextService:
             attachments=attachments,
             base_url=self._base_url,
             macros_from_storage=parse_scope.macros_from_storage,
+            parsed_storage=parsed_storage,
+            convert_markdown=page_format != "rich",
         )
         comments_list: list[PageComment] = []
         for comment in remote_comments:
@@ -391,6 +401,7 @@ class PageTextService:
             page_format,
             source,
             converted.blocks,
+            parsed_storage.top_level_blocks if parsed_storage is not None else (),
             attachments,
             comments,
             parse_scope,
@@ -456,6 +467,7 @@ def _page_blocks(
     page_format: PageTextFormat,
     source: RemotePageContent,
     text_blocks: tuple[PageTextBlock, ...],
+    storage_blocks: tuple[str, ...],
     attachments: list[PageAttachment],
     comments: tuple[PageComment, ...],
     scope: PageParseScope,
@@ -464,7 +476,7 @@ def _page_blocks(
     if page_format == "rich":
         blocks = [
             PageTextBlock(value, cursor_key=f"body:{index}")
-            for index, value in enumerate(storage_top_level_blocks(source.storage_body))
+            for index, value in enumerate(storage_blocks)
         ]
         if scope.comments:
             blocks.extend(_comment_blocks(comments, source.metadata.page_id))
