@@ -350,44 +350,65 @@ Architecture now records the shared modules.
 
 #### One placement resolver
 
-`create_page`, `move_page` and `restore_page` resolve `parent_id`, `space_key`, `position` and `sibling`
-through two implementations (`_Placement`/`_create_placement` and `PagePlacement`/`_resolve_placement`).
-Share one.
+**Implemented, awaiting review (2026-10-21).** Added `service/placement.py` and routed page creation,
+movement, restoration and root recovery through its shared resolver. The service entry points retain
+their distinct status rules and page-reference handling. The resolver checks sibling scope and move
+cycles and selects first or root-last action targets. Removed the duplicate `_Placement` and create
+placement helpers. Offline regressions cover first-sibling ordering, descendant protection, and the
+status difference between create and move. The current consolidated suite passes (274 tests, one
+platform skip), as do compilation and pyflakes.
 
 #### Rich-body checks on BeautifulSoup
 
-[`service/write_markup.py`](../src/confluence_connector/service/write_markup.py) is a 362-line
-hand-written `HTMLParser`. Rebuild it on BeautifulSoup, already a dependency, as was done for page text.
+**Implemented, awaiting review (2026-10-21).** Replaced the hand-built `HTMLParser` span tree with
+BeautifulSoup for rich-body safety checks, nesting limits, code/expand conversion and content-loss
+identity. Existing focused tests pass in the current consolidated suite (274 tests, one platform skip);
+source and test compilation and pyflakes pass.
+
+**Validation:** BeautifulSoup repairs some malformed markup during serialization (`<p>unclosed` becomes
+`<p>unclosed</p>`). D5 describes Confluence returning a 400 with row and column for unparseable markup.
+Confirm whether this recovery behavior is acceptable or whether malformed input must reach Confluence
+unchanged to retain its error response.
 
 #### Parse storage once per read
 
-Storage is parsed separately for macros and for references, and a `rich` read still runs the Markdown
-conversion it then discards. Parse once and skip the conversion for `rich`.
+**Implemented, awaiting review (2026-10-21).** `parse_storage` now extracts macro metadata, typed
+references and (for rich reads) verbatim top-level body slices from one BeautifulSoup tree. The read
+service passes that result into rendering, and rich reads skip Markdown conversion while retaining
+view-derived references. An offline regression checks one storage parse, typed Jira and attachment
+references, and no Markdown conversion; the rich body remains unchanged.
 
 #### One retry loop in the transport
 
-`ConfluenceTransport.download_to` repeats the retry loop of `_exchange`. Merge them.
+**Implemented, awaiting review (2026-10-21).** `download_to` now streams through `_exchange`, so JSON
+requests and downloads share one retry loop for status codes, transport errors, backoff, and account
+checks. Partial download bytes are cleared before a safe retry. An offline regression verifies a
+download honors `Retry-After`, clears prior destination contents, and returns the complete body; the
+existing partial-stream timeout test still passes.
 
 #### Remove dead code and add an undefined-name check
 
-Remove the unused helper in `service/writes.py`, the unreachable ownership branch in `bootstrap.py` and
-the needless `async` on `_nodes_for_children`. Add a `pyflakes`-style check to the documented checks:
-`service/pages.py` raised `Upstream` without importing it, which `compileall` does not catch.
-The missing import is fixed in this pass; the dead-code cleanup and additional static check remain open.
+**Implemented, awaiting review (2026-10-21).** The unused `_raise_account_error` helper in
+`service/writes.py` was already removed by the shared validation cleanup. Removed `AppContext`'s
+unreachable client-ownership fallback, made `_nodes_for_children` synchronous, and added pyflakes to
+the locked development dependencies and documented checks. The check also found and removed unused
+imports across source and tests; it now passes over `src`, `research` and `tests`.
 
 #### Fewer, stronger tests
 
-- Run fixture setup through its real write path against a fake transport, instead of the tests that
-  only list macro names; it would have caught the fixture bug above.
-- Make tables of near-identical cases: uncertain-write outcomes and account changes after a write
-  (`test_remote.py`); label partial failures and draft cursors (`test_writes_service.py`); config
-  precedence (`test_config.py`); MCP round-trips (`test_app.py`, moving the export attachment-reuse
-  case to the export tests).
-- Remove the trash assertions repeated in the omnibus route test and assertions on embedded constants,
-  such as the fixture PNG signature.
+**Implemented, awaiting review (2026-10-21).** The fixture macro-name check and PNG-signature assertion
+were already removed; fixture setup now exercises the real write path against a fake transport. This
+pass tables the uncertain-write and post-write account-change cases, label partial failures, draft
+cursor rejection and config-path caching. Search and page-read MCP round trips share one table, while
+attachment-list reuse is tested at the export-service boundary. Repeated trash checks now assert
+preflight-before-write ordering and both route statuses together. The offline suite passes 274 tests
+with one platform skip; compilation, pyflakes and whitespace checks pass.
 
-The shallow fixture macro-list test and embedded PNG-signature assertion were removed in this pass;
-fixture creation now has an integration regression. The remaining test consolidation is still open.
+#### Keep offline check lists aligned
+
+**Implemented, awaiting review (2026-10-21).** Added the repository's required pyflakes command to the
+research guide's offline checks. Updated the placement and rich-body summaries to the current
+consolidated suite count; dated acceptance-run counts remain historical results.
 
 ### Enhancements
 

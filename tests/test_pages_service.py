@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import patch
+
+from bs4 import BeautifulSoup
 
 from confluence_connector.domain.errors import AuthenticationRequired, InvalidRequest, NotFound, Upstream
 from confluence_connector.domain.models import (
@@ -89,6 +92,45 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.pages[0].text, storage)
         self.assertIsNotNone(result.pages[0].header)
         self.assertEqual(api.optional_calls, [])
+
+    async def test_rich_read_parses_storage_once_and_skips_markdown_conversion(self) -> None:
+        storage = (
+            "<p>Stored</p>"
+            '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">SYN-7</ac:parameter>'
+            "</ac:structured-macro>"
+            '<ri:attachment ri:content-id="att-1" ri:filename="guide.pdf"/>'
+        )
+        api = _ReadApi(pages={"55": _page("55", 1, "<p>Rendered view</p>", storage)})
+
+        with (
+            patch(
+                "confluence_connector.service.page_text.BeautifulSoup",
+                wraps=BeautifulSoup,
+            ) as parse_html,
+            patch(
+                "confluence_connector.service.page_text._to_markdown",
+                side_effect=AssertionError("rich reads must not convert Markdown"),
+            ) as markdown,
+        ):
+            result = await _service(api).get_pages(
+                "55",
+                format="rich",
+                parse_scope={"header": False, "comments": False, "attachments": False},
+            )
+
+        self.assertEqual(result.pages[0].text, storage)
+        self.assertEqual(
+            {reference.kind for reference in result.pages[0].references},
+            {"attachment", "jira"},
+        )
+        jira_reference = next(
+            reference for reference in result.pages[0].references if reference.kind == "jira"
+        )
+        self.assertEqual(jira_reference.key, "SYN-7")
+        self.assertEqual(
+            sum(call.args[0] == storage for call in parse_html.call_args_list), 1
+        )
+        markdown.assert_not_called()
 
     async def test_oversized_page_cursor_reloads_the_original_version(self) -> None:
         old_page = _page("55", 7, "<p>old one</p><p>old two</p><p>old three</p>", "")

@@ -9,13 +9,13 @@ import random
 import time
 from collections.abc import Mapping
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any, BinaryIO
 from urllib.parse import urljoin
 
 import httpx
 
-from confluence_connector import config
 from confluence_connector.domain.errors import (
     AccountMismatch,
     AuthenticationRequired,
@@ -35,6 +35,12 @@ READ_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WRITE_RETRY_STATUSES = frozenset({429, 503})
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _ExchangeResult:
+    response: httpx.Response
+    streamed_bytes: int | None = None
 
 
 class ConfluenceTransport:
@@ -81,10 +87,10 @@ class ConfluenceTransport:
         expected_username: str | None = None,
     ) -> dict[str, Any]:
         """GET one JSON route; the read may be retried according to the shared transport policy."""
-        response = await self._exchange(
+        result = await self._exchange(
             "GET", path, params=params, token_override=token_override, expected_username=expected_username
         )
-        return _json_payload(response)
+        return _json_payload(result.response)
 
     async def download_to(
         self,
@@ -99,62 +105,17 @@ class ConfluenceTransport:
         The caller supplies a seekable temporary or exclusively claimed file and removes it if this
         operation fails. A partial response is truncated before a safe GET retry.
         """
-        _validate_route(path)
-        for attempt in range(MAX_ATTEMPTS):
-            token = self._credential(None, expected_username)
-            request = self._client.build_request(
-                "GET",
-                path,
-                params=params,
-                headers={"Accept": "*/*", "Authorization": f"Bearer {token}"},
-            )
-            response: httpx.Response | None = None
-            retry_delay: float | None = None
-            try:
-                async with self._limit:
-                    response = await self._client.send(request, stream=True)
-                    if response.status_code in READ_RETRY_STATUSES and attempt + 1 < MAX_ATTEMPTS:
-                        retry_delay = _retry_delay(response.headers, attempt)
-                    elif response.status_code in REDIRECT_STATUSES:
-                        await response.aclose()
-                        response = None
-                        raise AuthenticationRequired(
-                            "Confluence redirected the attachment request; the stored token was not accepted."
-                        )
-                    elif not 200 <= response.status_code < 300:
-                        response = await _read_response(response)
-                    else:
-                        content_type = response.headers.get("content-type")
-                        size = 0
-                        async for chunk in response.aiter_bytes():
-                            destination.write(chunk)
-                            size += len(chunk)
-                        await response.aclose()
-                        response = None
-                        self._assert_account(expected_username)
-                        return content_type, size
-            except httpx.RequestError as exc:
-                _clear_destination(destination)
-                if attempt + 1 < MAX_ATTEMPTS:
-                    _log.warning(
-                        "Confluence attachment download failed; attempt=%d error=%s",
-                        attempt + 1,
-                        type(exc).__name__,
-                    )
-                    await self._sleep(_backoff(attempt))
-                    continue
-                raise Upstream(f"Could not complete the Confluence attachment download ({type(exc).__name__}).") from None
-            finally:
-                if response is not None and not response.is_closed:
-                    await response.aclose()
-            if retry_delay is not None:
-                _clear_destination(destination)
-                await self._sleep(retry_delay)
-                continue
-            if response is None:
-                raise Upstream("The Confluence attachment request did not return a response.")
-            _raise_status(response.status_code, response.content, method="GET")
-        raise Upstream("The Confluence attachment download failed after the allowed attempts.")
+        result = await self._exchange(
+            "GET",
+            path,
+            params=params,
+            expected_username=expected_username,
+            accept="*/*",
+            stream_to=destination,
+        )
+        if result.streamed_bytes is None:
+            raise Upstream("The Confluence attachment request did not return a response.")
+        return result.response.headers.get("content-type"), result.streamed_bytes
 
     async def send_json(
         self,
@@ -167,7 +128,7 @@ class ConfluenceTransport:
         expected_username: str,
     ) -> Any:
         """Send one write request, retrying only when the response proves it was not applied."""
-        response = await self._exchange(
+        result = await self._exchange(
             method,
             path,
             params=params,
@@ -176,7 +137,7 @@ class ConfluenceTransport:
             skip_atlassian_token_check=skip_atlassian_token_check,
         )
         try:
-            return _write_payload(response)
+            return _write_payload(result.response)
         except Upstream:
             raise UncertainWrite(
                 "Confluence may have applied the write but returned an unreadable response; inspect before retrying."
@@ -190,9 +151,10 @@ class ConfluenceTransport:
         params: Mapping[str, str] | None = None,
     ) -> str | None:
         """Read a same-instance short-link route and return its redirect target without following it."""
-        response = await self._exchange(
+        result = await self._exchange(
             "GET", path, params=params, expected_username=expected_username, allow_redirect=True
         )
+        response = result.response
         if response.status_code in REDIRECT_STATUSES:
             location = response.headers.get("location")
             return urljoin(str(response.url), location) if location else None
@@ -211,18 +173,21 @@ class ConfluenceTransport:
         expected_username: str | None = None,
         allow_redirect: bool = False,
         skip_atlassian_token_check: bool = False,
-    ) -> httpx.Response:
+        accept: str = "application/json",
+        stream_to: BinaryIO | None = None,
+    ) -> _ExchangeResult:
         _validate_route(path)
         method = method.upper()
         is_read = method in {"GET", "HEAD"}
         for attempt in range(MAX_ATTEMPTS):
             token = self._credential(token_override, expected_username)
-            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+            headers = {"Accept": accept, "Authorization": f"Bearer {token}"}
             if skip_atlassian_token_check:
                 headers["X-Atlassian-Token"] = "no-check"
             request = self._client.build_request(method, path, params=params, json=body, headers=headers)
             response: httpx.Response | None = None
             retry_delay: float | None = None
+            streamed_bytes: int | None = None
             try:
                 async with self._limit:
                     response = await self._client.send(request, stream=True)
@@ -235,6 +200,15 @@ class ConfluenceTransport:
                         raise AuthenticationRequired(
                             "Confluence redirected the API request to a login page; the stored token was not accepted."
                         )
+                    elif stream_to is not None and 200 <= response.status_code < 300:
+                        streamed_response = _empty_response(response)
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            stream_to.write(chunk)
+                            size += len(chunk)
+                        await response.aclose()
+                        response = streamed_response
+                        streamed_bytes = size
                     else:
                         try:
                             response = await _read_response(response)
@@ -250,12 +224,16 @@ class ConfluenceTransport:
                                 ) from None
                             raise
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+                if stream_to is not None:
+                    _clear_destination(stream_to)
                 if attempt + 1 < MAX_ATTEMPTS:
                     _log.warning("Confluence request could not connect; attempt=%d", attempt + 1)
                     await self._sleep(_backoff(attempt))
                     continue
                 raise Upstream(f"Could not reach Confluence ({type(exc).__name__}).") from None
             except httpx.RequestError as exc:
+                if stream_to is not None:
+                    _clear_destination(stream_to)
                 if is_read and attempt + 1 < MAX_ATTEMPTS:
                     _log.warning("Confluence read failed; attempt=%d error=%s", attempt + 1, type(exc).__name__)
                     await self._sleep(_backoff(attempt))
@@ -269,6 +247,8 @@ class ConfluenceTransport:
                 if response is not None and not response.is_closed:
                     await response.aclose()
             if retry_delay is not None:
+                if stream_to is not None:
+                    _clear_destination(stream_to)
                 await self._sleep(retry_delay)
                 continue
             if response is None:
@@ -285,7 +265,7 @@ class ConfluenceTransport:
                             "could be confirmed; inspect the target before retrying."
                         ) from None
                     raise
-            return response
+            return _ExchangeResult(response, streamed_bytes)
         raise Upstream("The Confluence request failed after the allowed attempts.")
 
     def _credential(self, token_override: str | None, expected_username: str | None) -> str:
@@ -322,6 +302,16 @@ async def _read_response(response: httpx.Response) -> httpx.Response:
     extensions = response.extensions
     await response.aclose()
     return httpx.Response(status, headers=headers, content=bytes(chunks), request=request, extensions=extensions)
+
+
+def _empty_response(response: httpx.Response) -> httpx.Response:
+    """Keep response status and headers after streaming and closing its body."""
+    return httpx.Response(
+        response.status_code,
+        headers=response.headers,
+        request=response.request,
+        extensions=response.extensions,
+    )
 
 
 def _clear_destination(destination: BinaryIO) -> None:

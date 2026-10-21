@@ -125,6 +125,29 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, 2)
         sleep.assert_awaited_once()
 
+    async def test_attachment_download_retries_status_and_honors_retry_after(self) -> None:
+        attempts = 0
+        sleep = AsyncMock()
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return httpx.Response(503, headers={"Retry-After": "0"}, content=b"retry")
+            return httpx.Response(200, content=b"complete")
+
+        _, transport = self.make_client(handler, sleep=sleep)
+        destination = BytesIO(b"discard")
+        content_type, size = await transport.download_to(
+            "download/attachments/55/guide.bin",
+            destination,
+            expected_username="sample-user",
+        )
+        self.assertEqual(destination.getvalue(), b"complete")
+        self.assertEqual((content_type, size), (None, 8))
+        self.assertEqual(attempts, 2)
+        sleep.assert_awaited_once_with(0.0)
+
     async def test_read_retries_connection_reset_then_succeeds(self) -> None:
         attempts = 0
         sleep = AsyncMock()
@@ -197,37 +220,27 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(attempts, 1)
 
-    async def test_oversized_successful_write_response_is_uncertain_and_never_retried(self) -> None:
-        attempts = 0
-
-        def handler(_: httpx.Request) -> httpx.Response:
-            nonlocal attempts
-            attempts += 1
-            return httpx.Response(200, content=b"oversized")
-
-        _, transport = self.make_client(handler)
-        with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", 4):
-            with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
-                await transport.send_json(
-                    "POST",
-                    "rest/api/content",
-                    body={"title": "Synthetic"},
-                    expected_username="sample-user",
-                )
-        self.assertEqual(attempts, 1)
-
-    async def test_oversized_uncertain_server_error_write_response_is_not_retried(self) -> None:
+    async def test_uncertain_write_responses_are_never_retried(self) -> None:
+        cases = [("oversized success", 200, b"oversized", 4)]
         for status in (500, 502, 504):
-            with self.subTest(status=status):
+            cases.extend(
+                (
+                    (f"HTTP {status}", status, b'{"message":"Synthetic server error"}', 1024),
+                    (f"oversized HTTP {status}", status, b"oversized", 4),
+                )
+            )
+
+        for name, status, body, response_limit in cases:
+            with self.subTest(case=name):
                 attempts = 0
 
                 def handler(_: httpx.Request) -> httpx.Response:
                     nonlocal attempts
                     attempts += 1
-                    return httpx.Response(status, content=b"oversized")
+                    return httpx.Response(status, content=body)
 
                 _, transport = self.make_client(handler)
-                with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", 4):
+                with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", response_limit):
                     with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
                         await transport.send_json(
                             "POST",
@@ -235,26 +248,6 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
                             body={"title": "Synthetic"},
                             expected_username="sample-user",
                         )
-                self.assertEqual(attempts, 1)
-
-    async def test_write_server_error_is_uncertain_and_never_retried(self) -> None:
-        for status in (500, 502, 504):
-            with self.subTest(status=status):
-                attempts = 0
-
-                def handler(_: httpx.Request) -> httpx.Response:
-                    nonlocal attempts
-                    attempts += 1
-                    return httpx.Response(status, json={"message": "Synthetic server error"})
-
-                _, transport = self.make_client(handler)
-                with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
-                    await transport.send_json(
-                        "POST",
-                        "rest/api/content",
-                        body={"title": "Synthetic"},
-                        expected_username="sample-user",
-                    )
                 self.assertEqual(attempts, 1)
 
     async def test_write_retries_only_retry_after_429_or_503(self) -> None:
@@ -361,39 +354,27 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AuthenticationRequired):
             await transport.get_json("rest/api/user/current", expected_username="sample-user")
 
-    async def test_sign_out_after_successful_write_response_reports_uncertain_outcome(self) -> None:
-        credentials = FakeCredentialSource()
+    async def test_account_change_after_write_response_reports_uncertain_outcome(self) -> None:
+        cases = [
+            ("sign out", None),
+            ("switch account", StoredCredential(username="sample-user-b", token="synthetic-pat-b")),
+        ]
+        for name, new_credential in cases:
+            with self.subTest(change=name):
+                credentials = FakeCredentialSource()
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            credentials.credential = None
-            return httpx.Response(200, json={"id": "700"})
+                def handler(_: httpx.Request) -> httpx.Response:
+                    credentials.credential = new_credential
+                    return httpx.Response(200, json={"id": "700"})
 
-        _, transport = self.make_client(handler, credentials=credentials)
-        with self.assertRaisesRegex(UncertainWrite, "inspect the target before retrying"):
-            await transport.send_json(
-                "POST",
-                "rest/api/content",
-                body={"title": "Synthetic"},
-                expected_username="sample-user",
-            )
-
-    async def test_account_switch_after_successful_write_response_reports_uncertain_outcome(self) -> None:
-        credentials = FakeCredentialSource()
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            credentials.credential = StoredCredential(
-                username="sample-user-b", token="synthetic-pat-b"
-            )
-            return httpx.Response(200, json={"id": "700"})
-
-        _, transport = self.make_client(handler, credentials=credentials)
-        with self.assertRaisesRegex(UncertainWrite, "inspect the target before retrying"):
-            await transport.send_json(
-                "POST",
-                "rest/api/content",
-                body={"title": "Synthetic"},
-                expected_username="sample-user",
-            )
+                _, transport = self.make_client(handler, credentials=credentials)
+                with self.assertRaisesRegex(UncertainWrite, "inspect the target before retrying"):
+                    await transport.send_json(
+                        "POST",
+                        "rest/api/content",
+                        body={"title": "Synthetic"},
+                        expected_username="sample-user",
+                    )
 
     async def test_status_mapping_and_error_detail(self) -> None:
         _, transport = self.make_client(lambda _: httpx.Response(409, json={"message": "Version conflict"}))

@@ -17,7 +17,6 @@ sys.path.insert(0, str(ROOT / "research"))
 
 from confluence_connector.config import (
     _read_config,
-    add_config_argument,
     data_dir,
     load_config,
     write_cql_timezone_if_missing,
@@ -81,10 +80,12 @@ class ConfigurationChecks(unittest.TestCase):
                     prompt.assert_not_called()
                     client.assert_not_called()
 
-    def test_configuration_is_loaded_once_per_process(self) -> None:
+    def test_selected_config_path_is_cached_and_shared(self) -> None:
         original = self.configure(settings())
         self.config_path.write_text("{}", encoding="utf-8")
         self.assertIs(load_config(self.config_path), original)
+        self.assertIs(load_config(), original)
+        self.assertIs(load_config(self.config_path.parent / "." / self.config_path.name), original)
 
     def test_missing_probe_endpoint_has_no_fallback(self) -> None:
         config = settings()
@@ -157,21 +158,15 @@ class ConfigurationChecks(unittest.TestCase):
         self.assertEqual(load_config()["cql_timezone"], "UTC+05:30")
         self.assertEqual(list(self.folder.glob(".confluence_config.json.*.tmp")), [])
 
-    def test_relative_and_absolute_paths_share_the_same_settings(self) -> None:
-        original = self.configure(settings())
-        self.config_path.write_text("{}", encoding="utf-8")
-        self.assertIs(load_config(self.config_path.parent / "." / self.config_path.name), original)
-
-    def test_command_override_is_shared_with_later_callers(self) -> None:
-        expected = self.configure(settings())
-        self.assertIs(load_config(), expected)
-
     def test_config_override_works_before_or_after_a_command(self) -> None:
         parser = build_parser()
-        before = parser.parse_args(["--config", str(self.config_path), "status"])
-        after = parser.parse_args(["status", "--config", str(self.config_path)])
-        self.assertEqual(before.config, self.config_path)
-        self.assertEqual(after.config, self.config_path)
+        cases = (
+            ["--config", str(self.config_path), "status"],
+            ["status", "--config", str(self.config_path)],
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                self.assertEqual(parser.parse_args(arguments).config, self.config_path)
 
     def test_environment_override_works_outside_repository(self) -> None:
         self.configure(settings())

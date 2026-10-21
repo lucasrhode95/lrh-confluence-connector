@@ -156,6 +156,7 @@ email or a SharePoint file stays a link; the agent follows it with the owning co
 ```bash
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
+uv run pyflakes src research tests
 uv run python research/probe_auth.py --help
 ```
 
