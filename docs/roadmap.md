@@ -339,11 +339,14 @@ Working behavior that could be simpler, cheaper or better tested.
 
 #### One validator for each input kind
 
-Page references, space keys, the current-page check, the account-error passthrough, filename
-sanitization (attachments and exports), `_cql_literal` and same-instance URL parsing are repeated across
-[`remote/links.py`](../src/confluence_connector/remote/links.py),
-[`remote/confluence.py`](../src/confluence_connector/remote/confluence.py) and the services, and already
-differ: one copy refuses a control character that another accepts. Keep one of each.
+**Implemented, awaiting review (2026-10-21).** Page references, space keys and current-page checks now
+share `domain/validation.py`; search scope space keys use the same allowlist. CQL quoting and
+same-instance URL checks are shared by the remote adapters and page renderer through `domain/cql.py`
+and `domain/urls.py`. Account-boundary propagation is in `service/errors.py`, and attachment/export
+filename cleanup and filesystem limits are in `service/filenames.py`. The structure service retains its
+prior allowance for metadata whose status is absent; write services still require `current`. Offline
+coverage passes for configuration, search escaping, page operations, link handling, and filename bounds.
+Architecture now records the shared modules.
 
 #### One placement resolver
 

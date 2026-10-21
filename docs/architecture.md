@@ -127,6 +127,8 @@ exact-title CQL lookup in that space. Any other host or path is refused with `In
 ### 5.5 [`domain/`](../src/confluence_connector/domain/)
 
 - Pydantic models are the only schema: FastMCP derives the tool schemas from them.
+- Shared page-reference, space-key and current-page checks live in `validation.py`; CQL quoting and
+  same-instance URL rules live in `cql.py` and `urls.py`.
 - Errors: `AuthenticationRequired`, `AccountMismatch`, `SecureStorageUnavailable`, `InvalidRequest`,
   `NotFound`, `PermissionDenied`, `Throttled`, `Upstream`, `Conflict` and `UncertainWrite`. Each has a
   readable message; the surface returns it as a tool error.
@@ -135,6 +137,9 @@ exact-title CQL lookup in that space. Any other host or path is refused with `In
 
 Every input is validated once, at the service entry point, for every caller. Services are built per
 account by `AppContext` ([`bootstrap.py`](../src/confluence_connector/bootstrap.py)).
+
+Account-boundary error propagation is shared in `errors.py`. Attachment downloads and exports share
+filename sanitization and filesystem component limits from `filenames.py`.
 
 **[`search.py`](../src/confluence_connector/service/search.py)** builds CQL from literal terms and
 validated scope only; terms escape text-query syntax separately from CQL string quoting. Title search
