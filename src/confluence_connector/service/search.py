@@ -12,7 +12,6 @@ from confluence_connector.domain.errors import (
     AuthenticationRequired,
     ConnectorError,
     InvalidRequest,
-    Upstream,
 )
 from confluence_connector.domain.cql import cql_literal
 from confluence_connector.domain.models import (

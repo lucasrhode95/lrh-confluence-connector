@@ -388,10 +388,11 @@ existing partial-stream timeout test still passes.
 
 #### Remove dead code and add an undefined-name check
 
-Remove the unused helper in `service/writes.py`, the unreachable ownership branch in `bootstrap.py` and
-the needless `async` on `_nodes_for_children`. Add a `pyflakes`-style check to the documented checks:
-`service/pages.py` raised `Upstream` without importing it, which `compileall` does not catch.
-The missing import is fixed in this pass; the dead-code cleanup and additional static check remain open.
+**Implemented, awaiting review (2026-10-21).** The unused `_raise_account_error` helper in
+`service/writes.py` was already removed by the shared validation cleanup. Removed `AppContext`'s
+unreachable client-ownership fallback, made `_nodes_for_children` synchronous, and added pyflakes to
+the locked development dependencies and documented checks. The check also found and removed unused
+imports across source and tests; it now passes over `src`, `research` and `tests`.
 
 #### Fewer, stronger tests
 
