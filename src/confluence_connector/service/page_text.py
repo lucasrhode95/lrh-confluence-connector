@@ -55,6 +55,15 @@ class _Macro:
     page_title: str | None = None
 
 
+@dataclass(frozen=True)
+class ParsedStorage:
+    """Macro facts, typed references and source slices extracted from one storage parse."""
+
+    macros: tuple[_Macro, ...] = ()
+    references: tuple[PageReference, ...] = ()
+    top_level_blocks: tuple[str, ...] = ()
+
+
 def render_page_body(
     view_html: str,
     storage_html: str,
@@ -63,22 +72,48 @@ def render_page_body(
     attachments: list[PageAttachment],
     base_url: str | None = None,
     macros_from_storage: bool = True,
+    parsed_storage: ParsedStorage | None = None,
+    convert_markdown: bool = True,
 ) -> RenderedPageBody:
     """Convert a page's ``view`` body to text blocks and collect typed references.
 
     The caller validates page references and parse scope once; this converter trusts that contract.
-    With ``macros_from_storage`` false, macro parameters and storage references are not used.
+    With ``macros_from_storage`` false, macro parameters and storage references are not used. Callers
+    reading one page can pass storage parsed for that page ID and body so macros, references and
+    rich-body slices share a parse.
     """
-    macros = _storage_macros(storage_html) if macros_from_storage else []
-    references = _storage_references(storage_html, page_id, macros) if macros_from_storage else []
+    storage = parsed_storage
+    if macros_from_storage and storage is None:
+        storage = parse_storage(storage_html, page_id=page_id, include_metadata=True)
+    macros = list(storage.macros) if macros_from_storage and storage is not None else []
+    references = list(storage.references) if macros_from_storage and storage is not None else []
     soup = BeautifulSoup(view_html, "html.parser")
     storage_files = {ref.attachment_id: ref.filename for ref in references if ref.kind == "attachment" and ref.attachment_id and ref.filename}
     references.extend(_prepare_view(soup, macros, page_id, attachments, base_url, storage_files))
-    blocks = [PageTextBlock(text) for text in _split_blocks(_to_markdown(soup))]
-    for macro in macros:
-        if macro.name == "html":
-            blocks.append(PageTextBlock("[Unrendered macro: html]", (_macro_reference(macro, page_id),)))
+    blocks: list[PageTextBlock] = []
+    if convert_markdown:
+        blocks = [PageTextBlock(text) for text in _split_blocks(_to_markdown(soup))]
+        for macro in macros:
+            if macro.name == "html":
+                blocks.append(PageTextBlock("[Unrendered macro: html]", (_macro_reference(macro, page_id),)))
     return RenderedPageBody(blocks=tuple(blocks), references=tuple(_unique(references)))
+
+
+def parse_storage(
+    storage_html: str,
+    *,
+    page_id: str,
+    include_metadata: bool = True,
+    include_top_level_blocks: bool = False,
+) -> ParsedStorage:
+    """Extract requested facts and source slices from one parsed storage document."""
+    soup = BeautifulSoup(storage_html, "html.parser")
+    macros = tuple(_storage_macros(soup)) if include_metadata else ()
+    references = (
+        tuple(_storage_references(soup, page_id, list(macros))) if include_metadata else ()
+    )
+    blocks = tuple(_storage_top_level_blocks(storage_html, soup)) if include_top_level_blocks else ()
+    return ParsedStorage(macros=macros, references=references, top_level_blocks=blocks)
 
 
 def storage_top_level_blocks(storage_html: str) -> list[str]:
@@ -88,6 +123,10 @@ def storage_top_level_blocks(storage_html: str) -> list[str]:
     markup. Whitespace-only slices are kept with the element before them.
     """
     soup = BeautifulSoup(storage_html, "html.parser")
+    return _storage_top_level_blocks(storage_html, soup)
+
+
+def _storage_top_level_blocks(storage_html: str, soup: BeautifulSoup) -> list[str]:
     line_starts = [0, *(match.end() for match in re.finditer(r"\n", storage_html))]
     starts = sorted(
         line_starts[tag.sourceline - 1] + tag.sourcepos
@@ -491,8 +530,7 @@ def _split_blocks(markdown: str) -> list[str]:
 # Storage source: macro parameters and references, read from storage elements.
 
 
-def _storage_macros(storage_html: str) -> list[_Macro]:
-    soup = BeautifulSoup(storage_html, "html.parser")
+def _storage_macros(soup: BeautifulSoup) -> list[_Macro]:
     macros: list[_Macro] = []
     for node in soup.find_all("ac:structured-macro"):
         name = (node.get("ac:name") or "").strip().casefold()
@@ -518,8 +556,9 @@ def _storage_macros(storage_html: str) -> list[_Macro]:
     return macros
 
 
-def _storage_references(storage_html: str, page_id: str, macros: list[_Macro]) -> list[PageReference]:
-    soup = BeautifulSoup(storage_html, "html.parser")
+def _storage_references(
+    soup: BeautifulSoup, page_id: str, macros: list[_Macro]
+) -> list[PageReference]:
     references: list[PageReference] = []
     for node in soup.find_all(["ri:page", "ri:attachment", "ac:inline-comment-marker"]):
         if node.name == "ri:page" and (node.get("ri:content-id") or node.get("ri:content-title")):
