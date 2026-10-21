@@ -65,6 +65,9 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await transport.get_json("rest/api/content"), {"ok": True})
         self.assertEqual(await transport.send_json("POST", "rest/api/content", expected_username="sample-user"), {"ok": True})
         self.assertEqual(len(attempts), 2)
+        with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", 4):
+            with self.assertRaisesRegex(Upstream, "larger than"):
+                await transport.get_json("rest/api/content")
 
     async def test_multipart_upload_reuses_safe_retries_and_retains_file_bytes(self) -> None:
         requests = []

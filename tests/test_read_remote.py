@@ -41,8 +41,21 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_collection_with_continuation_fails_instead_of_claiming_completion(self) -> None:
         api = self.make_api(lambda request: httpx.Response(200, json={"results": [], "_links": {"next": "?start=500"}}))
-        with self.assertRaisesRegex(Upstream, "empty page with a continuation"):
-            await api.list_page_comments("55", expected_username="sample-user")
+        for operation in (
+            api.list_page_comments("55", expected_username="sample-user"),
+            PageTree(api, None, "sample-user").get_page_tree(space_key="SYNTH"),
+        ):
+            with self.assertRaisesRegex(Upstream, "empty page with a continuation"):
+                await operation
+
+    async def test_attachment_cap_fails_explicitly_instead_of_returning_a_partial_list(self) -> None:
+        api = self.make_api(lambda request: httpx.Response(200, json={
+            "results": [{"id": "1", "title": "one"}, {"id": "2", "title": "two"}],
+            "_links": {"next": "?start=2"},
+        }))
+        with patch("confluence_connector.remote.confluence.MAX_COLLECTION_ITEMS", 2):
+            with self.assertRaisesRegex(Upstream, "safety cap.*incomplete"):
+                await api.list_page_attachments("55", expected_username="sample-user")
 
     async def test_search_sends_archived_filter_and_maps_source_fields(self) -> None:
         observed: list[httpx.Request] = []

@@ -109,13 +109,14 @@ class PageTextRenderingChecks(unittest.TestCase):
     def test_complex_table_preserves_links_and_is_one_budget_block(self) -> None:
         rendered = _render('<table class="layout"><tr><td><pre>first\n\nsecond</pre>'
             '<a href="https://example.test/guide" style="color:red">Guide</a>'
-            '<a href="javascript:bad()">Unsafe</a></td></tr></table>')
+            '<a href="javascript:bad()">Unsafe</a><a href="https://[broken">Broken</a></td></tr></table>')
         self.assertEqual(len(rendered.blocks), 1)
         text = rendered.blocks[0].text
         self.assertIn('<a href="https://example.test/guide">Guide</a>', text)
         self.assertIn('first\n\nsecond', text)
         self.assertNotIn('javascript:', text)
         self.assertNotIn('style=', text)
+        self.assertIn('<a>Broken</a>', text)
 
     def test_active_content_is_dropped_and_the_html_macro_is_marked(self) -> None:
         text = _text(

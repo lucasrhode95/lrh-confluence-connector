@@ -232,14 +232,6 @@ class PageExports:
                 attachment_override = await self._api.list_page_attachments(
                     page_id, expected_username=self._username
                 )
-                if len(attachment_override) == 500:
-                    outcome.report_items.append(
-                        _ReportItem(
-                            "attachment list",
-                            _page_label(page_id, None),
-                            "The attachment list reached its 500-item request limit and may be incomplete.",
-                        )
-                    )
             except ConnectorError as exc:
                 raise_account_error(exc)
                 attachment_override = []

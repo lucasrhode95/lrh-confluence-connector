@@ -31,8 +31,8 @@ from confluence_connector.service.timezone_calibration import calibrate_cql_time
 from confluence_connector.service.writes import PageWrites
 from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
-from test_structure_service import _StructureApi, _Links, _page
-from test_timezone_calibration import _REFERENCE_UTC, _page_row
+from fakes.structure import _StructureApi, _Links, _page
+from fakes.calibration import _REFERENCE_UTC, _page_row
 
 
 class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):

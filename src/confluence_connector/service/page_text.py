@@ -451,8 +451,11 @@ def _minimal_table_html(table: Tag) -> str:
         allowed = {"colspan", "rowspan"} if tag.name in {"th", "td"} else set()
         if tag.name == "a":
             href = re.sub(r"[\x00-\x20\x7f]+", "", str(tag.get("href", "")))
-            if urlsplit(href).scheme.casefold() in {"", "http", "https", "mailto"}:
-                allowed.add("href")
+            try:
+                if urlsplit(href).scheme.casefold() in {"", "http", "https", "mailto"}:
+                    allowed.add("href")
+            except ValueError:
+                pass  # Malformed destinations retain their visible label only.
         tag.attrs = {key: value for key, value in tag.attrs.items() if key in allowed}
     return str(copy)
 
