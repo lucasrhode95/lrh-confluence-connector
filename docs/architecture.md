@@ -184,8 +184,11 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 
 **[`writes.py`](../src/confluence_connector/service/writes.py) and
 [`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: `to_storage` converts and
-checks `rich` input (requirements §10.1); `content_loss` compares inline-comment anchors, macro names
-and attachment references between the stored and new bodies.
+checks `rich` input with BeautifulSoup, converts code blocks and expand sections, and refuses active
+content and excessive nesting (requirements §10.1). The HTML parser repairs some malformed input
+before sending it to Confluence; the roadmap tracks whether that matches the D5 error contract.
+`content_loss` compares inline-comment anchors, macro names and attachment references between the
+stored and new bodies.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.
