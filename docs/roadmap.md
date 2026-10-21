@@ -396,17 +396,13 @@ imports across source and tests; it now passes over `src`, `research` and `tests
 
 #### Fewer, stronger tests
 
-- Run fixture setup through its real write path against a fake transport, instead of the tests that
-  only list macro names; it would have caught the fixture bug above.
-- Make tables of near-identical cases: uncertain-write outcomes and account changes after a write
-  (`test_remote.py`); label partial failures and draft cursors (`test_writes_service.py`); config
-  precedence (`test_config.py`); MCP round-trips (`test_app.py`, moving the export attachment-reuse
-  case to the export tests).
-- Remove the trash assertions repeated in the omnibus route test and assertions on embedded constants,
-  such as the fixture PNG signature.
-
-The shallow fixture macro-list test and embedded PNG-signature assertion were removed in this pass;
-fixture creation now has an integration regression. The remaining test consolidation is still open.
+**Implemented, awaiting review (2026-10-21).** The fixture macro-name check and PNG-signature assertion
+were already removed; fixture setup now exercises the real write path against a fake transport. This
+pass tables the uncertain-write and post-write account-change cases, label partial failures, draft
+cursor rejection and config-path caching. Search and page-read MCP round trips share one table, while
+attachment-list reuse is tested at the export-service boundary. Repeated trash checks now assert
+preflight-before-write ordering and both route statuses together. The offline suite passes 274 tests
+with one platform skip; compilation, pyflakes and whitespace checks pass.
 
 ### Enhancements
 

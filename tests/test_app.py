@@ -283,83 +283,88 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tools_by_name["list_trash"].annotations.readOnlyHint)
         await context.aclose()
 
-    async def test_search_tool_runs_through_the_account_bound_mcp_service(self) -> None:
-        requests: list[httpx.Request] = []
-
-        def respond(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {
-                            "title": "Synthetic search result",
-                            "content": {"id": "123", "type": "page", "title": "Synthetic search result"},
-                        }
-                    ],
-                    "start": 0,
-                    "size": 1,
-                    "totalSize": 1,
-                },
-            )
-
-        client = httpx.AsyncClient(
-            base_url="https://confluence.example.test/wiki/",
-            transport=httpx.MockTransport(respond),
-        )
-        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
-        server = build_server(context)
-        try:
-            result = await server.call_tool("search_content", {"query": "synthetic", "limit": 1})
-            self.assertIn("Synthetic search result", str(result))
-            self.assertEqual(len(requests), 1)
-            self.assertEqual(requests[0].url.path, "/wiki/rest/api/search")
-            self.assertEqual(requests[0].url.params["includeArchivedSpaces"], "true")
-        finally:
-            await context.aclose()
-            await client.aclose()
-
-    async def test_get_pages_tool_reads_a_synthetic_page(self) -> None:
-        requests: list[httpx.Request] = []
-
-        def respond(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            if request.url.path.endswith("/child/attachment"):
-                return httpx.Response(200, json={"results": []})
-            if request.url.path.endswith("/child/comment"):
-                return httpx.Response(200, json={"results": []})
-            return httpx.Response(
-                200,
-                json={
-                    "id": "55",
-                    "title": "Synthetic page",
-                    "type": "page",
-                    "space": {"key": "SYNTH"},
-                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
-                    "body": {"view": {"value": "<p>Page body</p>"}, "storage": {"value": "<p>Page body</p>"}},
-                },
-            )
-
-        client = httpx.AsyncClient(
-            base_url="https://confluence.example.test/wiki/",
-            transport=httpx.MockTransport(respond),
-        )
-        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
-        server = build_server(context)
-        try:
-            result = await server.call_tool("get_pages", {"pages": "55"})
-            self.assertIn("Page body", str(result))
-            self.assertEqual(
-                {request.url.path for request in requests},
+    async def test_read_mcp_tools_round_trip_synthetic_responses(self) -> None:
+        cases = (
+            (
+                "search_content",
+                {"query": "synthetic", "limit": 1},
+                "Synthetic search result",
+                {"/wiki/rest/api/search"},
+            ),
+            (
+                "get_pages",
+                {"pages": "55"},
+                "Page body",
                 {
                     "/wiki/rest/api/content/55",
                     "/wiki/rest/api/content/55/child/attachment",
                     "/wiki/rest/api/content/55/child/comment",
                 },
-            )
-        finally:
-            await context.aclose()
-            await client.aclose()
+            ),
+        )
+        for tool_name, arguments, expected_text, expected_routes in cases:
+            with self.subTest(tool=tool_name):
+                requests: list[httpx.Request] = []
+
+                def respond(request: httpx.Request) -> httpx.Response:
+                    requests.append(request)
+                    if request.url.path == "/wiki/rest/api/search":
+                        return httpx.Response(
+                            200,
+                            json={
+                                "results": [
+                                    {
+                                        "title": "Synthetic search result",
+                                        "content": {
+                                            "id": "123",
+                                            "type": "page",
+                                            "title": "Synthetic search result",
+                                        },
+                                    }
+                                ],
+                                "start": 0,
+                                "size": 1,
+                                "totalSize": 1,
+                            },
+                        )
+                    if request.url.path.endswith("/child/attachment"):
+                        return httpx.Response(200, json={"results": []})
+                    if request.url.path.endswith("/child/comment"):
+                        return httpx.Response(200, json={"results": []})
+                    if request.url.path == "/wiki/rest/api/content/55":
+                        return httpx.Response(
+                            200,
+                            json={
+                                "id": "55",
+                                "title": "Synthetic page",
+                                "type": "page",
+                                "space": {"key": "SYNTH"},
+                                "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
+                                "body": {
+                                    "view": {"value": "<p>Page body</p>"},
+                                    "storage": {"value": "<p>Page body</p>"},
+                                },
+                            },
+                        )
+                    self.fail(f"Unexpected route {request.url.path}")
+
+                client = httpx.AsyncClient(
+                    base_url="https://confluence.example.test/wiki/",
+                    transport=httpx.MockTransport(respond),
+                )
+                context = AppContext(
+                    settings(), store=FakeCredentialSource(), http_client=client
+                )  # type: ignore[arg-type]
+                server = build_server(context)
+                try:
+                    result = await server.call_tool(tool_name, arguments)
+                    self.assertIn(expected_text, str(result))
+                    self.assertEqual({request.url.path for request in requests}, expected_routes)
+                    if tool_name == "search_content":
+                        self.assertEqual(requests[0].url.params["includeArchivedSpaces"], "true")
+                finally:
+                    await context.aclose()
+                    await client.aclose()
 
     async def test_download_attachments_tool_returns_a_local_file(self) -> None:
         from tempfile import TemporaryDirectory
@@ -458,79 +463,6 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                         "/wiki/rest/api/content/55/child/attachment",
                         "/wiki/rest/api/content/55/child/comment",
                     },
-                )
-            finally:
-                await context.aclose()
-                await client.aclose()
-
-    async def test_export_pages_reuses_the_attachment_list_for_downloads(self) -> None:
-        import zipfile
-        from tempfile import TemporaryDirectory
-
-        requests: list[httpx.Request] = []
-
-        def respond(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            if request.url.path.endswith("/child/attachment"):
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": [
-                            {
-                                "id": "att-1",
-                                "title": "guide.txt",
-                                "mediaType": "text/plain",
-                                "fileSize": 8,
-                                "_links": {"download": "/download/attachments/55/guide.txt"},
-                            }
-                        ]
-                    },
-                )
-            if request.url.path.endswith("/child/comment"):
-                return httpx.Response(200, json={"results": []})
-            if request.url.path.endswith("/download/attachments/55/guide.txt"):
-                return httpx.Response(200, content=b"synthetic", headers={"content-type": "text/plain"})
-            return httpx.Response(
-                200,
-                json={
-                    "id": "55",
-                    "title": "Synthetic export",
-                    "type": "page",
-                    "space": {"key": "SYNTH", "name": "Synthetic Space"},
-                    "version": {"number": 2, "when": "2026-10-01T00:00:00Z"},
-                    "body": {
-                        "view": {"value": "<p>Export body</p>"},
-                        "storage": {"value": "<p>Export body</p>"},
-                    },
-                },
-            )
-
-        client = httpx.AsyncClient(
-            base_url="https://confluence.example.test/wiki/",
-            transport=httpx.MockTransport(respond),
-        )
-        context = AppContext(settings(), store=FakeCredentialSource(), http_client=client)  # type: ignore[arg-type]
-        server = build_server(context)
-        with TemporaryDirectory() as directory, patch(
-            "confluence_connector.config.data_dir", return_value=Path(directory)
-        ):
-            try:
-                await server.call_tool("export_pages", {"pages": "55", "include_attachments": True})
-                output_files = list(Path(directory).rglob("*.zip"))
-                self.assertEqual(len(output_files), 1)
-                with zipfile.ZipFile(output_files[0]) as archive:
-                    self.assertIn("Synthetic export (55) v2/guide.txt", archive.namelist())
-                    self.assertEqual(
-                        archive.read("Synthetic export (55) v2/guide.txt"), b"synthetic"
-                    )
-                    exported_text = archive.read("Synthetic export (55) v2.txt").decode("utf-8")
-                    self.assertIn("guide.txt", exported_text)
-                self.assertEqual(
-                    sum(request.url.path.endswith("/child/attachment") for request in requests), 1
-                )
-                self.assertEqual(
-                    sum(request.url.path.endswith("/download/attachments/55/guide.txt") for request in requests),
-                    1,
                 )
             finally:
                 await context.aclose()

@@ -220,15 +220,21 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.truncated)
         self.assertIsNone(result.next_cursor)
 
-    async def test_draft_cursor_rejects_added_scope(self) -> None:
+    async def test_draft_cursor_rejects_malformed_or_overridden_scope(self) -> None:
         first = await self.service.list_drafts(limit=1)
-        with self.assertRaisesRegex(InvalidRequest, "Pass only cursor"):
-            await self.service.list_drafts(cursor=first.next_cursor, space_key="SYNTH")
-
-    async def test_draft_cursor_rejects_missing_fields(self) -> None:
-        cursor = encode("list_drafts", start=0, limit=10)
-        with self.assertRaisesRegex(InvalidRequest, "Malformed draft cursor"):
-            await self.service.list_drafts(cursor=cursor)
+        self.assertIsNotNone(first.next_cursor)
+        cases = (
+            ("added scope", first.next_cursor, "SYNTH", "Pass only cursor"),
+            (
+                "missing cursor fields",
+                encode("list_drafts", start=0, limit=10),
+                None,
+                "Malformed draft cursor",
+            ),
+        )
+        for name, cursor, space_key, message in cases:
+            with self.subTest(case=name), self.assertRaisesRegex(InvalidRequest, message):
+                await self.service.list_drafts(cursor=cursor, space_key=space_key)
 
     async def test_draft_offset_cap_reports_truncation_without_an_invalid_cursor(self) -> None:
         self.api.draft_page_override = RemoteDraftPage(
@@ -282,53 +288,72 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
             await self.service.delete_draft("55")
         self.assertEqual(self.api.deleted_drafts, [])
 
-    async def test_set_labels_reports_completed_failed_and_unattempted_operations(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old", "another"]
-        self.api.label_errors[("remove", "old")] = Upstream("synthetic failure")
+    async def test_label_partial_failures_preserve_confirmed_and_unattempted_changes(self) -> None:
+        cases = [
+            (
+                "upstream failure after add",
+                ["old", "another"],
+                ["new"],
+                ["old", "another"],
+                "old",
+                Upstream,
+                ["new"],
+                [],
+                ["another"],
+                [("add", "55", "new"), ("remove", "55", "old")],
+            ),
+            (
+                "account change after add",
+                ["old", "another"],
+                ["new"],
+                ["old", "another"],
+                "old",
+                AccountMismatch,
+                ["new"],
+                [],
+                ["another"],
+                [("add", "55", "new"), ("remove", "55", "old")],
+            ),
+            (
+                "uncertain failure after add",
+                ["old"],
+                ["new"],
+                ["old"],
+                "old",
+                UncertainWrite,
+                ["new"],
+                [],
+                [],
+                [("add", "55", "new"), ("remove", "55", "old")],
+            ),
+            (
+                "later removal failure",
+                ["old", "another"],
+                [],
+                ["old", "another"],
+                "another",
+                Upstream,
+                [],
+                ["old"],
+                [],
+                [("remove", "55", "old"), ("remove", "55", "another")],
+            ),
+        ]
 
-        result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
+        for name, labels, additions, removals, failed_label, error_type, added, removed, pending, calls in cases:
+            with self.subTest(case=name):
+                api = _WriteApi()
+                api.pages["55"].metadata.labels = labels
+                api.label_errors[("remove", failed_label)] = error_type("synthetic failure")
+                service = PageWrites(api, _Links(api), "sample-user", "https://confluence.example.test/wiki")
 
-        self.assertEqual(result.added, ["new"])
-        self.assertEqual(result.removed, [])
-        self.assertEqual(result.failures[0].label, "old")
-        self.assertEqual(result.not_attempted[0].label, "another")
-        self.assertEqual(
-            self.api.label_calls,
-            [("add", "55", "new"), ("remove", "55", "old")],
-        )
+                result = await service.set_labels("55", add=additions, remove=removals)
 
-    async def test_successful_removal_is_not_reversed_after_a_later_failure(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old", "another"]
-        self.api.label_errors[("remove", "another")] = Upstream("synthetic failure")
-
-        result = await self.service.set_labels("55", remove=["old", "another"])
-
-        self.assertEqual(result.removed, ["old"])
-        self.assertEqual(result.failures[0].label, "another")
-        self.assertEqual(
-            self.api.label_calls,
-            [("remove", "55", "old"), ("remove", "55", "another")],
-        )
-
-    async def test_account_change_during_label_updates_preserves_partial_result(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old", "another"]
-        self.api.label_errors[("remove", "old")] = AccountMismatch("The active account changed.")
-
-        result = await self.service.set_labels("55", add=["new"], remove=["old", "another"])
-
-        self.assertEqual(result.added, ["new"])
-        self.assertEqual(result.failures[0].label, "old")
-        self.assertEqual(result.not_attempted[0].label, "another")
-        self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
-
-    async def test_uncertain_label_failure_preserves_prior_success_without_followup(self) -> None:
-        self.api.pages["55"].metadata.labels = ["old"]
-        self.api.label_errors[("remove", "old")] = UncertainWrite("Synthetic uncertain outcome.")
-
-        result = await self.service.set_labels("55", add=["new"], remove=["old"])
-
-        self.assertEqual(result.added, ["new"])
-        self.assertEqual(self.api.label_calls, [("add", "55", "new"), ("remove", "55", "old")])
+                self.assertEqual(result.added, added)
+                self.assertEqual(result.removed, removed)
+                self.assertEqual([failure.label for failure in result.failures], [failed_label])
+                self.assertEqual([failure.label for failure in result.not_attempted], pending)
+                self.assertEqual(api.label_calls, calls)
 
     async def test_set_labels_skips_noops_and_rejects_overlap(self) -> None:
         result = await self.service.set_labels("55", add=["old"], remove=["missing"])
