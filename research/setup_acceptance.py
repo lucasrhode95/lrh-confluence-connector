@@ -220,7 +220,7 @@ async def _ensure_page(
     elif parent_id is not None and position is not None:
         await services.structure.move_page(page_id, parent_id=parent_id, position=position)
     if _fixture_body_needs_refresh(current.storage_body, body):
-        # A parent move may have created a new version. Pin the fresh version before updating.
+        # Same-space placement preserves the content version. Pin the fresh version before updating.
         current = await services.api.get_page_content(
             page_id, expected_username=services.username, include_storage=True
         )
