@@ -257,7 +257,7 @@ class PageStructure:
                 space_key=space_key,
                 position=position,
                 sibling=sibling,
-                )
+            )
         else:
             selected_position, parent_reference, selected_space, sibling_reference = (
                 "last",

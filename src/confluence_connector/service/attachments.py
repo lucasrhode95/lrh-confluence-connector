@@ -60,7 +60,17 @@ class AttachmentDownloads:
             for attachment_id in selected_ids
             if attachment_id not in by_id
         ]
-        directory = self._download_directory()
+        selected = [attachment_id for attachment_id in selected_ids if attachment_id in by_id]
+        if not selected:
+            return AttachmentDownloadResult(page_id=resolved.page_id, files=[], failures=missing)
+        try:
+            directory = self._download_directory()
+        except OSError as exc:
+            return AttachmentDownloadResult(page_id=resolved.page_id, files=[], failures=missing + [
+                AttachmentDownloadFailure(attachment_id=attachment_id, filename=by_id[attachment_id].filename,
+                    error=f"LocalFileError: {type(exc).__name__}")
+                for attachment_id in selected
+            ])
         tasks = [
             self.download_to_directory(by_id[attachment_id], directory)
             for attachment_id in selected_ids
