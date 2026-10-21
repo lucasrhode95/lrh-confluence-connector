@@ -24,7 +24,8 @@ A local MCP server for one user's Confluence Data Center account.
    - **Manually:** install [Git](https://git-scm.com/downloads) and
      [uv](https://docs.astral.sh/uv/getting-started/installation/). uv supplies Python 3.12+ if needed.
      Find uv's full path with `(Get-Command uv -CommandType Application).Source` on Windows or
-     `command -v uv` on macOS/Linux. Test that executable with `--version`, then clone and install:
+     `command -v uv` on macOS/Linux. If PATH cannot find it, check the installer's destination.
+     Test that executable with `--version`, then clone and install:
 
      ```bash
      git clone https://github.com/lucasrhode95/lrh-confluence-connector.git
@@ -87,8 +88,10 @@ A local MCP server for one user's Confluence Data Center account.
 
    Paste your personal access token at the hidden prompt. An agent should hand this step to you and
    never ask for the token in chat. The connector checks the token with Confluence, stores it with your
-   username in encrypted per-user storage (it refuses to run without encryption), and then measures
-   Confluence's search time zone into `cql_timezone`. To switch accounts, run `auth --sign-out`, then
+   username and instance URL in encrypted per-user storage (it refuses to run without encryption),
+   and then measures Confluence's search time zone into `cql_timezone` when unset. A fixed offset does not follow daylight
+   saving; replace it with the IANA zone if needed. An existing setting is compared by `status --check`
+   and warned on mismatch. To switch accounts or instances, run `auth --sign-out`, then
    `auth` again; sign-out deletes the local copy but does not revoke the token in Confluence.
 
 4. **Restart the client completely.** Save your work and close **all** VS Code or chat-app windows.
@@ -97,13 +100,17 @@ A local MCP server for one user's Confluence Data Center account.
    An agent should leave these steps for you before its session ends, rather than close the app.
    Restart again after any later change to `confluence_config.json`.
 
-5. **Verify and try it.** Check the stored sign-in against Confluence from the connector folder:
+5. **Verify and try it.** Check stored sign-in status from the connector folder:
 
    ```bash
-   uv run confluence-connector status --check
+   uv run confluence-connector status
    ```
 
-   Then confirm the tools appear in the restarted client and make a small read-only request, such as
+   This is an offline check. Run `status --check` when you want live token verification and timezone
+   calibration. If an unbound encrypted record is rejected after an update, clear it with
+   `auth --sign-out` and sign in once to store the bound format.
+
+   Also confirm the tools appear in the restarted client and make a small read-only request, such as
    "Find Confluence pages about the release checklist". An agent should report CLI and MCP verification
    separately, leaving any post-restart check as pending until it is performed.
 
@@ -120,8 +127,10 @@ on Windows, or `~/.local/share/lrh-confluence-connector` on other systems. Set
 
 ## MCP tools
 
-The MCP server exposes the tools below. Each one's inputs, results and caveats are in
-[architecture §8](docs/architecture.md#8-mcp-tools).
+The MCP server exposes the tools below. Agents receive input/output schemas and descriptions from
+[MCP declarations](src/confluence_connector/surfaces/mcp_main.py). Text reads use Markdown-like text;
+complex tables retain minimal HTML. `format="rich"` returns Confluence storage markup for editing,
+not a cleaned HTML page.
 
 | MCP tool | Service module | Behavior |
 |---|---|---|
@@ -172,7 +181,3 @@ Project references: [documentation index](docs/README.md) · [requirements](docs
 > Confluence web routes. Check your organization's AI and data policies before giving an agent your work
 > data. Provided as is, without warranty. Atlassian and Confluence are Atlassian trademarks; this
 > project is not affiliated with Atlassian.
-
-Tokens are bound to the configured instance URL (including its installation path) as well as the account.
-Switching instances requires `confluence-connector auth --sign-out` followed by `auth`. An encrypted
-record without instance binding is rejected; clear it and sign in once to store the current format.
