@@ -50,15 +50,26 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         await service.search_content(
             "roadmap",
             scope={
-                "space_keys": ["ENG' OR type = page"],
+                "space_keys": ["ENG"],
+                "creator_usernames": ["ENG' OR type = page"],
                 "created_after": "2026-10-18T12:00:00-03:00",
                 "include_archived": True,
             },
         )
         cql = api.search_calls[0][0]
-        self.assertIn("space IN ('ENG\\' OR type = page')", cql)
+        self.assertIn("space IN ('ENG')", cql)
+        self.assertIn("creator IN ('ENG\\' OR type = page')", cql)
         self.assertIn("created >= '2026/10/18 20:30'", cql)
         self.assertTrue(api.search_calls[0][3])
+
+    async def test_scope_rejects_invalid_space_keys_before_search(self) -> None:
+        api = _SearchApi()
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(InvalidRequest, "scope.space_keys"):
+            await service.search_content("roadmap", scope={"space_keys": ["ENG!"]})
+
+        self.assertEqual(api.search_calls, [])
 
     async def test_date_only_scope_works_without_timezone_but_timestamps_do_not(self) -> None:
         api = _SearchApi()

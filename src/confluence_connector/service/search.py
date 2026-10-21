@@ -14,6 +14,7 @@ from confluence_connector.domain.errors import (
     InvalidRequest,
     Upstream,
 )
+from confluence_connector.domain.cql import cql_literal
 from confluence_connector.domain.models import (
     ContentSearchHit,
     ContentSearchResult,
@@ -22,6 +23,7 @@ from confluence_connector.domain.models import (
     SearchQuery,
     SearchScope,
 )
+from confluence_connector.domain.validation import page_reference, space_key
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service.cql_dates import (
@@ -194,13 +196,13 @@ class ContentSearch:
         _check_range("created", scope.created_after, scope.created_before, self._cql_timezone)
         _check_range("modified", scope.modified_after, scope.modified_before, self._cql_timezone)
         if scope.parent is not None:
-            reference = _page_scope_reference("parent", scope.parent)
+            reference = page_reference(scope.parent, field="scope.parent")
             resolved = await self._links.resolve(reference, expected_username=self._username)
             if not _is_page_id(resolved.page_id):
                 raise InvalidRequest("Confluence returned an invalid page ID for scope.parent.")
             scope.parent = resolved.page_id
         if scope.ancestor is not None:
-            reference = _page_scope_reference("ancestor", scope.ancestor)
+            reference = page_reference(scope.ancestor, field="scope.ancestor")
             resolved = await self._links.resolve(reference, expected_username=self._username)
             if not _is_page_id(resolved.page_id):
                 raise InvalidRequest("Confluence returned an invalid page ID for scope.ancestor.")
@@ -305,21 +307,12 @@ def _scope_values(name: str, values: list[str]) -> list[str]:
             or any(ord(char) < 32 for char in value)
         ):
             raise InvalidRequest(f"scope.{name} contains an invalid value.")
-        if value.strip() not in normalized:
-            normalized.append(value.strip())
+        selected = value.strip()
+        if name == "space_keys":
+            selected = space_key(selected, field="scope.space_keys")
+        if selected not in normalized:
+            normalized.append(selected)
     return normalized
-
-
-def _page_scope_reference(name: str, value: Any) -> str:
-    """Validate an untrusted public page reference before link resolution."""
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or len(value.strip()) > 2_048
-        or any(not character.isprintable() for character in value)
-    ):
-        raise InvalidRequest(f"scope.{name} must be a page ID or supported page URL.")
-    return value.strip()
 
 
 def _is_page_id(value: Any) -> bool:
@@ -369,40 +362,40 @@ def _build_cql(
         else _text_search_term(term) for term in terms
     ]
     if match == "all":
-        clauses = [f"{search_field} ~ {_cql_literal(term)}" for term in escaped_terms]
+        clauses = [f"{search_field} ~ {cql_literal(term)}" for term in escaped_terms]
     elif match == "any":
-        clauses = [f"{search_field} ~ {_cql_literal(' '.join(escaped_terms))}"]
+        clauses = [f"{search_field} ~ {cql_literal(' '.join(escaped_terms))}"]
     else:
         phrase = '"' + " ".join(escaped_terms) + '"'
-        clauses = [f"{search_field} ~ {_cql_literal(phrase)}"]
+        clauses = [f"{search_field} ~ {cql_literal(phrase)}"]
     if scope.space_keys:
-        clauses.append("space IN (" + ", ".join(_cql_literal(key) for key in scope.space_keys) + ")")
+        clauses.append("space IN (" + ", ".join(cql_literal(key) for key in scope.space_keys) + ")")
     if scope.space_type is not None:
         clauses.append(f"space.type = {scope.space_type}")
     if scope.content_types:
         clauses.append("type IN (" + ", ".join(scope.content_types) + ")")
     if scope.labels:
-        clauses.append("label IN (" + ", ".join(_cql_literal(label) for label in scope.labels) + ")")
+        clauses.append("label IN (" + ", ".join(cql_literal(label) for label in scope.labels) + ")")
     if scope.creator_usernames:
         clauses.append(
-            "creator IN (" + ", ".join(_cql_literal(name) for name in scope.creator_usernames) + ")"
+            "creator IN (" + ", ".join(cql_literal(name) for name in scope.creator_usernames) + ")"
         )
     if scope.contributor_usernames:
         clauses.append(
-            "contributor IN (" + ", ".join(_cql_literal(name) for name in scope.contributor_usernames) + ")"
+            "contributor IN (" + ", ".join(cql_literal(name) for name in scope.contributor_usernames) + ")"
         )
     if scope.created_after:
         date_value = cql_date_literal("created_after", scope.created_after, "after", cql_timezone)
-        clauses.append(f"created >= {_cql_literal(date_value)}")
+        clauses.append(f"created >= {cql_literal(date_value)}")
     if scope.created_before:
         date_value = cql_date_literal("created_before", scope.created_before, "before", cql_timezone)
-        clauses.append(f"created <= {_cql_literal(date_value)}")
+        clauses.append(f"created <= {cql_literal(date_value)}")
     if scope.modified_after:
         date_value = cql_date_literal("modified_after", scope.modified_after, "after", cql_timezone)
-        clauses.append(f"lastmodified >= {_cql_literal(date_value)}")
+        clauses.append(f"lastmodified >= {cql_literal(date_value)}")
     if scope.modified_before:
         date_value = cql_date_literal("modified_before", scope.modified_before, "before", cql_timezone)
-        clauses.append(f"lastmodified <= {_cql_literal(date_value)}")
+        clauses.append(f"lastmodified <= {cql_literal(date_value)}")
     if scope.parent is not None:
         clauses.append(f"parent = {scope.parent}")
     if scope.ancestor is not None:
@@ -411,10 +404,6 @@ def _build_cql(
     if len(cql) > 8_000:
         raise InvalidRequest("The search query and scope produce an overly long CQL request.")
     return cql
-
-
-def _cql_literal(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
 def _text_search_term(value: str) -> str:
