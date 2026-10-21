@@ -193,7 +193,7 @@ def _source_items(source: str) -> list[tuple[str, ...]]:
         if node.name == "ac:inline-comment-marker":
             items.append(("inline-comment", node.get("ac:ref") or "unidentified"))
         elif node.name == "ri:attachment":
-            identity = node.get("ri:content-id") or node.get("ri:filename") or "unidentified"
+            identity = _attachment_identity(node)
             items.append(("attachment", identity))
         elif node.name == "ac:structured-macro":
             name, identity = _macro_identity(node)
@@ -204,7 +204,7 @@ def _source_items(source: str) -> list[tuple[str, ...]]:
 def _macro_identity(node: Tag) -> tuple[str, str]:
     name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
     parameters: list[tuple[str, str]] = []
-    page_references: list[tuple[str, str]] = []
+    page_references: list[tuple[str, ...]] = []
     for child in node.find_all(True):
         if child.find_parent("ac:structured-macro") is not node:
             continue
@@ -212,12 +212,26 @@ def _macro_identity(node: Tag) -> tuple[str, str]:
             parameter_name = (child.get("ac:name") or child.get("name") or "").casefold()
             parameters.append((parameter_name, child.get_text().strip()))
         elif child.name == "ri:page":
-            page_id = child.get("ri:content-id") or child.get("ri:page-id") or ""
-            page_title = child.get("ri:content-title") or ""
-            page_references.append((page_id, page_title))
+            page_references.append(_page_identity(child))
+        elif child.name == "ri:attachment":
+            page_references.append(("attachment", _attachment_identity(child)))
     identity = json.dumps(
         [name, sorted(parameters), sorted(page_references)],
         separators=(",", ":"),
         ensure_ascii=False,
     )
     return name, identity
+
+
+def _page_identity(node: Tag) -> tuple[str, ...]:
+    """A source page target includes its space as well as its ID/title."""
+    return tuple(str(node.get(key) or "") for key in ("ri:content-id", "ri:page-id", "ri:content-title", "ri:space-key"))
+
+
+def _attachment_identity(node: Tag) -> str:
+    """A source attachment target includes the explicit owning page, when present."""
+    owner = node.find("ri:page")
+    return json.dumps([
+        node.get("ri:content-id") or "", node.get("ri:filename") or "",
+        _page_identity(owner) if owner is not None else None,
+    ], separators=(",", ":"), ensure_ascii=False)
