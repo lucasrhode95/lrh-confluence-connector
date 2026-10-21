@@ -8,8 +8,6 @@ from typing import Any
 from urllib.parse import quote, urljoin
 
 from confluence_connector.domain.errors import (
-    AccountMismatch,
-    AuthenticationRequired,
     Conflict,
     ConnectorError,
     InvalidRequest,
@@ -26,6 +24,12 @@ from confluence_connector.domain.models import (
     RemoteDraftPage,
     ResolvedPageReference,
 )
+from confluence_connector.domain.validation import (
+    optional_space_key,
+    page_reference,
+    require_current_page,
+    space_key as validate_space_key,
+)
 from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
@@ -35,7 +39,6 @@ MAX_TITLE_CHARS = 255
 MAX_WRITE_BODY_CHARS = 2_000_000
 MAX_DRAFT_OFFSET = 1_000_000
 MAX_DRAFT_LIMIT = DRAFT_PAGE_SIZE
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 _LABEL = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
 _DRAFT_CURSOR_KIND = "list_drafts"
 
@@ -81,7 +84,7 @@ class PageWrites:
         if not isinstance(status, str) or status not in {"current", "draft"}:
             raise InvalidRequest("status must be current or draft.")
         placement_kind = _placement_kind(position, sibling)
-        validated_sibling = _page_reference(sibling) if sibling is not None else None
+        validated_sibling = page_reference(sibling, field="sibling") if sibling is not None else None
         placement = await self._create_placement(
             parent_id=parent_id,
             space_key=space_key,
@@ -133,7 +136,7 @@ class PageWrites:
         allow_comment_loss: bool = False,
     ) -> PageWriteResult:
         """Replace a whole page body after checking its version and source references."""
-        reference = _page_reference(page)
+        reference = page_reference(page)
         storage_body = _write_body(body, format)
         version = _expected_version(expected_version)
         new_title = _title(title) if title is not None else None
@@ -143,7 +146,7 @@ class PageWrites:
         current = await self._api.get_page_content(
             resolved.page_id, expected_username=self._username, include_storage=True
         )
-        _require_current_page(current.metadata)
+        require_current_page(current.metadata)
         if current.version != version:
             raise Conflict(
                 f"The page is now version {current.version}; expected_version was {version}. "
@@ -195,7 +198,7 @@ class PageWrites:
                 raise InvalidRequest("Pass only cursor; it already contains the draft list scope and limit.")
             selected_space, start, page_limit = _decode_draft_cursor(cursor)
         else:
-            selected_space = _optional_space_key(space_key)
+            selected_space = optional_space_key(space_key)
             start = 0
             page_limit = _draft_limit(limit)
         page: RemoteDraftPage = await self._api.list_drafts_page(
@@ -235,7 +238,7 @@ class PageWrites:
 
     async def publish_draft(self, draft: str) -> PageWriteResult:
         """Publish one readable new-page draft while retaining its content ID."""
-        reference = _page_reference(draft)
+        reference = page_reference(draft, field="draft")
         resolved = await self._resolve_page(reference)
         source = await self._api.get_page_content(
             resolved.page_id,
@@ -273,7 +276,7 @@ class PageWrites:
 
     async def delete_draft(self, draft: str) -> DraftDeletionResult:
         """Permanently delete one verified new-page draft, bypassing the Confluence trash."""
-        reference = _page_reference(draft)
+        reference = page_reference(draft, field="draft")
         resolved = await self._resolve_page(reference)
         metadata = await self._api.get_page_metadata(
             resolved.page_id, status="draft", expected_username=self._username
@@ -291,7 +294,7 @@ class PageWrites:
         remove: list[str] | None = None,
     ) -> LabelChangeResult:
         """Add and remove global labels, stopping at the first failed write with an exact partial result."""
-        reference = _page_reference(page)
+        reference = page_reference(page)
         additions = _labels(add, "add")
         removals = _labels(remove, "remove")
         if not additions and not removals:
@@ -302,7 +305,7 @@ class PageWrites:
         metadata = await self._api.get_page_metadata(
             resolved.page_id, expected_username=self._username
         )
-        _require_current_page(metadata)
+        require_current_page(metadata)
         existing = set(metadata.labels)
         operations: list[tuple[str, str]] = []
         unchanged: list[str] = []
@@ -356,17 +359,17 @@ class PageWrites:
             raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
         resolved_parent_id = None
         if parent_id is not None:
-            resolved_parent = await self._resolve_page(_page_reference(parent_id))
+            resolved_parent = await self._resolve_page(page_reference(parent_id, field="parent_id"))
             parent_metadata = await self._api.get_page_metadata(
                 resolved_parent.page_id, expected_username=self._username
             )
-            _require_current_page(parent_metadata)
+            require_current_page(parent_metadata)
             if parent_metadata.space_key is None:
                 raise InvalidRequest("Confluence did not return the parent's space.")
             resolved_parent_id = parent_metadata.page_id
             selected_space = parent_metadata.space_key
         else:
-            selected_space = _space_key(space_key)
+            selected_space = validate_space_key(space_key)
         target_id: str | None = None
         if position in {"before", "after"}:
             if sibling is None:
@@ -409,7 +412,7 @@ class PageWrites:
         metadata = await self._api.get_page_metadata(
             resolved.page_id, expected_username=self._username
         )
-        _require_current_page(metadata)
+        require_current_page(metadata)
         return metadata
 
     async def _resolve_page(self, reference: str) -> ResolvedPageReference:
@@ -438,17 +441,6 @@ class PageWrites:
             self._base_url + "/",
             f"spaces/{quote(space_key, safe='')}/pages/{quote(page_id, safe='')}",
         )
-
-
-def _page_reference(value: Any) -> str:
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or len(value.strip()) > 2_048
-        or any(not char.isprintable() for char in value)
-    ):
-        raise InvalidRequest("Pass a non-empty page ID or supported same-instance page URL.")
-    return value.strip()
 
 
 def _title(value: Any) -> str:
@@ -493,19 +485,6 @@ def _action_position(position: str) -> str | None:
     return None
 
 
-def _space_key(value: Any) -> str:
-    if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
-        raise InvalidRequest(
-            "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "or a ~ personal-space key whose username may also contain dots and @."
-        )
-    return value
-
-
-def _optional_space_key(value: Any) -> str | None:
-    return None if value is None else _space_key(value)
-
-
 def _draft_limit(value: Any) -> int:
     result = 50 if value is None else value
     if not isinstance(result, int) or isinstance(result, bool) or not 1 <= result <= MAX_DRAFT_LIMIT:
@@ -517,7 +496,7 @@ def _decode_draft_cursor(value: str) -> tuple[str | None, int, int]:
     state = cursors.decode(value, _DRAFT_CURSOR_KIND)
     if set(state) != {"space_key", "start", "limit"}:
         raise InvalidRequest("Malformed draft cursor.")
-    space_key = _optional_space_key(state.get("space_key"))
+    space_key = optional_space_key(state.get("space_key"))
     start = state.get("start")
     limit = state.get("limit")
     if (
@@ -547,15 +526,3 @@ def _labels(value: Any, name: str) -> list[str]:
         seen.add(label)
         result.append(label)
     return result
-
-
-def _require_current_page(metadata: PageMetadata) -> None:
-    if metadata.content_type != "page":
-        raise InvalidRequest("This tool accepts Confluence pages only.")
-    if metadata.status != "current":
-        raise InvalidRequest("This tool accepts current published pages only.")
-
-
-def _raise_account_error(error: ConnectorError) -> None:
-    if isinstance(error, (AccountMismatch, AuthenticationRequired)):
-        raise error

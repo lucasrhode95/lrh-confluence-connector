@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from confluence_connector.domain.errors import InvalidRequest, Upstream
 from confluence_connector.domain.models import ResolvedPageReference
+from confluence_connector.domain.urls import same_instance_origin
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.transport import ConfluenceTransport
 
@@ -29,7 +30,7 @@ class PageLinkResolver:
         self._transport = transport
         self._api = api
         base = urlsplit(str(settings["base_url"]))
-        self._origin = (base.scheme.casefold(), (base.hostname or "").casefold(), _port(base))
+        self._base_url = str(settings["base_url"])
         self._base_path = base.path.rstrip("/")
 
     async def resolve(self, reference: str, *, expected_username: str, status: str | None = None) -> ResolvedPageReference:
@@ -92,10 +93,10 @@ class PageLinkResolver:
         if not parsed.scheme or not parsed.netloc or parsed.username is not None or parsed.password is not None:
             raise InvalidRequest("Page URLs must be absolute URLs for the configured Confluence instance.")
         try:
-            origin = (parsed.scheme.casefold(), (parsed.hostname or "").casefold(), _port(parsed))
+            parsed.port
         except ValueError:
             raise InvalidRequest("The page URL has an invalid host or port.") from None
-        if origin != self._origin:
+        if not same_instance_origin(self._base_url, value):
             raise InvalidRequest("Page URLs on hosts other than the configured Confluence instance are refused.")
         self._site_path(parsed.path)
         return parsed
@@ -122,9 +123,3 @@ def _version(query: Mapping[str, list[str]]) -> int | None:
 def _first(values: Mapping[str, list[str]], key: str) -> str | None:
     matches = values.get(key)
     return matches[0] if matches else None
-
-
-def _port(parts: Any) -> int:
-    if parts.port is not None:
-        return parts.port
-    return 443 if parts.scheme.casefold() == "https" else 80

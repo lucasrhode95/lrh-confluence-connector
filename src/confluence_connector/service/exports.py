@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from confluence_connector.domain.errors import (
-    AccountMismatch,
-    AuthenticationRequired,
     ConnectorError,
     InvalidRequest,
 )
@@ -30,14 +28,21 @@ from confluence_connector.domain.models import (
     ResolvedPageReference,
     SavedAttachment,
 )
+from confluence_connector.domain.validation import page_references
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import localfiles
 from confluence_connector.service.attachments import AttachmentDownloads
+from confluence_connector.service.errors import raise_account_error
+from confluence_connector.service.filenames import (
+    MAX_FILENAME_COMPONENT_UNITS,
+    filename_component_units,
+    safe_filename_stem,
+    sanitize_filename_component,
+)
 from confluence_connector.service.pages import (
     PageTextService,
     _format,
-    _page_references,
     _parse_scope,
 )
 
@@ -46,11 +51,6 @@ PAGE_READ_CONCURRENCY = 2
 ATTACHMENT_DOWNLOAD_CONCURRENCY = 6
 MAX_EXPORT_MEMBER_LENGTH = 180
 MAX_SINGLE_FILENAME_LENGTH = 160
-MAX_FILENAME_COMPONENT_UNITS = 240
-_BAD_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED_WINDOWS_NAME = re.compile(
-    r"^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]) *(?:\..*)?$", re.IGNORECASE
-)
 
 
 @dataclass(frozen=True)
@@ -110,7 +110,7 @@ class PageExports:
         readers receive validated references and a numeric page ID; a provenance header is always
         enabled because D8 requires it in exported files.
         """
-        references = _page_references(pages, maximum=MAX_EXPORT_PAGES)
+        references = page_references(pages, maximum=MAX_EXPORT_PAGES)
         page_format = _format(format)
         scope = _parse_scope(parse_scope).model_copy(update={"header": True})
         include_file_bytes = _boolean(include_attachments)
@@ -222,7 +222,7 @@ class PageExports:
                 )
             page_id = resolved.page_id
         except ConnectorError as exc:
-            _raise_account_error(exc)
+            raise_account_error(exc)
             outcome.failure = _error_text(exc)
             outcome.report_items.append(_ReportItem("page", reference, outcome.failure))
             return outcome
@@ -242,7 +242,7 @@ class PageExports:
                         )
                     )
             except ConnectorError as exc:
-                _raise_account_error(exc)
+                raise_account_error(exc)
                 attachment_override = []
                 outcome.attachment_failures += 1
                 outcome.report_items.append(
@@ -262,7 +262,7 @@ class PageExports:
                 attachment_override=attachment_override,
             )
         except ConnectorError as exc:
-            _raise_account_error(exc)
+            raise_account_error(exc)
             outcome.failure = _error_text(exc)
             outcome.report_items.append(
                 _ReportItem("page", _page_label(page_id, None), outcome.failure)
@@ -316,7 +316,7 @@ class PageExports:
                 if isinstance(result, asyncio.CancelledError):
                     raise result
                 if isinstance(result, ConnectorError):
-                    _raise_account_error(result)
+                    raise_account_error(result)
                     reason = _error_text(result)
                 elif isinstance(result, OSError):
                     reason = f"LocalFileError: {type(result).__name__}"
@@ -348,7 +348,7 @@ class PageExports:
             page_format,
             maximum_length=MAX_SINGLE_FILENAME_LENGTH - len(prefix),
             maximum_component_units=MAX_FILENAME_COMPONENT_UNITS
-            - _component_units(prefix),
+            - filename_component_units(prefix),
         )
         filename = f"{prefix}{page_name}"
         target = localfiles.claim(output_directory, filename)
@@ -461,17 +461,18 @@ def _page_filename(
 ) -> str:
     extension = ".txt" if page_format == "text" else ".html"
     suffix = f" ({metadata.page_id}) v{metadata.version}{extension}"
-    if len(suffix) >= maximum_length or _component_units(suffix) >= maximum_component_units:
+    if len(suffix) >= maximum_length or filename_component_units(suffix) >= maximum_component_units:
         raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
-    title = _BAD_FILENAME.sub("_", metadata.title).strip().rstrip(" .") or "Untitled page"
-    if _RESERVED_WINDOWS_NAME.fullmatch(title):
-        title = f"_{title}"
-    title = title[: maximum_length - len(suffix)].rstrip(" .")
-    while title and _component_units(f"{title}{suffix}") > maximum_component_units:
-        title = title[:-1].rstrip(" .")
-    title = title or "Page"
+    title = sanitize_filename_component(metadata.title) or "Untitled page"
+    title = safe_filename_stem(
+        title,
+        suffix=suffix,
+        maximum_length=maximum_length,
+        maximum_component_units=maximum_component_units,
+        fallback="Page",
+    )
     filename = f"{title}{suffix}"
-    if len(filename) > maximum_length or _component_units(filename) > maximum_component_units:
+    if len(filename) > maximum_length or filename_component_units(filename) > maximum_component_units:
         raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
     return filename
 
@@ -496,7 +497,7 @@ def _unique_archive_name(filename: str, used_names: set[str]) -> str:
         candidate_title = title[: max(0, title_limit)].rstrip(" .")
         while candidate_title and (
             len(candidate_title + tail) > MAX_EXPORT_MEMBER_LENGTH
-            or _component_units(candidate_title + tail) > MAX_FILENAME_COMPONENT_UNITS
+            or filename_component_units(candidate_title + tail) > MAX_FILENAME_COMPONENT_UNITS
         ):
             candidate_title = candidate_title[:-1].rstrip(" .")
         candidate_title = candidate_title or "Page"
@@ -504,20 +505,12 @@ def _unique_archive_name(filename: str, used_names: set[str]) -> str:
         if candidate.casefold() not in used_names:
             if (
                 len(candidate) > MAX_EXPORT_MEMBER_LENGTH
-                or _component_units(candidate) > MAX_FILENAME_COMPONENT_UNITS
+                or filename_component_units(candidate) > MAX_FILENAME_COMPONENT_UNITS
             ):
                 raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
             used_names.add(candidate.casefold())
             return candidate
         counter += 1
-
-
-def _component_units(value: str) -> int:
-    """Measure both common filesystem limits: encoded bytes and UTF-16 code units."""
-    return max(
-        len(value.encode("utf-8", errors="surrogatepass")),
-        len(value.encode("utf-16-le", errors="surrogatepass")) // 2,
-    )
 
 
 def _export_report(items: list[_ReportItem]) -> str:
@@ -545,11 +538,6 @@ def _boolean(value: Any) -> bool:
     if not isinstance(value, bool):
         raise InvalidRequest("include_attachments must be a boolean.")
     return value
-
-
-def _raise_account_error(error: ConnectorError) -> None:
-    if isinstance(error, (AuthenticationRequired, AccountMismatch)):
-        raise error
 
 
 def _timestamp() -> str:

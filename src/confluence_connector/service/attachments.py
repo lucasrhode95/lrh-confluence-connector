@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 from pathlib import Path
 
-from confluence_connector.domain.errors import AccountMismatch, AuthenticationRequired, ConnectorError, InvalidRequest
+from confluence_connector.domain.errors import ConnectorError, InvalidRequest
 from confluence_connector.domain.models import (
     AttachmentDownloadFailure,
     AttachmentDownloadResult,
@@ -17,13 +16,16 @@ from confluence_connector.domain.models import (
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import localfiles
-from confluence_connector.service.pages import _page_references
+from confluence_connector.domain.validation import page_references
+from confluence_connector.service.errors import raise_account_error
+from confluence_connector.service.filenames import (
+    MAX_FILENAME_COMPONENT_UNITS,
+    safe_filename_stem,
+    sanitize_filename_component,
+)
 
 MAX_ATTACHMENT_IDS = 500
 MAX_FILENAME_LENGTH = 180
-MAX_FILENAME_COMPONENT_UNITS = 240
-_BAD_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED_WINDOWS_NAME = re.compile(r"^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]) *(?:\..*)?$", re.IGNORECASE)
 
 
 class AttachmentDownloads:
@@ -41,7 +43,7 @@ class AttachmentDownloads:
         attachment_ids: list[str],
     ) -> AttachmentDownloadResult:
         """Entry point: validate the page and requested IDs before listing or downloading files."""
-        page_reference = _page_references(page, maximum=1)[0]
+        page_reference = page_references(page, maximum=1)[0]
         selected_ids = _attachment_ids(attachment_ids)
         resolved = await self._links.resolve(page_reference, expected_username=self._username)
         if not resolved.page_id.isdecimal():
@@ -73,7 +75,7 @@ class AttachmentDownloads:
                 files.append(outcome)
                 continue
             if isinstance(outcome, ConnectorError):
-                _raise_account_error(outcome)
+                raise_account_error(outcome)
                 failures.append(
                     AttachmentDownloadFailure(
                         attachment_id=attachment_id,
@@ -158,32 +160,15 @@ def _attachment_ids(value: object) -> list[str]:
 
 def _safe_filename(value: str) -> str:
     """Replace path and Windows-invalid characters, device names and excessive lengths."""
-    filename = _BAD_FILENAME.sub("_", value).strip().rstrip(" .")
-    if not filename or filename in {".", ".."}:
-        filename = "attachment"
-    if _RESERVED_WINDOWS_NAME.fullmatch(filename):
-        filename = f"_{filename}"
-    suffix = Path(filename).suffix[:20]
-    stem = filename[: -len(Path(filename).suffix)] if Path(filename).suffix else filename
-    stem = stem[: max(1, MAX_FILENAME_LENGTH - len(suffix))]
-    while stem and (
-        len(stem + suffix) > MAX_FILENAME_LENGTH
-        or _component_units(stem + suffix) > MAX_FILENAME_COMPONENT_UNITS
-    ):
-        stem = stem[:-1]
-    filename = f"{stem or 'attachment'}{suffix}"
-    return filename
-
-
-def _component_units(value: str) -> int:
-    """Measure both common filesystem limits: encoded bytes and UTF-16 code units."""
-    return max(
-        len(value.encode("utf-8", errors="surrogatepass")),
-        len(value.encode("utf-16-le", errors="surrogatepass")) // 2,
+    filename = sanitize_filename_component(value)
+    original_suffix = Path(filename).suffix
+    suffix = original_suffix[:20]
+    stem = filename[: -len(original_suffix)] if original_suffix else filename
+    safe_stem = safe_filename_stem(
+        stem,
+        suffix=suffix,
+        maximum_length=MAX_FILENAME_LENGTH,
+        maximum_component_units=MAX_FILENAME_COMPONENT_UNITS,
+        fallback="attachment",
     )
-
-
-def _raise_account_error(error: ConnectorError) -> None:
-    """Account-boundary failures abort the whole call; ordinary file failures remain per attachment."""
-    if isinstance(error, (AuthenticationRequired, AccountMismatch)):
-        raise error
+    return f"{safe_stem}{suffix}"
