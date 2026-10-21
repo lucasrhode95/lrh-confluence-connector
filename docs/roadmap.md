@@ -380,7 +380,11 @@ references, and no Markdown conversion; the rich body remains unchanged.
 
 #### One retry loop in the transport
 
-`ConfluenceTransport.download_to` repeats the retry loop of `_exchange`. Merge them.
+**Implemented, awaiting review (2026-10-21).** `download_to` now streams through `_exchange`, so JSON
+requests and downloads share one retry loop for status codes, transport errors, backoff, and account
+checks. Partial download bytes are cleared before a safe retry. An offline regression verifies a
+download honors `Retry-After`, clears prior destination contents, and returns the complete body; the
+existing partial-stream timeout test still passes.
 
 #### Remove dead code and add an undefined-name check
 
