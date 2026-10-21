@@ -141,6 +141,12 @@ account by `AppContext` ([`bootstrap.py`](../src/confluence_connector/bootstrap.
 Account-boundary error propagation is shared in `errors.py`. Attachment downloads and exports share
 filename sanitization and filesystem component limits from `filenames.py`.
 
+`placement.py` resolves parent, space, position and sibling inputs for page creation, movement and
+restoration. Service entry points validate public references and provide their existing page resolver;
+the shared resolver checks page state and sibling scope, and selects the sibling action target for
+first and root-last placement. Move and restore allow missing status metadata; page creation requires
+an explicit `current` status.
+
 **[`search.py`](../src/confluence_connector/service/search.py)** builds CQL from literal terms and
 validated scope only; terms escape text-query syntax separately from CQL string quoting. Title search
 replaces punctuation with spaces and, on an unscoped first page, merges up to 20 quick-navigation
