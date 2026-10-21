@@ -118,9 +118,12 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         api.add_child("10", "11", "First")
         api.add_child("10", "12", "Second")
         original = api.list_child_pages
+        original_trash = api.trash_page
         starts = []
+        events: list[tuple[str, str]] = []
+
         async def short_pages(page_id, *, start, expected_username):
-            self.assertEqual(api.trash_calls, [])
+            events.append(("children", page_id))
             page = await original(page_id, start=start, expected_username=expected_username)
             if page_id != "10":
                 return page
@@ -128,12 +131,21 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
             return RemoteContentSearchPage(
                 hits=page.hits[:1], start=start, size=min(1, page.size), has_more=start == 0
             )
+
+        async def record_trash(page_id, *, expected_username):
+            events.append(("trash", page_id))
+            await original_trash(page_id, expected_username=expected_username)
+
         api.list_child_pages = short_pages
+        api.trash_page = record_trash
         result = await PageStructure(api, _Links(), "sample-user").delete_page("10", children="trash")
         self.assertTrue(result.complete)
         self.assertEqual(api.trash_calls, ["12", "11", "10"])
         self.assertIn(1, starts)
         self.assertEqual(api.permission_checks, ["10", "11", "12"])
+        child_reads = [index for index, (kind, _page_id) in enumerate(events) if kind == "children"]
+        trash_writes = [index for index, (kind, _page_id) in enumerate(events) if kind == "trash"]
+        self.assertLess(max(child_reads), min(trash_writes))
 
     async def test_move_up_skips_concurrent_parent_or_space_changes(self):
         for changed_field in ("parent", "space"):
