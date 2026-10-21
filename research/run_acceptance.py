@@ -14,8 +14,10 @@ from typing import Any, Awaitable, Callable
 from acceptance_fixtures import AcceptanceFixture, new_fixture
 from confluence_connector import config
 from confluence_connector.bootstrap import AppContext, Services
-from confluence_connector.domain.errors import Conflict, InvalidRequest
-from confluence_connector.domain.models import ContentSearchResult
+from confluence_connector.domain.errors import (
+    AccountMismatch, AuthenticationRequired, Conflict, InvalidRequest, NotFound, UncertainWrite,
+)
+from confluence_connector.domain.models import ContentSearchResult, PageWriteResult
 from confluence_connector.timezones import parse_cql_timezone
 
 INDEX_ATTEMPTS = 18
@@ -226,10 +228,14 @@ async def _run_live(
             "page_and_draft_writes",
             lambda: _check_page_and_draft_writes(services, fixture, page_ids.root, page_ids.personal_space),
         )
+        if report.results[-1].detail == "ScratchCleanupRequired":
+            return report  # The operator must inspect partial writes before any further write group.
         await report.run(
             "move_and_order",
             lambda: _check_move_and_order(services, fixture, page_ids),
         )
+        if report.results[-1].detail == "ScratchCleanupRequired":
+            return report  # The operator must inspect partial writes before any further write group.
         if cross_space_key is None:
             report.skip("cross_space_move", "acceptance.cross_space_key is not configured")
         else:
@@ -237,6 +243,8 @@ async def _run_live(
                 "cross_space_move",
                 lambda: _check_cross_space_move(services, fixture, page_ids, str(cross_space_key)),
             )
+        if report.results[-1].detail == "ScratchCleanupRequired":
+            return report  # The operator must inspect partial writes before any further write group.
         await report.run("delete_and_restore", lambda: _check_delete_and_restore(services, fixture, page_ids))
     else:
         for name in (
@@ -589,92 +597,91 @@ async def _check_concurrent_reads(services: Services, root_id: str) -> None:
 async def _check_page_and_draft_writes(
     services: Services, fixture: AcceptanceFixture, root_id: str, space_key: str
 ) -> None:
-    title = f"Connector Lab Write Check [{fixture.run_id}]"
-    text_created = await services.writes.create_page(
-        title,
-        f"writecheck{fixture.run_id} initial text",
-        format="text",
-        parent_id=root_id,
-    )
-    if text_created.status != "current" or text_created.version is None:
-        raise AssertionError("text page creation did not return a current version")
-    try:
-        await services.writes.create_page(title, "duplicate", format="text", parent_id=root_id)
-    except InvalidRequest:
-        pass
-    else:
-        raise AssertionError("duplicate-title creation was not refused")
-    rich = await services.writes.update_page(
-        text_created.page_id,
-        f"<p>writecheck{fixture.run_id} rich update</p>",
-        expected_version=text_created.version,
-        format="rich",
-    )
-    if rich.version is None or rich.version <= text_created.version:
-        raise AssertionError("rich update did not advance the page version")
-    try:
-        await services.writes.update_page(
-            text_created.page_id,
-            "stale update",
-            expected_version=text_created.version,
+    async with _ScratchPages(services, space_key, root_id) as scratch:
+        title = f"Connector Lab Write Check [{fixture.run_id}]"
+        text_created = await scratch.create(
+            title,
+            f"writecheck{fixture.run_id} initial text",
             format="text",
-        )
-    except Conflict:
-        pass
-    else:
-        raise AssertionError("stale expected_version was not refused")
-    try:
-        await services.writes.create_page(
-            f"Connector Lab Unsafe [{fixture.run_id}]",
-            "<script>synthetic</script>",
-            format="rich",
             parent_id=root_id,
         )
-    except InvalidRequest:
-        pass
-    else:
-        raise AssertionError("active content was not refused")
-    try:
-        await services.writes.update_page(
+        if text_created.status != "current" or text_created.version is None:
+            raise AssertionError("text page creation did not return a current version")
+        try:
+            await scratch.create(title, "duplicate", format="text", parent_id=root_id)
+        except InvalidRequest:
+            pass
+        else:
+            raise AssertionError("duplicate-title creation was not refused")
+        rich = await services.writes.update_page(
             text_created.page_id,
-            f"<p>writecheck{fixture.run_id}</p>",
-            expected_version=rich.version,
-            title=fixture.root_title,
+            f"<p>writecheck{fixture.run_id} rich update</p>",
+            expected_version=text_created.version,
             format="rich",
         )
-    except InvalidRequest:
-        pass
-    else:
-        raise AssertionError("duplicate-title rename was not refused")
-    added = await services.writes.set_labels(text_created.page_id, add=[fixture.label + "_write"])
-    removed = await services.writes.set_labels(text_created.page_id, remove=[fixture.label + "_write"])
-    if fixture.label + "_write" not in added.added or fixture.label + "_write" not in removed.removed:
-        raise AssertionError("label add/remove did not report completed changes")
-    draft = await services.writes.create_page(
-        f"Connector Lab Publish Draft [{fixture.run_id}]",
-        f"draftcheck{fixture.run_id}",
-        format="text",
-        status="draft",
-        parent_id=root_id,
-    )
-    draft_list = await services.writes.list_drafts(space_key=space_key, limit=100)
-    if draft.page_id not in {item.page_id for item in draft_list.drafts}:
-        raise AssertionError("new page draft was not listed")
-    published = await services.writes.publish_draft(draft.page_id)
-    if published.page_id != draft.page_id or published.status != "current":
-        raise AssertionError("draft publish did not retain its page ID")
-    disposable_draft = await services.writes.create_page(
-        f"Connector Lab Delete Draft [{fixture.run_id}]",
-        f"draftdelete{fixture.run_id}",
-        format="text",
-        status="draft",
-        parent_id=root_id,
-    )
-    deletion = await services.writes.delete_draft(disposable_draft.page_id)
-    if not deletion.deleted or not deletion.permanent:
-        raise AssertionError("new-page draft deletion was not reported as permanent")
-    await services.structure.delete_page(text_created.page_id)
-    await services.structure.delete_page(published.page_id)
+        if rich.version is None or rich.version <= text_created.version:
+            raise AssertionError("rich update did not advance the page version")
+        try:
+            await services.writes.update_page(
+                text_created.page_id,
+                "stale update",
+                expected_version=text_created.version,
+                format="text",
+            )
+        except Conflict:
+            pass
+        else:
+            raise AssertionError("stale expected_version was not refused")
+        try:
+            await scratch.create(
+                f"Connector Lab Unsafe [{fixture.run_id}]",
+                "<script>synthetic</script>",
+                format="rich",
+                parent_id=root_id,
+            )
+        except InvalidRequest:
+            pass
+        else:
+            raise AssertionError("active content was not refused")
+        try:
+            await services.writes.update_page(
+                text_created.page_id,
+                f"<p>writecheck{fixture.run_id}</p>",
+                expected_version=rich.version,
+                title=fixture.root_title,
+                format="rich",
+            )
+        except InvalidRequest:
+            pass
+        else:
+            raise AssertionError("duplicate-title rename was not refused")
+        added = await services.writes.set_labels(text_created.page_id, add=[fixture.label + "_write"])
+        removed = await services.writes.set_labels(text_created.page_id, remove=[fixture.label + "_write"])
+        if fixture.label + "_write" not in added.added or fixture.label + "_write" not in removed.removed:
+            raise AssertionError("label add/remove did not report completed changes")
+        draft = await scratch.create(
+            f"Connector Lab Publish Draft [{fixture.run_id}]",
+            f"draftcheck{fixture.run_id}",
+            format="text",
+            status="draft",
+            parent_id=root_id,
+        )
+        draft_list = await services.writes.list_drafts(space_key=space_key, limit=100)
+        if draft.page_id not in {item.page_id for item in draft_list.drafts}:
+            raise AssertionError("new page draft was not listed")
+        published = await services.writes.publish_draft(draft.page_id)
+        if published.page_id != draft.page_id or published.status != "current":
+            raise AssertionError("draft publish did not retain its page ID")
+        disposable_draft = await scratch.create(
+            f"Connector Lab Delete Draft [{fixture.run_id}]",
+            f"draftdelete{fixture.run_id}",
+            format="text",
+            status="draft",
+            parent_id=root_id,
+        )
+        deletion = await services.writes.delete_draft(disposable_draft.page_id)
+        if not deletion.deleted or not deletion.permanent:
+            raise AssertionError("new-page draft deletion was not reported as permanent")
 
 
 async def _check_move_and_order(
@@ -682,26 +689,30 @@ async def _check_move_and_order(
     fixture: AcceptanceFixture,
     pages: _FixturePages,
 ) -> None:
-    move_title = f"Connector Lab Move Check [{fixture.run_id}]"
-    created = await services.writes.create_page(
-        move_title,
-        f"movecheck{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    moved = await services.structure.move_page(
-        created.page_id, parent_id=pages.child_one, position="last"
-    )
-    if not moved.moved or moved.parent_id != pages.child_one or moved.position_applied is not True:
-        raise AssertionError("same-space parent move did not complete")
-    await _assert_placement(services, created.page_id, pages.personal_space, pages.child_one, "last")
-    returned = await services.structure.move_page(
-        created.page_id, parent_id=pages.root, position="first"
-    )
-    if not returned.moved or returned.parent_id != pages.root or returned.position_applied is not True:
-        raise AssertionError("same-space return move did not complete")
-    await _assert_placement(services, created.page_id, pages.personal_space, pages.root, "first")
-    await services.structure.delete_page(created.page_id)
+    async with _ScratchPages(services, pages.personal_space, pages.root) as scratch:
+        move_title = f"Connector Lab Move Check [{fixture.run_id}]"
+        created = await scratch.create(
+            move_title,
+            f"movecheck{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
+        )
+        moved = await services.structure.move_page(
+            created.page_id, parent_id=pages.child_one, position="last"
+        )
+        if moved.position_applied is None:
+            raise UncertainWrite("Same-space move is uncertain.")
+        if not moved.moved or moved.parent_id != pages.child_one or moved.position_applied is not True:
+            raise AssertionError("same-space parent move did not complete")
+        await _assert_placement(services, created.page_id, pages.personal_space, pages.child_one, "last", expected_version=created.version)
+        returned = await services.structure.move_page(
+            created.page_id, parent_id=pages.root, position="first"
+        )
+        if returned.position_applied is None:
+            raise UncertainWrite("Same-space return is uncertain.")
+        if not returned.moved or returned.parent_id != pages.root or returned.position_applied is not True:
+            raise AssertionError("same-space return move did not complete")
+        await _assert_placement(services, created.page_id, pages.personal_space, pages.root, "first", expected_version=created.version)
 
 
 async def _check_cross_space_move(
@@ -711,32 +722,39 @@ async def _check_cross_space_move(
     cross_space_key: str,
 ) -> None:
     """Move one disposable page out and back only when a distinct visible target is configured."""
-    if cross_space_key == pages.personal_space:
-        raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
-    created = await services.writes.create_page(
-        f"Connector Lab Cross-Space Check [{fixture.run_id}]",
-        f"crossspacecheck{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    cross = await services.structure.move_page(
-        created.page_id, space_key=cross_space_key, position="last"
-    )
-    if not cross.moved or cross.space_key != cross_space_key or cross.position_applied is not True:
-        raise AssertionError("cross-space long task did not confirm its target")
-    await _assert_placement(services, created.page_id, cross_space_key, None, "last")
-    back = await services.structure.move_page(created.page_id, space_key=pages.personal_space)
-    if not back.moved or back.space_key != pages.personal_space or back.position_applied is not True:
-        raise AssertionError("cross-space return move did not confirm its target")
-    await _assert_placement(services, created.page_id, pages.personal_space, None, "last")
-    await services.structure.delete_page(created.page_id)
+    async with _ScratchPages(services, pages.personal_space, pages.root) as scratch:
+        if cross_space_key == pages.personal_space:
+            raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
+        created = await scratch.create(
+            f"Connector Lab Cross-Space Check [{fixture.run_id}]",
+            f"crossspacecheck{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
+        )
+        cross = await services.structure.move_page(
+            created.page_id, space_key=cross_space_key, position="last"
+        )
+        if cross.position_applied is None:
+            raise UncertainWrite("Cross-space move is still uncertain.")
+        if not cross.moved or cross.space_key != cross_space_key or cross.position_applied is not True:
+            raise AssertionError("cross-space long task did not confirm its target")
+        await _assert_placement(services, created.page_id, cross_space_key, None, "last")
+        back = await services.structure.move_page(created.page_id, space_key=pages.personal_space)
+        if back.position_applied is None:
+            raise UncertainWrite("Cross-space return is still uncertain.")
+        if not back.moved or back.space_key != pages.personal_space or back.position_applied is not True:
+            raise AssertionError("cross-space return move did not confirm its target")
+        await _assert_placement(services, created.page_id, pages.personal_space, None, "last")
 
 
 async def _assert_placement(
-    services: Services, page_id: str, space_key: str, parent_id: str | None, position: str
+    services: Services, page_id: str, space_key: str, parent_id: str | None, position: str,
+    *, expected_version: int | None = None,
 ) -> None:
     """Independently verify a move's parent, space and order using the read API."""
     metadata = await services.api.get_page_metadata(page_id, expected_username=services.username)
+    if expected_version is not None and metadata.version != expected_version:
+        raise AssertionError("same-space move created a content version")
     actual_parent = metadata.ancestors[-1].page_id if metadata.ancestors else None
     if metadata.space_key != space_key or actual_parent != parent_id:
         raise AssertionError("move metadata does not match its requested destination")
@@ -747,17 +765,11 @@ async def _assert_placement(
             page = await services.api.list_space_root_pages(space_key, start=start, expected_username=services.username)
         else:
             page = await services.api.list_child_pages(parent_id, start=start, expected_username=services.username)
-        if page.start != start or page.size != len(page.hits):
-            raise AssertionError("ordered children returned inconsistent paging")
         ids.extend(hit.content_id for hit in page.hits)
-        start += page.size
-        more = page.has_more if page.has_more is not None else (
-            start < page.total_size if page.total_size is not None else page.size == 500
-        )
-        if not more:
+        next_start = page.next_start(500)
+        if next_start is None:
             break
-        if page.size == 0:
-            raise AssertionError("ordered children did not advance")
+        start = next_start
     else:
         raise AssertionError("ordered children exceeded the acceptance paging bound")
     if not ids or (ids[0] if position == "first" else ids[-1]) != page_id:
@@ -767,106 +779,181 @@ async def _assert_placement(
 async def _check_delete_and_restore(
     services: Services, fixture: AcceptanceFixture, pages: _FixturePages
 ) -> None:
-    try:
-        await services.structure.delete_page(pages.root, children="refuse")
-    except InvalidRequest:
-        pass
-    else:
-        raise AssertionError("children=refuse did not prevent deleting a page with children")
+    async with _ScratchPages(services, pages.personal_space, pages.root) as scratch:
+        try:
+            await services.structure.delete_page(pages.root, children="refuse")
+        except InvalidRequest:
+            pass
+        else:
+            raise AssertionError("children=refuse did not prevent deleting a page with children")
 
-    move_parent = await services.writes.create_page(
-        f"Connector Lab Move-Up Delete [{fixture.run_id}]",
-        f"deletecheck{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    move_child = await services.writes.create_page(
-        f"Connector Lab Move-Up Child [{fixture.run_id}]",
-        f"deletechild{fixture.run_id}",
-        format="text",
-        parent_id=move_parent.page_id,
-    )
-    move_result = await services.structure.delete_page(move_parent.page_id, children="move_up")
-    if not move_result.complete or not any(item.page_id == move_child.page_id and item.status == "moved_up" for item in move_result.pages):
-        raise AssertionError("move_up delete did not preserve its child")
-    await _assert_placement(services, move_child.page_id, pages.personal_space, pages.root, "last")
-    restored = await services.structure.restore_page(move_parent.page_id)
-    if restored.placement_source != "saved_property" or restored.placement_status != "applied":
-        raise AssertionError("saved placement was not applied during restore")
-    await services.structure.delete_page(move_child.page_id)
-    await services.structure.delete_page(move_parent.page_id)
-
-    trash_parent = await services.writes.create_page(
-        f"Connector Lab Subtree Delete [{fixture.run_id}]",
-        f"subtreecheck{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    trash_child = await services.writes.create_page(
-        f"Connector Lab Subtree Child [{fixture.run_id}]",
-        f"subtreechild{fixture.run_id}",
-        format="text",
-        parent_id=trash_parent.page_id,
-    )
-    trash_grandchild = await services.writes.create_page(
-        f"Connector Lab Subtree Grandchild [{fixture.run_id}]",
-        f"subtreegrandchild{fixture.run_id}",
-        format="text",
-        parent_id=trash_child.page_id,
-    )
-    subtree = await services.structure.delete_page(trash_parent.page_id, children="trash")
-    if not subtree.complete or sum(item.status == "trashed" for item in subtree.pages) != 3:
-        raise AssertionError("bottom-up subtree deletion did not trash all three pages")
-    listed = await services.structure.list_trash(space_key=pages.personal_space, limit=100)
-    if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= {
-        item.page_id for item in listed.pages
-    }:
-        raise AssertionError("fixture subtree was missing from the trash listing")
-    for page_id in (trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id):
-        restored_page = await services.structure.restore_page(page_id)
-        if restored_page.placement_status != "applied":
-            raise AssertionError("subtree restoration did not apply saved placement")
-    retrash = await services.structure.delete_page(trash_parent.page_id, children="trash")
-    if not retrash.complete or {item.page_id for item in retrash.pages if item.status == "trashed"} != {
-        trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id
-    }:
-        raise AssertionError("restored subtree cleanup did not trash every scratch page")
-
-    caller_page = await services.writes.create_page(
-        f"Connector Lab Caller Restore [{fixture.run_id}]",
-        f"callerrestore{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    await services.structure.delete_page(caller_page.page_id)
-    caller_restore = await services.structure.restore_page(
-        caller_page.page_id, parent_id=pages.root, position="last"
-    )
-    if caller_restore.placement_source != "caller" or caller_restore.placement_status != "applied":
-        raise AssertionError("caller placement was not applied during restore")
-    await services.structure.delete_page(caller_page.page_id)
-
-    root_fallback = await services.writes.create_page(
-        f"Connector Lab Root Restore [{fixture.run_id}]",
-        f"rootrestore{fixture.run_id}",
-        format="text",
-        parent_id=pages.root,
-    )
-    await services.api.trash_page(root_fallback.page_id, expected_username=services.username)
-    fallback = await services.structure.restore_page(root_fallback.page_id)
-    if fallback.placement_source != "space_root" or fallback.placement_status != "root":
-        raise AssertionError("missing placement property did not fall back to space root")
-    await services.structure.delete_page(root_fallback.page_id)
-
-    for page_id in (
-        move_parent.page_id, move_child.page_id, trash_parent.page_id,
-        trash_child.page_id, trash_grandchild.page_id, caller_page.page_id, root_fallback.page_id,
-    ):
-        metadata = await services.api.get_page_metadata(
-            page_id, status="trashed", expected_username=services.username
+        move_parent = await scratch.create(
+            f"Connector Lab Move-Up Delete [{fixture.run_id}]",
+            f"deletecheck{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
         )
-        if metadata.status != "trashed":
-            raise AssertionError("scratch page cleanup left a current page")
+        move_child = await scratch.create(
+            f"Connector Lab Move-Up Child [{fixture.run_id}]",
+            f"deletechild{fixture.run_id}",
+            format="text",
+            parent_id=move_parent.page_id,
+        )
+        move_result = await services.structure.delete_page(move_parent.page_id, children="move_up")
+        if not move_result.complete or not any(item.page_id == move_child.page_id and item.status == "moved_up" for item in move_result.pages):
+            raise AssertionError("move_up delete did not preserve its child")
+        await _assert_placement(services, move_child.page_id, pages.personal_space, pages.root, "last")
+        restored = await services.structure.restore_page(move_parent.page_id)
+        if restored.placement_source != "saved_property" or restored.placement_status != "applied":
+            raise AssertionError("saved placement was not applied during restore")
+        await services.structure.delete_page(move_child.page_id)
+        await services.structure.delete_page(move_parent.page_id)
+
+        trash_parent = await scratch.create(
+            f"Connector Lab Subtree Delete [{fixture.run_id}]",
+            f"subtreecheck{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
+        )
+        trash_child = await scratch.create(
+            f"Connector Lab Subtree Child [{fixture.run_id}]",
+            f"subtreechild{fixture.run_id}",
+            format="text",
+            parent_id=trash_parent.page_id,
+        )
+        trash_grandchild = await scratch.create(
+            f"Connector Lab Subtree Grandchild [{fixture.run_id}]",
+            f"subtreegrandchild{fixture.run_id}",
+            format="text",
+            parent_id=trash_child.page_id,
+        )
+        subtree = await services.structure.delete_page(trash_parent.page_id, children="trash")
+        if not subtree.complete or sum(item.status == "trashed" for item in subtree.pages) != 3:
+            raise AssertionError("bottom-up subtree deletion did not trash all three pages")
+        listed = await services.structure.list_trash(space_key=pages.personal_space, limit=100)
+        if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= {
+            item.page_id for item in listed.pages
+        }:
+            raise AssertionError("fixture subtree was missing from the trash listing")
+        for page_id in (trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id):
+            restored_page = await services.structure.restore_page(page_id)
+            if restored_page.placement_status != "applied":
+                raise AssertionError("subtree restoration did not apply saved placement")
+        retrash = await services.structure.delete_page(trash_parent.page_id, children="trash")
+        if not retrash.complete or {item.page_id for item in retrash.pages if item.status == "trashed"} != {
+            trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id
+        }:
+            raise AssertionError("restored subtree cleanup did not trash every scratch page")
+
+        caller_page = await scratch.create(
+            f"Connector Lab Caller Restore [{fixture.run_id}]",
+            f"callerrestore{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
+        )
+        await services.structure.delete_page(caller_page.page_id)
+        caller_restore = await services.structure.restore_page(
+            caller_page.page_id, parent_id=pages.root, position="last"
+        )
+        if caller_restore.placement_source != "caller" or caller_restore.placement_status != "applied":
+            raise AssertionError("caller placement was not applied during restore")
+        await services.structure.delete_page(caller_page.page_id)
+
+        root_fallback = await scratch.create(
+            f"Connector Lab Root Restore [{fixture.run_id}]",
+            f"rootrestore{fixture.run_id}",
+            format="text",
+            parent_id=pages.root,
+        )
+        await services.api.trash_page(root_fallback.page_id, expected_username=services.username)
+        fallback = await services.structure.restore_page(root_fallback.page_id)
+        if fallback.placement_source != "space_root" or fallback.placement_status != "root":
+            raise AssertionError("missing placement property did not fall back to space root")
+        await services.structure.delete_page(root_fallback.page_id)
+
+        for page_id in (
+            move_parent.page_id, move_child.page_id, trash_parent.page_id,
+            trash_child.page_id, trash_grandchild.page_id, caller_page.page_id, root_fallback.page_id,
+        ):
+            metadata = await services.api.get_page_metadata(
+                page_id, status="trashed", expected_username=services.username
+            )
+            if metadata.status != "trashed":
+                raise AssertionError("scratch page cleanup left a current page")
+
+
+class ScratchCleanupRequired(Exception):
+    """Some scratch state needs manual inspection; the report exposes this fixed label only."""
+
+
+class _ScratchPages:
+    """Track confirmed synthetic creations and clean them on success or definite check failure.
+
+    An uncertain write or changed account stops cleanup rather than racing an outstanding move.
+    Only known created IDs are touched. Fresh source metadata decides draft/current status and space.
+    """
+
+    def __init__(self, services: Services, home_space: str, home_parent: str) -> None:
+        self._services = services
+        self._home_space = home_space
+        self._home_parent = home_parent
+        self._ids: list[str] = []
+
+    async def __aenter__(self) -> _ScratchPages:
+        return self
+
+    async def create(self, *args: Any, **kwargs: Any) -> PageWriteResult:
+        created = await self._services.writes.create_page(*args, **kwargs)
+        self._ids.append(created.page_id)
+        return created
+
+    async def __aexit__(self, exc_type: Any, exc: BaseException | None, traceback: Any) -> None:
+        if isinstance(exc, (UncertainWrite, AuthenticationRequired, AccountMismatch)):
+            raise ScratchCleanupRequired("Inspect outstanding synthetic writes before cleanup.") from exc
+        failed = False
+        for page_id in reversed(self._ids):
+            try:
+                await self._clean_page(page_id)
+            except (UncertainWrite, AuthenticationRequired, AccountMismatch) as cleanup_error:
+                raise ScratchCleanupRequired("Cleanup stopped after an uncertain write or account change.") from cleanup_error
+            except Exception:
+                failed = True
+        if failed:
+            raise ScratchCleanupRequired("Some synthetic pages could not be cleaned; inspect the fixture run.") from exc
+
+    async def _clean_page(self, page_id: str) -> None:
+        services = self._services
+        try:
+            metadata = await services.api.get_page_metadata(page_id, expected_username=services.username)
+        except NotFound:
+            try:
+                draft = await services.api.get_page_metadata(page_id, status="draft", expected_username=services.username)
+            except NotFound:
+                return  # Already trashed or permanently deleted.
+            if draft.status != "draft":
+                raise AssertionError("scratch draft status was not confirmed")
+            result = await services.writes.delete_draft(page_id)
+            if not result.deleted:
+                raise AssertionError("scratch draft deletion was not confirmed")
+            return
+        if metadata.status == "trashed":
+            return
+        if metadata.status != "current":
+            raise AssertionError("scratch page status was not confirmed")
+        if metadata.space_key != self._home_space:
+            returned = await services.structure.move_page(page_id, parent_id=self._home_parent)
+            if returned.position_applied is None:
+                raise UncertainWrite("Scratch return move has an uncertain outcome.")
+            if not returned.moved or returned.space_key != self._home_space or returned.position_applied is not True:
+                raise AssertionError("scratch return move was refused")
+            metadata = await services.api.get_page_metadata(page_id, expected_username=services.username)
+            if metadata.space_key != self._home_space:
+                raise AssertionError("scratch return destination was not verified")
+        result = await services.structure.delete_page(page_id)
+        if any(item.status == "unknown" for item in result.pages):
+            raise UncertainWrite("Scratch trash operation has an uncertain outcome.")
+        if not result.complete:
+            raise AssertionError("scratch trash operation was not confirmed")
 
 
 def _local_day(value: str | None, timezone_name: str) -> str:

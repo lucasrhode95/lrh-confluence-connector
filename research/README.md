@@ -109,3 +109,8 @@ Confluence's own UI does during one controlled action, following the [UI runbook
 **Captures are credentials.** They contain session cookies, `atl_token` values, page content and names.
 Never commit or share them, or turn them into test fixtures; re-implement what they show with the
 connector's own token.
+
+Disposable write checks clean confirmed creations even when an assertion fails: drafts are deleted,
+current pages are trashed, and pages in a foreign space are returned first. `ScratchCleanupRequired`
+means cleanup failed or stopped after an uncertain write/account change; inspect that fixture run
+before retrying. The same-space move check verifies the version as well as parent and sibling order.
