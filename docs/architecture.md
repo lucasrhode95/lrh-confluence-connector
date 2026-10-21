@@ -166,8 +166,9 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 **[`pages.py`](../src/confluence_connector/service/pages.py) and
 [`page_text.py`](../src/confluence_connector/service/page_text.py)** convert a body in three steps:
 
-1. Storage is parsed with BeautifulSoup for macro parameters (Jira keys, PlantUML source, titles,
-   include targets) and typed references (`ri:page`, `ri:attachment`, inline-comment markers).
+1. `parse_storage` parses storage once per page read. It extracts macro parameters (Jira keys,
+   PlantUML source, titles, include targets), typed references (`ri:page`, `ri:attachment`,
+   inline-comment markers), and—on rich reads—verbatim top-level source slices from the same tree.
 2. A BeautifulSoup pass over `view` replaces each `data-macro-name` wrapper with its marker, pairing
    wrappers with storage macros by name and document order (wrappers inside a resolved include take no
    local source); turns images and attachment links into markers with typed references; renders
