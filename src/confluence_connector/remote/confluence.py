@@ -782,6 +782,8 @@ class ConfluenceApi:
             )
             rows, envelope = _page_envelope(payload, requested_start=start)
             versions.extend(_page_version(row) for row in rows)
+            if envelope.total_size is not None:
+                envelope.has_more = None  # Version-list totals are exact, unlike CQL search totals.
             next_start = envelope.next_start(VERSION_PAGE_SIZE)
             if next_start is None:
                 return versions[:MAX_PAGE_VERSIONS], len(versions) > MAX_PAGE_VERSIONS
