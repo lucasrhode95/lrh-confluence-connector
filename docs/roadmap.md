@@ -324,18 +324,14 @@ All four in [`service/page_text.py`](../src/confluence_connector/service/page_te
 
 ### One route for same-space moves
 
-**Decided 2026-10-20; implementation pending.** Use `movepage.action` for every same-space move,
-reparenting and positioning in one request without creating a page version. The user prefers avoiding
-unnecessary content versions. Dependence on the verified private route is accepted; do not fall back
-to the version-creating content update. D7 records this contract
-([requirements §10.4](requirements.md#104-routes-identity-and-placement-d7)).
-
-The current non-root move still updates `ancestors`, creating a version, then sends a second action
-for positioning. Replace that sequence and use the same action for `move_up` and restore placement.
-Keep root handling, sibling-order checks and uncertain-write reporting. Update offline tests to verify
-one action, no parent-update PUT and an unchanged page version; align the architecture when implemented.
-Live acceptance must independently verify parent, order and unchanged version
-([research §6.3](api-research.md#63-moves)).
+**Decided 2026-10-20; implemented, awaiting review (2026-10-21).** Same-space reparenting and
+positioning now use one `movepage.action` request. `move_up` and restore placement use that route too;
+the version-creating parent update was removed. Definite refusals retain the previous parent, while
+uncertain results leave placement unknown and advise inspection before retry. Root `last` placement
+uses `below` the final root page because `topLevel` inserts first. Offline tests verify one action,
+unchanged versions, order-preserving `move_up`, and definite and uncertain failures. Architecture and
+requirements now describe the route. Live acceptance must independently verify parent, order and
+unchanged version ([research §6.3](api-research.md#63-moves)).
 
 ### Improvements
 
