@@ -372,8 +372,11 @@ unchanged to retain its error response.
 
 #### Parse storage once per read
 
-Storage is parsed separately for macros and for references, and a `rich` read still runs the Markdown
-conversion it then discards. Parse once and skip the conversion for `rich`.
+**Implemented, awaiting review (2026-10-21).** `parse_storage` now extracts macro metadata, typed
+references and (for rich reads) verbatim top-level body slices from one BeautifulSoup tree. The read
+service passes that result into rendering, and rich reads skip Markdown conversion while retaining
+view-derived references. An offline regression checks one storage parse, typed Jira and attachment
+references, and no Markdown conversion; the rich body remains unchanged.
 
 #### One retry loop in the transport
 
