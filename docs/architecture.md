@@ -157,10 +157,19 @@ first and root-last placement. Move and restore allow missing status metadata; p
 an explicit `current` status.
 
 **[`search.py`](../src/confluence_connector/service/search.py)** builds CQL from literal terms and
-validated scope only; terms escape text-query syntax separately from CQL string quoting. Title search
-replaces punctuation with spaces and, on an unscoped first page, merges up to 20 quick-navigation
-matches after the CQL hits, within `limit`. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py)
-converts UTC bounds to CQL minutes in `cql_timezone` (requirements §7).
+validated scope only; terms escape text-query syntax separately from CQL string quoting. A missing
+query requires a narrowing filter and defaults to pages ordered by last modification. Order and detail
+settings live in cursors. Compact hits omit excerpts and ancestor arrays. The JSON response budget is
+checked after shaping; oversized pages are re-requested at the same CQL offset with a smaller server
+limit so the cursor can continue without skipping hits. Title search replaces punctuation with spaces
+and, on an unscoped first page, merges up to 20 quick-navigation matches after the CQL hits, within
+`limit`. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py) converts UTC bounds to CQL
+minutes in `cql_timezone` (requirements §7).
+
+`remote/confluence.py` already requests `content.version` to read each hit's modification time. The
+adapter now also maps `version.by` into `last_modified_by`; this adds no request or expansion and
+therefore no incremental REST payload for the author field. Availability of `version.by` on the
+deployed search response remains unverified; absent authors are null.
 
 **[`timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)** takes the
 newest readable page, reads its reference instant from REST metadata, and binary-searches
@@ -222,7 +231,8 @@ outputs.
 ### 5.8 [`config.py`](../src/confluence_connector/config.py) and [`logs.py`](../src/confluence_connector/logs.py)
 
 - `load_config` selects the file (`--config`, `CONFLUENCE_CONFIG`, repository root), refuses missing or
-  unknown keys before any prompt or request, and caches the result per process.
+  unknown keys before any prompt or request, and caches the result per process. Optional
+  `search_response_max_chars` is bounded from 1,000 to 1,000,000; it defaults to 40,000.
 - [`logs.py`](../src/confluence_connector/logs.py) is the same module as in the `lrh-*` Microsoft 365
   connectors: one daily-rotated file per `mcp` process (the one-shot `auth` and `status` commands
   print to the terminal and write no log), kept seven days, with a filter that redacts bearer

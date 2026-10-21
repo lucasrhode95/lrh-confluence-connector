@@ -184,6 +184,35 @@ Live (browser), 2026-10-19:
   still returns them, and `creator = "username"` still finds their pages.
 - `creator` and `contributor` take a username, not a display name.
 
+### 4.6 Ordering and latest-version author fields
+
+Documentation review, 2026-10-21:
+
+- Atlassian's [Data Center CQL guide](https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/)
+  documents `ORDER BY` and date ordering generally. It does not document this instance's observed
+  `siteSearch` field or state whether that private search clause accepts a sort suffix.
+- The [REST expansion guide](https://developer.atlassian.com/server/confluence/expansions-in-the-rest-api/)
+  documents expanding `version` and shows its `by` author. The connector's search request already
+  expands `content.version` for `when`; the parser now also reads `by` from that same expansion.
+
+Live read-only check, 2026-10-21:
+
+- On the configured Data Center instance, a text query using `siteSearch` succeeded with each of
+  `ORDER BY lastmodified DESC`, `ORDER BY lastmodified ASC` and `ORDER BY created DESC`; each returned
+  three hits. The returned modification timestamps followed the requested order for both modified
+  sorts. A queryless `contributor IN ('<configured-user>')` page listing also succeeded, defaulted to
+  `type IN (page)` and `ORDER BY lastmodified DESC`, and returned three hits in descending modification
+  order.
+- All sampled hits included `version.by`; the mapped `last_modified_by` included both username and
+  display name in the initial text and queryless samples. The API still permits a missing author, which
+  maps to null. No missing-author result occurred in these samples.
+- The two initial compact responses were 2,254 and 2,612 JSON characters, below the 40,000-character
+  default. This did not stress the size guard. No pre-change latency or payload comparison was made;
+  the search request already expanded `content.version`, so the change adds no request or expansion.
+- This verifies behavior on one configured instance only. The search hits do not expose creation time,
+  so the `created DESC` result order was accepted by Confluence but not independently checked against
+  per-hit creation timestamps. Support across other Data Center versions remains unknown.
+
 ## 5. Reading pages
 
 ### 5.1 Bodies and macros

@@ -54,6 +54,8 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
   resolution in archived spaces, and quick-navigation coverage for personal/archived spaces and quotes.
 - **CQL timezone:** confirm calibration/conversion on another zone and whether CQL follows profile or
   server zone when they differ; check repeated daylight-saving hours.
+- **Search behavior:** check `siteSearch` ordering and `content.version.by` across supported Data Center
+  versions; the read-only check on the configured instance passed (research §4.6).
 - **Large child lists:** verify paging beyond 500 children and practical tree/delete preflight caps.
 - **HTML macros/includes:** investigate whether source fields locate wrapperless HTML macros and
   identify macros inside resolved includes.

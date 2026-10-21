@@ -20,6 +20,7 @@ from confluence_connector.domain.errors import (
 from confluence_connector.domain.cql import cql_literal
 from confluence_connector.domain.urls import same_instance_link, same_instance_origin
 from confluence_connector.domain.models import (
+    ContentAuthor,
     ContentSearchHit,
     CurrentUser,
     DraftSummary,
@@ -932,6 +933,7 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
         url=same_instance_link(base_url, raw_url),
         excerpt=_optional_string(value.get("excerpt")),
         modified_at=_optional_string(version.get("when")) or _optional_string(value.get("lastModified")),
+        last_modified_by=_content_author(version.get("by")),
         parent_id=ancestors[-1].page_id if ancestors else None,
         ancestors=ancestors,
         position=position,
@@ -1148,6 +1150,14 @@ def _person(value: Any) -> PersonSummary | None:
         user_type=_optional_string(value.get("type")),
     )
     return person if any((person.username, person.user_key, person.display_name)) else None
+
+
+def _content_author(value: Any) -> ContentAuthor | None:
+    """Map the latest-version author from source fields; absence is a valid null result."""
+    person = _person(value)
+    if person is None:
+        return None
+    return ContentAuthor(username=person.username, display_name=person.display_name)
 
 
 def _page_version(value: Any) -> PageVersion:

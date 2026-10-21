@@ -265,6 +265,10 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(annotations.idempotentHint)
         search_schema = tools_by_name["search_content"].model_dump(mode="json")["inputSchema"]
         self.assertIn("Literal search text", search_schema["properties"]["query"]["description"])
+        self.assertNotIn("query", search_schema.get("required", []))
+        self.assertIn("order_by", search_schema["properties"])
+        self.assertIn("detail", search_schema["properties"])
+        self.assertIn("contributor means anyone", search_schema["properties"]["query"]["description"])
         scope_properties = search_schema["$defs"]["SearchScope"]["properties"]
         self.assertTrue(all("description" in prop for prop in scope_properties.values()))
         self.assertIn("no offset means UTC", scope_properties["modified_after"]["description"])
