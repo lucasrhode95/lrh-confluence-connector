@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -29,6 +28,12 @@ from confluence_connector.domain.models import (
     ResolvedPageReference,
     TrashListResult,
 )
+from confluence_connector.domain.validation import (
+    optional_space_key,
+    page_reference,
+    require_current_page,
+    space_key as validate_space_key,
+)
 from confluence_connector.remote.confluence import (
     CHILD_PAGE_SIZE,
     PLACEMENT_PROPERTY_KEY,
@@ -46,7 +51,6 @@ MAX_TRASH_LIMIT = TRASH_PAGE_SIZE
 MAX_DELETE_SUBTREE_PAGES = 100
 MAX_HIERARCHY_READ_PAGES = 5_000
 _TRASH_CURSOR_KIND = "list_trash"
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
 class PageStructure:
@@ -72,7 +76,7 @@ class PageStructure:
         routines receive numeric current-page IDs, a current page metadata record and a resolved
         target placement.
         """
-        reference = _page_reference(page)
+        reference = page_reference(page)
         selected_position, parent_reference, selected_space, sibling_reference = _placement_inputs(
             parent_id=parent_id,
             space_key=space_key,
@@ -84,7 +88,7 @@ class PageStructure:
         metadata = await self._api.get_page_metadata(
             source.page_id, expected_username=self._username
         )
-        _require_current_page(metadata)
+        require_current_page(metadata, allow_missing_status=True)
         target = await self._resolve_placement(
             parent_reference=parent_reference,
             space_key=selected_space,
@@ -103,13 +107,13 @@ class PageStructure:
         After writes begin, it stops at the first error and returns confirmed, unknown and unattempted
         pages separately; it never compensates a completed move or trash operation.
         """
-        reference = _page_reference(page)
+        reference = page_reference(page)
         mode = _children_mode(children)
         resolved = await self._resolve_page(reference)
         metadata = await self._api.get_page_metadata(
             resolved.page_id, expected_username=self._username
         )
-        _require_current_page(metadata)
+        require_current_page(metadata, allow_missing_status=True)
         if metadata.space_key is None:
             raise Upstream("Confluence did not return the page's space.")
 
@@ -152,7 +156,7 @@ class PageStructure:
                     child_metadata = await self._api.get_page_metadata(
                         node.page_id, expected_username=self._username
                     )
-                    _require_current_page(child_metadata)
+                    require_current_page(child_metadata, allow_missing_status=True)
                     current_parent = child_metadata.ancestors[-1].page_id if child_metadata.ancestors else None
                     if current_parent != node.parent_id or child_metadata.space_key != node.space_key:
                         outcomes[node.page_id] = _outcome(node, "skipped", "Parent or space changed after preflight.")
@@ -201,7 +205,7 @@ class PageStructure:
                 raise InvalidRequest("Pass only cursor; it already contains the trash scope and limit.")
             selected_space, start, page_limit = _decode_trash_cursor(cursor)
         else:
-            selected_space = _optional_space_key(space_key)
+            selected_space = optional_space_key(space_key)
             start = 0
             page_limit = _trash_limit(limit)
         page: RemoteTrashPage = await self._api.list_trash_page(
@@ -247,7 +251,7 @@ class PageStructure:
         sibling: str | None = None,
     ) -> PageRestoreResult:
         """Restore one trashed page, then apply caller placement, saved placement or the space root."""
-        reference = _page_reference(page)
+        reference = page_reference(page)
         has_caller_placement = any(
             value is not None for value in (parent_id, space_key, position, sibling)
         )
@@ -353,7 +357,7 @@ class PageStructure:
                 current = await self._api.get_page_metadata(
                     metadata.page_id, expected_username=self._username
                 )
-                _require_current_page(current)
+                require_current_page(current, allow_missing_status=True)
                 move_result = await self._move_resolved(current, chosen)
             except UncertainWrite as exc:
                 placement_status = "unknown"
@@ -531,7 +535,7 @@ class PageStructure:
         current = await self._api.get_page_metadata(
             page_id, expected_username=self._username
         )
-        _require_current_page(current)
+        require_current_page(current, allow_missing_status=True)
         if not current.ancestors:
             return
         await self._change_parent(current, None)
@@ -566,7 +570,7 @@ class PageStructure:
             parent_metadata = await self._api.get_page_metadata(
                 parent.page_id, expected_username=self._username
             )
-            _require_current_page(parent_metadata)
+            require_current_page(parent_metadata, allow_missing_status=True)
             if parent_metadata.space_key is None:
                 raise Upstream("Confluence did not return the target parent's space.")
             if parent_metadata.page_id == moving_page_id or any(
@@ -576,7 +580,7 @@ class PageStructure:
             selected_space = parent_metadata.space_key
             parent_id = parent_metadata.page_id
         else:
-            selected_space = _space_key(space_key)
+            selected_space = validate_space_key(space_key)
             parent_id = None
 
         sibling_id: str | None = None
@@ -587,7 +591,7 @@ class PageStructure:
             sibling_metadata = await self._api.get_page_metadata(
                 sibling.page_id, expected_username=self._username
             )
-            _require_current_page(sibling_metadata)
+            require_current_page(sibling_metadata, allow_missing_status=True)
             sibling_parent_id = sibling_metadata.ancestors[-1].page_id if sibling_metadata.ancestors else None
             if sibling_metadata.space_key != selected_space or sibling_parent_id != parent_id:
                 raise InvalidRequest("The sibling must be in the target space and under the selected parent.")
@@ -802,41 +806,17 @@ def _placement_inputs(
         raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
     if not required and parent_id is None and space_key is None:
         raise InvalidRequest("A page placement requires parent_id or space_key.")
-    parent_reference = _page_reference(parent_id) if parent_id is not None else None
-    selected_space = _space_key(space_key) if space_key is not None else None
+    parent_reference = page_reference(parent_id, field="parent_id") if parent_id is not None else None
+    selected_space = validate_space_key(space_key) if space_key is not None else None
     selected_position = "last" if position is None else position
     if not isinstance(selected_position, str) or selected_position not in {"first", "last", "before", "after"}:
         raise InvalidRequest("position must be first, last, before or after.")
-    sibling_reference = _page_reference(sibling) if sibling is not None else None
+    sibling_reference = page_reference(sibling, field="sibling") if sibling is not None else None
     if selected_position in {"before", "after"} and sibling_reference is None:
         raise InvalidRequest("position before or after requires a sibling page reference.")
     if selected_position not in {"before", "after"} and sibling_reference is not None:
         raise InvalidRequest("sibling is only valid with position before or after.")
     return selected_position, parent_reference, selected_space, sibling_reference
-
-
-def _page_reference(value: Any) -> str:
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or len(value.strip()) > 2_048
-        or any(not char.isprintable() for char in value)
-    ):
-        raise InvalidRequest("Pass a non-empty page ID or supported same-instance page URL.")
-    return value.strip()
-
-
-def _space_key(value: Any) -> str:
-    if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
-        raise InvalidRequest(
-            "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "or a ~ personal-space key whose username may also contain dots and @."
-        )
-    return value
-
-
-def _optional_space_key(value: Any) -> str | None:
-    return None if value is None else _space_key(value)
 
 
 def _children_mode(value: Any) -> Literal["refuse", "move_up", "trash"]:
@@ -856,7 +836,7 @@ def _decode_trash_cursor(value: str) -> tuple[str | None, int, int]:
     state = cursors.decode(value, _TRASH_CURSOR_KIND)
     if set(state) != {"space_key", "start", "limit"}:
         raise InvalidRequest("Malformed trash cursor.")
-    selected_space = _optional_space_key(state.get("space_key"))
+    selected_space = optional_space_key(state.get("space_key"))
     start = state.get("start")
     limit = state.get("limit")
     if (
@@ -869,11 +849,6 @@ def _decode_trash_cursor(value: str) -> tuple[str | None, int, int]:
     ):
         raise InvalidRequest("Malformed trash cursor.")
     return selected_space, start, limit
-
-
-def _require_current_page(metadata: PageMetadata) -> None:
-    if metadata.content_type != "page" or metadata.status not in (None, "current"):
-        raise InvalidRequest("This operation accepts current Confluence pages only.")
 
 
 def _hit_page_id(hit: ContentSearchHit) -> str:

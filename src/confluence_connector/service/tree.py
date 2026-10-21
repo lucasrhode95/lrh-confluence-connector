@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -14,13 +13,13 @@ from confluence_connector.domain.models import (
     PageTreeResult,
     RemoteContentSearchPage,
 )
+from confluence_connector.domain.validation import space_key as validate_space_key
 from confluence_connector.remote.confluence import CHILD_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 
 DEFAULT_DEPTH = 3
 MAX_DEPTH = 5
 MAX_TREE_PAGES = 1_000
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
 class PageTree:
@@ -75,7 +74,7 @@ class PageTree:
                 notes=notes,
             )
 
-        key = _space_key(space_key)
+        key = validate_space_key(space_key)
         state = _TreeState()
         children = await self._space_children(key, max_depth=depth, state=state)
         return PageTreeResult(
@@ -192,15 +191,6 @@ def _tree_node(hit: ContentSearchHit) -> PageTreeNode:
 def _page_id(value: str) -> str:
     if not value.isdecimal():
         raise InvalidRequest("The selected reference did not resolve to a numeric page ID.")
-    return value
-
-
-def _space_key(value: Any) -> str:
-    if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
-        raise InvalidRequest(
-            "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "or a ~ personal-space key whose username may also contain dots and @."
-        )
     return value
 
 

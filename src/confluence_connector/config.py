@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from msal_extensions import CrossPlatLock
 
+from confluence_connector.domain.validation import is_space_key
 from confluence_connector.timezones import parse_cql_timezone
 
 APP_NAME = "lrh-confluence-connector"
@@ -23,7 +24,6 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = ROOT / "confluence_config.json"
 CONFIG_PATH = Path(os.environ.get("CONFLUENCE_CONFIG", str(DEFAULT_CONFIG_PATH)))
 _selected_path = CONFIG_PATH.resolve()
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -110,7 +110,7 @@ def _validate_settings(settings: object) -> None:
         if not isinstance(acceptance, dict) or set(acceptance) - {"personal_space_key", "cross_space_key"}:
             raise SystemExit("acceptance may contain only personal_space_key and cross_space_key.")
         for key, value in acceptance.items():
-            if value is not None and (not isinstance(value, str) or not _SPACE_KEY.fullmatch(value)):
+            if value is not None and not is_space_key(value):
                 raise SystemExit(f"acceptance.{key} must be a valid space key or null.")
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None

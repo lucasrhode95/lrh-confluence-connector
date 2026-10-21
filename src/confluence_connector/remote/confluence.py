@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from typing import Any, BinaryIO
-from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from pydantic import ValidationError
 
@@ -17,6 +17,8 @@ from confluence_connector.domain.errors import (
     UncertainWrite,
     Upstream,
 )
+from confluence_connector.domain.cql import cql_literal
+from confluence_connector.domain.urls import same_instance_link, same_instance_origin
 from confluence_connector.domain.models import (
     ContentSearchHit,
     CurrentUser,
@@ -164,8 +166,8 @@ class ConfluenceApi:
         if not space_key or not title:
             raise InvalidRequest("A display URL must include both a space key and page title.")
         cql = (
-            f"type = page AND space = {_cql_literal(space_key)} "
-            f"AND title = {_cql_literal(title)}"
+            f"type = page AND space = {cql_literal(space_key)} "
+            f"AND title = {cql_literal(title)}"
         )
         payload = await self._transport.get_json(
             self._endpoint("search_pages"),
@@ -230,7 +232,7 @@ class ConfluenceApi:
         self, name: str, *, start: int, limit: int, expected_username: str
     ) -> RemoteUserSearchPage:
         """Resolve a current user's display name through the observed user CQL search."""
-        cql = f"type = user AND user.fullname ~ {_cql_literal(name)}"
+        cql = f"type = user AND user.fullname ~ {cql_literal(name)}"
         payload = await self._transport.get_json(
             self._endpoint("ui_search"),
             params={"cql": cql, "start": str(start), "limit": str(limit)},
@@ -933,7 +935,7 @@ class ConfluenceApi:
             name=name,
             type=kind,
             status=status,
-            url=_same_instance_link(str(self._settings["base_url"]), webui),
+            url=same_instance_link(str(self._settings["base_url"]), webui),
         )
 
 
@@ -1001,7 +1003,7 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
         title=title,
         space_key=_optional_string(space.get("key")),
         space_name=_optional_string(space.get("name")),
-        url=_same_instance_link(base_url, raw_url),
+        url=same_instance_link(base_url, raw_url),
         excerpt=_optional_string(value.get("excerpt")),
         modified_at=_optional_string(version.get("when")) or _optional_string(value.get("lastModified")),
         parent_id=ancestors[-1].page_id if ancestors else None,
@@ -1034,7 +1036,7 @@ def _quicknav_hit(value: Any, *, base_url: str) -> ContentSearchHit | None:
         title=title,
         space_key=_optional_string(value.get("spaceKey")) or _optional_string(space.get("key")),
         space_name=_optional_string(value.get("spaceName")) or _optional_string(space.get("name")),
-        url=_same_instance_link(base_url, raw_url),
+        url=same_instance_link(base_url, raw_url),
         modified_at=_optional_string(value.get("lastModified")),
         sources=["quicknav"],
     )
@@ -1062,7 +1064,7 @@ def _page_metadata(payload: dict[str, Any], *, base_url: str) -> PageMetadata:
         title=title,
         content_type=content_type,
         status=_optional_string(payload.get("status")),
-        url=_same_instance_link(base_url, links.get("webui")),
+        url=same_instance_link(base_url, links.get("webui")),
         space_key=_optional_string(space.get("key")),
         space_name=_optional_string(space.get("name")),
         created_at=_optional_string(history.get("createdDate"))
@@ -1176,7 +1178,7 @@ def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:
                 page_id=page_id,
                 title=title,
                 space_key=_optional_string(space.get("key")),
-                url=_same_instance_link(base_url, links.get("webui")),
+                url=same_instance_link(base_url, links.get("webui")),
                 position=_optional_position(item.get("position")),
             )
         )
@@ -1301,7 +1303,7 @@ def _page_attachment(value: Any, *, base_url: str) -> PageAttachment | None:
         filename=filename,
         media_type=_optional_string(value.get("mediaType")) or _optional_string(extensions.get("mediaType")),
         file_size=_optional_nonnegative_int(value.get("fileSize", extensions.get("fileSize"))),
-        download_url=_same_instance_link(base_url, links.get("download")),
+        download_url=same_instance_link(base_url, links.get("download")),
     )
 
 
@@ -1408,47 +1410,11 @@ def _page_id(value: Any) -> bool:
     return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).isdigit()
 
 
-def _cql_literal(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
-
-def _same_instance_link(base_url: str, value: Any) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
-    base = urlsplit(base_url)
-    base_path = base.path.rstrip("/")
-    if value.startswith("/") and base_path and not value.startswith(base_path + "/"):
-        target = urlunsplit((base.scheme, base.netloc, base_path + value, "", ""))
-    else:
-        target = urljoin(base_url.rstrip("/") + "/", value)
-    link = urlsplit(target)
-    try:
-        same_origin = (
-            base.scheme.casefold() == link.scheme.casefold()
-            and (base.hostname or "").casefold() == (link.hostname or "").casefold()
-            and _port(base) == _port(link)
-        )
-    except ValueError:
-        return None
-    in_context = not base_path or link.path == base_path or link.path.startswith(base_path + "/")
-    return target if same_origin and in_context and link.username is None and link.password is None else None
-
-
 def _attachment_download_route(base_url: str, value: str) -> tuple[str, dict[str, str]]:
     """Validate a mapped download URL and reduce it to an in-context route and query."""
     base = urlsplit(base_url)
     link = urlsplit(value)
-    try:
-        same_origin = (
-            base.scheme.casefold() == link.scheme.casefold()
-            and (base.hostname or "").casefold() == (link.hostname or "").casefold()
-            and _port(base) == _port(link)
-            and link.username is None
-            and link.password is None
-        )
-    except ValueError:
-        same_origin = False
-    if not same_origin:
+    if not same_instance_origin(base_url, value):
         raise Upstream("Confluence returned an unsafe attachment download link.")
 
     base_path = base.path.rstrip("/")
@@ -1466,9 +1432,3 @@ def _attachment_download_route(base_url: str, value: str) -> tuple[str, dict[str
     ):
         raise Upstream("Confluence returned an unsafe attachment download path.")
     return path, dict(parse_qsl(link.query, keep_blank_values=True))
-
-
-def _port(parts: Any) -> int:
-    if parts.port is not None:
-        return parts.port
-    return 443 if parts.scheme == "https" else 80

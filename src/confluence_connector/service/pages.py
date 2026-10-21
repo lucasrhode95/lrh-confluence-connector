@@ -10,8 +10,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from confluence_connector.domain.errors import (
-    AccountMismatch,
-    AuthenticationRequired,
     ConnectorError,
     InvalidRequest,
     Upstream,
@@ -29,9 +27,11 @@ from confluence_connector.domain.models import (
     RemotePageContent,
     ResolvedPageReference,
 )
+from confluence_connector.domain.validation import page_references
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
+from confluence_connector.service.errors import raise_account_error
 from confluence_connector.service.page_text import (
     PageTextBlock,
     render_page_body,
@@ -103,7 +103,7 @@ class PageTextService:
             state = _decode_cursor(cursor)
             return await self._continue(state)
 
-        references = _page_references(pages)
+        references = page_references(pages, maximum=MAX_PAGE_REFERENCES)
         page_format = _format(format)
         budget = _character_budget(max_chars)
         scope = _parse_scope(parse_scope)
@@ -156,7 +156,7 @@ class PageTextService:
                     raise InvalidRequest("The selected reference did not resolve to a numeric page ID.")
                 return _PageRequest(reference, resolved.page_id, resolved.version), None
             except ConnectorError as exc:
-                _raise_account_error(exc)
+                raise_account_error(exc)
                 return None, PageReadFailure(reference=reference, error=f"{type(exc).__name__}: {exc}")
 
         resolved = await asyncio.gather(*(resolve(reference) for reference in references))
@@ -213,7 +213,7 @@ class PageTextService:
                 try:
                     loaded = await pending.pop(index)
                 except ConnectorError as exc:
-                    _raise_account_error(exc)
+                    raise_account_error(exc)
                     failures.append(PageReadFailure(reference=request.reference, error=f"{type(exc).__name__}: {exc}"))
                     schedule(index + 2)
                     continue
@@ -332,7 +332,7 @@ class PageTextService:
         for name, result in zip(task_names[1:], results[1:], strict=True):
             if isinstance(result, BaseException):
                 if isinstance(result, ConnectorError):
-                    _raise_account_error(result)
+                    raise_account_error(result)
                     notes.append(f"The {name} section could not be read ({type(result).__name__}).")
                     continue
                 raise result
@@ -406,28 +406,6 @@ class PageTextService:
             header=header,
             notes=tuple(notes),
         )
-
-
-def _page_references(value: Any, *, maximum: int = MAX_PAGE_REFERENCES) -> list[str]:
-    if isinstance(value, str):
-        values = [value]
-    elif isinstance(value, list):
-        values = value
-    else:
-        raise InvalidRequest("pages must be one page reference or a list of page references.")
-    if not values or len(values) > maximum:
-        raise InvalidRequest(f"pages must contain 1 to {maximum} page references.")
-    result: list[str] = []
-    for item in values:
-        if (
-            not isinstance(item, str)
-            or not item.strip()
-            or len(item.strip()) > 2_048
-            or any(ord(character) < 32 for character in item)
-        ):
-            raise InvalidRequest("pages contains an invalid page reference.")
-        result.append(item.strip())
-    return result
 
 
 def _parse_scope(value: PageParseScope | dict[str, Any] | None) -> PageParseScope:
@@ -742,8 +720,3 @@ def _unique_references(references: list[PageReference]) -> list[PageReference]:
             seen.add(key)
             unique.append(reference)
     return unique
-
-
-def _raise_account_error(error: ConnectorError) -> None:
-    if isinstance(error, (AuthenticationRequired, AccountMismatch)):
-        raise error
