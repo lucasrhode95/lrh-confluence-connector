@@ -28,8 +28,8 @@ requests were made. Broader refactoring, implementation of the decided move rout
 - **Implemented, awaiting review:** use REST metadata for both initial and final timestamps, comparing
   parsed UTC instants. Search only selects the page. Synthetic offset tests now include the search/REST
   discrepancy and equivalent offset spellings; concurrent-edit tests still enforce retry and failure.
-- **Live verification:** the corrected read-only calibration succeeded with offset zero. Configuration
-  persistence through the operator-run CLI and the skipped date-filter checks remain pending.
+- **Live verification:** the corrected read-only calibration succeeded with offset zero. The operator
+  subsequently persisted the setting through the CLI; date-only and timestamp filters passed live.
 
 
 #### Acceptance view-file parameter has the wrong type (P2)
@@ -420,11 +420,18 @@ use of local filenames instead of source IDs. Fixes and regressions remain above
 The earlier HTTP 500 was the fixture parameter's server-side `ClassCastException`; it was not an
 authentication failure. Offline checks after these fixes: 278 tests, one platform skip, compilation.
 
-Still needed to complete coverage:
+**Targeted live follow-up, 2026-10-20:** after the operator saved `cql_timezone`, date-only filters,
+timestamp intervals supplied with offsets, and an excluding timestamp bound all passed. A separate
+synthetic page was moved under the explicitly authorized parent in another space, verified there,
+and immediately moved back under the personal fixture root. The round trip took 3.82 seconds and
+preserved its version. The scratch page was trashed in the personal space; direct child-list and
+metadata reads confirmed no test page remained at the authorized destination. No destination setting
+was persisted, and no real target identifiers are retained here.
 
-- Configure `cql_timezone` through a successful operator-run `status --check`, then rerun date filters.
-- Add one inline comment to the fixture root in the UI, then rerun marker and content-loss checks.
-- Configure a distinct authorized cross-space target, then rerun the cross-space move check.
+The date and cross-space skips from the full run are now covered by this targeted follow-up. Still
+needed: add one inline comment to the fixture root in the UI, then rerun marker and content-loss checks.
+The standalone runner's optional cross-space setting remains unset; any future run must use an
+explicitly authorized destination and the same immediate return/cleanup policy.
 
 See the [research toolkit](../research/README.md#synthetic-acceptance-fixture) for the opt-in commands.
 

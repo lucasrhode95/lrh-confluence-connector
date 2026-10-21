@@ -403,3 +403,16 @@ cross-field precision. No private configuration was changed during diagnosis.
 
 A read-only replay of the corrected calibration succeeded with effective offset zero on 2026-10-20.
 The private configuration remained unchanged; the normal operator-run CLI command owns persistence.
+
+### 8.6 Date and cross-space follow-up
+
+Live, 2026-10-20, using the saved CQL timezone: date-only created/modified scopes, an inclusive timestamp
+interval with an explicit non-UTC input offset, and a timestamp bound excluding the fixture all passed.
+This verifies the configured conversion on this instance; it does not resolve profile-versus-server
+zone selection or repeated daylight-saving hours.
+
+A synthetic page moved under a separately authorized parent in another space and returned immediately
+under the personal fixture root. Independent metadata reads confirmed both destinations and an unchanged
+page version. This round trip took 3.82 seconds. The scratch page was then trashed in the personal
+space; a direct child listing confirmed its absence from the temporary destination. The destination
+was supplied for this run only, with no real key, page ID or URL retained in the research record.
