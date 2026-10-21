@@ -361,7 +361,7 @@ class PageWriteResult(BaseModel):
 
 
 class PagePlacement(BaseModel):
-    """Validated target placement carried into move and restore operations."""
+    """Validated placement; sibling_id is the explicit or resolved sibling action target."""
 
     model_config = ConfigDict(extra="forbid")
 

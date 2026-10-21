@@ -102,6 +102,14 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.position_calls, [("700", "SYNTH", "above", "101")])
         self.assertEqual(self.api.create_calls[0]["parent_id"], "100")
 
+    async def test_create_requires_explicit_current_status_for_parent_placement(self) -> None:
+        self.api.metadata["100"].status = None
+
+        with self.assertRaisesRegex(InvalidRequest, "current published pages only"):
+            await self.service.create_page("New", "body", format="text", parent_id="100")
+
+        self.assertEqual(self.api.create_calls, [])
+
     async def test_requested_position_failure_is_reported_after_page_creation(self) -> None:
         self.api.metadata["102"] = _metadata(
             "102", title="Sibling", ancestors=[PageSummary(page_id="100", title="Parent")]
