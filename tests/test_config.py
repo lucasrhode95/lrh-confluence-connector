@@ -17,7 +17,6 @@ sys.path.insert(0, str(ROOT / "research"))
 
 from confluence_connector.config import (
     _read_config,
-    add_config_argument,
     data_dir,
     load_config,
     write_cql_timezone_if_missing,

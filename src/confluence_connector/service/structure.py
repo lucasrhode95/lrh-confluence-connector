@@ -129,7 +129,7 @@ class PageStructure:
         ]
         if mode == "move_up":
             nodes.extend(
-                await self._nodes_for_children(direct_children, metadata.page_id, metadata.space_key)
+                self._nodes_for_children(direct_children, metadata.page_id, metadata.space_key)
             )
         if mode == "trash" and len(nodes) > MAX_DELETE_SUBTREE_PAGES:
             raise InvalidRequest(
@@ -665,7 +665,7 @@ class PageStructure:
         while pending:
             parent = pending.pop()
             children = await self._read_children(parent.page_id, parent.space_key)
-            child_nodes = await self._nodes_for_children(children, parent.page_id, parent.space_key)
+            child_nodes = self._nodes_for_children(children, parent.page_id, parent.space_key)
             if len(nodes) + len(child_nodes) > MAX_HIERARCHY_READ_PAGES:
                 raise InvalidRequest(
                     f"The page hierarchy exceeds the {MAX_HIERARCHY_READ_PAGES}-page read safety cap; no changes were made."
@@ -678,7 +678,7 @@ class PageStructure:
             pending.extend(reversed(child_nodes))
         return nodes
 
-    async def _nodes_for_children(
+    def _nodes_for_children(
         self, children: list[ContentSearchHit], parent_id: str, space_key: str
     ) -> list[_PageNode]:
         nodes: list[_PageNode] = []

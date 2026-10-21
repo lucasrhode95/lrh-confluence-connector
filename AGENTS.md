@@ -147,11 +147,12 @@ write tests. Do not run live authentication or Wiki probes as routine checks.
 
 ## Checks
 
-Run both offline checks before every commit:
+Run all offline checks before every commit:
 
 ```powershell
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
+uv run pyflakes src research tests
 ```
 
 After moving or changing the probe, also check its CLI without network access:

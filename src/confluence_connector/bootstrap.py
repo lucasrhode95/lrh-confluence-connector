@@ -64,7 +64,6 @@ class AppContext:
         self.settings = settings if settings is not None else config.load_config()
         self.store = store or TokenStore()
         self._http_client = http_client
-        self._owns_http_client = http_client is None
         self._transport: ConfluenceTransport | None = None
         self._services: Services | None = None
         self._lock = asyncio.Lock()
@@ -128,8 +127,6 @@ class AppContext:
         """Close the owned process HTTP client, if one has been created."""
         if self._transport is not None:
             await self._transport.aclose()
-        elif self._owns_http_client and self._http_client is not None:
-            await self._http_client.aclose()
 
     def _build(self, username: str) -> Services:
         api = self._api()
