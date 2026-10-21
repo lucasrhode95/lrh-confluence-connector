@@ -47,15 +47,8 @@ async def _calibrate_once(api: ConfluenceApi, username: str) -> CqlTimezoneCalib
     page_id = page.content_id
     if page_id is None or not page_id.isdecimal():
         raise Upstream("Confluence did not return a usable page for timezone calibration.")
-    if page.modified_at is None:
-        raise Upstream("Confluence did not return a page modification timestamp for calibration.")
-    try:
-        reference = datetime.fromisoformat(page.modified_at.replace("Z", "+00:00"))
-    except ValueError:
-        raise Upstream("Confluence returned an invalid page modification timestamp.") from None
-    if reference.tzinfo is None:
-        raise Upstream("Confluence returned a modification timestamp without a timezone.")
-    reference_utc = reference.astimezone(timezone.utc)
+    sample = await api.get_page_metadata(page_id, expected_username=username)
+    reference_utc = _modification_instant(sample.modified_at)
     reference_minute = reference_utc.replace(second=0, microsecond=0)
 
     low, high = -_SEARCH_BOUND_MINUTES, _SEARCH_BOUND_MINUTES
@@ -70,7 +63,7 @@ async def _calibrate_once(api: ConfluenceApi, username: str) -> CqlTimezoneCalib
     if abs(low) > _MAX_SUPPORTED_OFFSET_MINUTES:
         raise Upstream("Confluence's effective CQL timezone is outside the supported calibration range.")
     verified = await api.get_page_metadata(page_id, expected_username=username)
-    if verified.modified_at != page.modified_at:
+    if _modification_instant(verified.modified_at) != reference_utc:
         raise _SampleChanged
     return CqlTimezoneCalibration(offset_minutes=low, reference_utc=reference_utc)
 
@@ -103,3 +96,16 @@ async def _matches_cutoff(
         expected_username=username,
     )
     return any(hit.content_id == page_id for hit in page.hits)
+
+
+def _modification_instant(value: str | None) -> datetime:
+    """Parse one REST modification instant; equivalent timezone spellings identify the same sample."""
+    if value is None:
+        raise Upstream("Confluence did not return a page modification timestamp for calibration.")
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise Upstream("Confluence returned an invalid page modification timestamp.") from None
+    if instant.tzinfo is None:
+        raise Upstream("Confluence returned a modification timestamp without a timezone.")
+    return instant.astimezone(timezone.utc)

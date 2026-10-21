@@ -143,8 +143,9 @@ matches after the CQL hits, within `limit`. [`cql_dates.py`](../src/confluence_c
 converts UTC bounds to CQL minutes in `cql_timezone` (requirements §7).
 
 **[`timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)** takes the
-newest readable page and binary-searches `lastmodified >=` minute cutoffs within ±15 hours to find
-CQL's effective offset. The sample timestamp is rechecked after measurement; a changed sample retries
+newest readable page, reads its reference instant from REST metadata, and binary-searches
+`lastmodified >=` minute cutoffs within ±15 hours to find
+CQL's effective offset. The REST sample timestamp is rechecked as a UTC instant after measurement; a changed sample retries
 once, then fails without a result to persist. The CLI calls it; `config.py` writes the result atomically
 under a lock.
 

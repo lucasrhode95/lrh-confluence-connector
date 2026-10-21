@@ -25,12 +25,19 @@ class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
         for expected_offset in (0, 330, -180):
             with self.subTest(offset_minutes=expected_offset):
                 queries: list[str] = []
+                metadata_reads = 0
                 ref_minute = _REFERENCE_UTC.replace(second=0, microsecond=0).replace(tzinfo=None)
                 effective_cutoff = ref_minute + timedelta(minutes=expected_offset)
 
                 def respond(request: httpx.Request) -> httpx.Response:
+                    nonlocal metadata_reads
                     if request.url.path.endswith(f"/content/{_PAGE_ID}"):
-                        return httpx.Response(200, json=_page_row()["content"])
+                        metadata_reads += 1
+                        row = _page_row()["content"]
+                        if metadata_reads == 2:
+                            # Same instant, different offset spelling in the verification response.
+                            row["version"]["when"] = _REFERENCE_UTC.astimezone(timezone(timedelta(hours=5))).isoformat()
+                        return httpx.Response(200, json=row)
                     cql = request.url.params["cql"]
                     queries.append(cql)
                     if "lastmodified >=" not in cql:
@@ -40,6 +47,9 @@ class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
                         self.assertIsNotNone(match)
                         cutoff = datetime.strptime(match.group(1), "%Y/%m/%d %H:%M")  # type: ignore[union-attr]
                         rows = [_page_row()] if cutoff <= effective_cutoff else []
+                    for row in rows:
+                        # Search metadata differs by one millisecond from authoritative REST metadata.
+                        row["content"]["version"]["when"] = (_REFERENCE_UTC + timedelta(milliseconds=1)).isoformat()
                     return httpx.Response(
                         200,
                         json={"start": 0, "size": len(rows), "results": rows},
@@ -55,6 +65,7 @@ class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
                     api = ConfluenceApi(settings(), transport)
                     result = await calibrate_cql_timezone(api, "sample-user")
 
+                self.assertEqual(metadata_reads, 2)
                 self.assertEqual(result.offset_minutes, expected_offset)
                 self.assertEqual(result.reference_utc, _REFERENCE_UTC)
                 self.assertGreaterEqual(len(queries), 10)
