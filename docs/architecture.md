@@ -88,6 +88,8 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
   timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
   across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
+- JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
+  destination stream while the transport applies the shared retry, status and account checks.
 - **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
   `Retry-After`, otherwise with short jittered backoff.
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
