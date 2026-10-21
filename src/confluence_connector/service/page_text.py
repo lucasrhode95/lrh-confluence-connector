@@ -96,7 +96,7 @@ def render_page_body(
         for macro in macros:
             if macro.name == "html":
                 blocks.append(PageTextBlock("[Unrendered macro: html]", (_macro_reference(macro, page_id),)))
-    return RenderedPageBody(blocks=tuple(blocks), references=tuple(_unique(references)))
+    return RenderedPageBody(blocks=tuple(blocks), references=tuple(unique_references(references)))
 
 
 def parse_storage(
@@ -114,6 +114,17 @@ def parse_storage(
     )
     blocks = tuple(_storage_top_level_blocks(storage_html, soup)) if include_top_level_blocks else ()
     return ParsedStorage(macros=macros, references=references, top_level_blocks=blocks)
+
+
+def unique_references(references: list[PageReference]) -> list[PageReference]:
+    seen: set[str] = set()
+    result: list[PageReference] = []
+    for reference in references:
+        key = reference.model_dump_json()
+        if key not in seen:
+            seen.add(key)
+            result.append(reference)
+    return result
 
 
 def _storage_top_level_blocks(storage_html: str, soup: BeautifulSoup) -> list[str]:
@@ -556,14 +567,3 @@ def _macro_reference(macro: _Macro, page_id: str) -> PageReference | None:
 
 def _text(node: Tag | None) -> str:
     return " ".join(node.get_text(" ").split()) if node is not None else ""
-
-
-def _unique(references: list[PageReference]) -> list[PageReference]:
-    seen: set[str] = set()
-    result: list[PageReference] = []
-    for reference in references:
-        key = reference.model_dump_json()
-        if key not in seen:
-            seen.add(key)
-            result.append(reference)
-    return result

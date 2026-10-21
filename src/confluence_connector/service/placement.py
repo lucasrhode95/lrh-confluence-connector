@@ -13,7 +13,7 @@ from confluence_connector.domain.models import (
     RemoteContentSearchPage,
     ResolvedPageReference,
 )
-from confluence_connector.domain.validation import require_current_page, space_key as validate_space_key
+from confluence_connector.domain.validation import require_current_page
 from confluence_connector.remote.confluence import CHILD_PAGE_SIZE, ConfluenceApi
 
 PageResolver = Callable[[str], Awaitable[ResolvedPageReference]]
@@ -40,9 +40,6 @@ class PagePlacementResolver:
         resolve_root_last: bool = False,
     ) -> PagePlacement:
         """Resolve boundary-validated inputs; callers keep their page-reference policy."""
-        if (parent_reference is None) == (space_key is None):
-            raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
-
         parent_id, selected_space = await self._resolve_parent(
             parent_reference=parent_reference,
             space_key=space_key,
@@ -77,7 +74,8 @@ class PagePlacementResolver:
         moving_page_id: str | None,
     ) -> tuple[str | None, str]:
         if parent_reference is None:
-            return None, validate_space_key(space_key)
+            assert space_key is not None
+            return None, space_key
 
         parent = await resolve_page(parent_reference)
         metadata = await self._metadata(parent.page_id)
@@ -104,8 +102,7 @@ class PagePlacementResolver:
         resolve_root_last: bool,
     ) -> str | None:
         if position in {"before", "after"}:
-            if sibling_reference is None:
-                raise InvalidRequest("position before or after requires a sibling page reference.")
+            assert sibling_reference is not None
             sibling = await resolve_page(sibling_reference)
             metadata = await self._metadata(sibling.page_id)
             require_current_page(metadata, allow_missing_status=allow_missing_status)
@@ -116,8 +113,6 @@ class PagePlacementResolver:
                 raise InvalidRequest("A page cannot be positioned before or after itself.")
             return metadata.page_id
 
-        if sibling_reference is not None:
-            raise InvalidRequest("sibling is only valid with position before or after.")
         if position == "first":
             return await self._sibling_id(
                 parent_id=parent_id,

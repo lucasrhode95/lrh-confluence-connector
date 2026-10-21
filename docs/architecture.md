@@ -42,7 +42,7 @@ interrupted.
 
 Consequences of short-lived processes:
 
-- **No in-memory state outlives a call.** Cursors are self-contained (the normalized request plus the
+- **Continuation needs no retained session state.** Cursors are self-contained (the normalized request plus the
   next offset or anchor) and survive a client restart.
 - **No background work:** no schedulers, sync loops or warm-up. Calibration runs only inside `auth` and
   `status --check`, never on MCP startup or in a tool.
@@ -469,3 +469,8 @@ same conservative write policy to JSON and multipart fixture uploads. Encrypted 
 account to the canonical configured instance URL, including its installation context; an instance
 mismatch fails before a credential is sent. Exact-title resolution uses the content collection rather
 than the CQL index. Async moves require a terminal task state before reporting success.
+
+Public page services share reference and placement validation. The placement resolver trusts those
+inputs and checks remote scope and cycles. Space reads rely on the transport's account guard. MCP
+returns typed models directly; FastMCP owns serialization and result schemas. Downloads prepare their
+output directory once per operation, and export collision names are built from source metadata.

@@ -14,6 +14,14 @@ from confluence_connector.service import localfiles
 
 
 class AttachmentDownloadChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_prepares_and_cleans_the_output_directory_once(self) -> None:
+        api = _AttachmentApi([PageAttachment(attachment_id=str(i), filename=f"file-{i}.txt") for i in range(3)])
+        service = _service(api)
+        with tempfile.TemporaryDirectory() as directory, patch.object(service, "_download_directory", return_value=Path(directory)) as prepare:
+            result = await service.download_attachments("55", ["0", "1", "2"])
+        self.assertEqual(len(result.files), 3)
+        prepare.assert_called_once()
+
     async def test_selected_attachment_is_saved_with_safe_path_and_source_metadata(self) -> None:
         api = _AttachmentApi([PageAttachment(attachment_id="att-1", filename="NUL.txt", media_type="text/plain")])
         service = _service(api)

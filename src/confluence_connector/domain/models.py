@@ -17,14 +17,10 @@ PageWriteStatus = Literal["current", "draft"]
 
 
 class CurrentUser(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     username: str
 
 
 class AuthStatus(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     configured: bool
     token_stored: bool
     username: str | None = None
@@ -33,8 +29,6 @@ class AuthStatus(BaseModel):
 
 
 class SpaceSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     id: str | None = None
     key: str
     name: str
@@ -44,8 +38,6 @@ class SpaceSummary(BaseModel):
 
 
 class SpaceList(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     spaces: list[SpaceSummary]
     total_count: int
     truncated: bool
@@ -98,15 +90,11 @@ class SearchScope(BaseModel):
 
 
 class SearchQuery(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     source: SearchSource
     value: str
 
 
 class PageSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     space_key: str | None = None
@@ -115,8 +103,6 @@ class PageSummary(BaseModel):
 
 
 class ContentSearchHit(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     content_id: str | None = None
     content_type: str | None = None
     title: str
@@ -155,14 +141,10 @@ class PageEnvelope(BaseModel):
 class RemoteContentSearchPage(PageEnvelope):
     """One mapped Confluence search page before service-level cursor construction."""
 
-    model_config = ConfigDict(extra="ignore")
-
     hits: list[ContentSearchHit]
 
 
 class ContentSearchResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     query: str
     match: SearchMatch
     fields: SearchFields
@@ -178,8 +160,6 @@ class ContentSearchResult(BaseModel):
 
 
 class PersonSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     username: str | None = None
     user_key: str | None = None
     display_name: str | None = None
@@ -187,14 +167,10 @@ class PersonSummary(BaseModel):
 
 
 class RemoteUserSearchPage(PageEnvelope):
-    model_config = ConfigDict(extra="ignore")
-
     users: list[PersonSummary]
 
 
 class UserSearchResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     query: str
     users: list[PersonSummary]
     approximate_total: int | None = None
@@ -205,8 +181,6 @@ class UserSearchResult(BaseModel):
 
 
 class PageTreeNode(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     url: str | None = None
@@ -215,8 +189,6 @@ class PageTreeNode(BaseModel):
 
 
 class PageTreeResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     root: PageSummary | None = None
     space_key: str | None = None
     ancestors: list[PageSummary] = Field(default_factory=list)
@@ -228,8 +200,6 @@ class PageTreeResult(BaseModel):
 
 
 class PageVersion(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     number: int
     when: str | None = None
     author: PersonSummary | None = None
@@ -238,8 +208,6 @@ class PageVersion(BaseModel):
 
 
 class PageMetadata(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     content_type: str
@@ -260,22 +228,16 @@ class PageMetadata(BaseModel):
 
 
 class PageMetadataFailure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     reference: str
     error: str
 
 
 class PageMetadataResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     pages: list[PageMetadata]
     failures: list[PageMetadataFailure] = Field(default_factory=list)
 
 
 class ResolvedPageReference(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     version: int | None = None
 
@@ -298,8 +260,6 @@ class PageParseScope(BaseModel):
 class PageReference(BaseModel):
     """Typed source identity carried beside rendered page text."""
 
-    model_config = ConfigDict(extra="ignore")
-
     kind: Literal["page", "attachment", "image", "comment", "jira", "macro", "inline_comment"]
     page_id: str | None = None
     version: int | None = None
@@ -317,8 +277,6 @@ class PageReference(BaseModel):
 
 
 class PageAttachment(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     attachment_id: str
     filename: str
     media_type: str | None = None
@@ -327,8 +285,6 @@ class PageAttachment(BaseModel):
 
 
 class SavedAttachment(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     attachment_id: str
     filename: str
     path: str
@@ -337,24 +293,18 @@ class SavedAttachment(BaseModel):
 
 
 class AttachmentDownloadFailure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     attachment_id: str
     filename: str | None = None
     error: str
 
 
 class AttachmentDownloadResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     files: list[SavedAttachment] = Field(default_factory=list)
     failures: list[AttachmentDownloadFailure] = Field(default_factory=list)
 
 
 class PageExportResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     path: str
     filename: str
     content_type: str
@@ -366,8 +316,6 @@ class PageExportResult(BaseModel):
 
 
 class PageWriteResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     status: PageWriteStatus
@@ -388,8 +336,6 @@ class PagePlacement(BaseModel):
 
 
 class PageMoveResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     space_key: str
@@ -400,8 +346,6 @@ class PageMoveResult(BaseModel):
 
 
 class PageStructureOutcome(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     former_space_key: str
@@ -412,8 +356,6 @@ class PageStructureOutcome(BaseModel):
 
 
 class PageDeleteResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     children_mode: Literal["refuse", "move_up", "trash"]
@@ -424,8 +366,6 @@ class PageDeleteResult(BaseModel):
 
 
 class TrashPageSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     space_key: str | None = None
@@ -435,8 +375,6 @@ class TrashPageSummary(BaseModel):
 
 
 class TrashListResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     pages: list[TrashPageSummary]
     start: int
     size: int
@@ -447,20 +385,16 @@ class TrashListResult(BaseModel):
 
 
 class PageRestoreResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     space_key: str | None = None
     parent_id: str | None = None
     placement_source: Literal["caller", "saved_property", "space_root"]
-    placement_status: Literal["applied", "root", "partial", "unknown"]
+    placement_status: Literal["applied", "root", "unknown"]
     warnings: list[str] = Field(default_factory=list)
 
 
 class DraftSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     space_key: str | None = None
@@ -470,8 +404,6 @@ class DraftSummary(BaseModel):
 
 
 class DraftListResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     drafts: list[DraftSummary]
     start: int
     size: int
@@ -482,8 +414,6 @@ class DraftListResult(BaseModel):
 
 
 class DraftDeletionResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     deleted: bool
@@ -491,28 +421,20 @@ class DraftDeletionResult(BaseModel):
 
 
 class RemoteDraftPage(PageEnvelope):
-    model_config = ConfigDict(extra="ignore")
-
     drafts: list[DraftSummary]
 
 
 class RemoteTrashPage(PageEnvelope):
-    model_config = ConfigDict(extra="ignore")
-
     pages: list[TrashPageSummary]
 
 
 class LabelChangeFailure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     action: Literal["add", "remove"]
     label: str
     error: str
 
 
 class LabelChangeResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     added: list[str] = Field(default_factory=list)
     removed: list[str] = Field(default_factory=list)
@@ -522,8 +444,6 @@ class LabelChangeResult(BaseModel):
 
 
 class PageComment(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     comment_id: str
     parent_comment_id: str | None = None
     author: PersonSummary | None = None
@@ -538,8 +458,6 @@ class PageComment(BaseModel):
 class RemotePageComment(BaseModel):
     """Mapped comment source fields before its rendered HTML body becomes plain text."""
 
-    model_config = ConfigDict(extra="ignore")
-
     comment_id: str
     parent_comment_id: str | None = None
     author: PersonSummary | None = None
@@ -553,8 +471,6 @@ class RemotePageComment(BaseModel):
 class RemotePageContent(BaseModel):
     """Mapped page source fields required to render one current or historical version."""
 
-    model_config = ConfigDict(extra="ignore")
-
     metadata: PageMetadata
     view_body: str
     storage_body: str
@@ -563,8 +479,6 @@ class RemotePageContent(BaseModel):
 
 
 class PageReadRecord(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     page_id: str
     title: str
     url: str | None = None
@@ -582,15 +496,11 @@ class PageReadRecord(BaseModel):
 
 
 class PageReadFailure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     reference: str
     error: str
 
 
 class PageReadResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     pages: list[PageReadRecord]
     remaining: list[str] = Field(default_factory=list)
     failures: list[PageReadFailure] = Field(default_factory=list)

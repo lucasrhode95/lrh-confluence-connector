@@ -398,23 +398,27 @@ class ConfluenceApi:
         expected_username: str,
     ) -> RemoteTrashPage:
         """Read one bounded page of visible trashed pages from the content collection."""
-        params = {
-            "type": "page",
-            "status": "trashed",
-            "start": str(start),
-            "limit": str(limit),
-            "expand": "space,version",
-        }
+        rows, envelope = await self._list_page_status(
+            "trashed", space_key=space_key, start=start, limit=limit, expand="space,version",
+            expected_username=expected_username,
+        )
+        return RemoteTrashPage(
+            pages=[_trash_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
+            **envelope.model_dump(),
+        )
+
+    async def _list_page_status(
+        self, status: str, *, space_key: str | None, start: int, limit: int,
+        expand: str, expected_username: str,
+    ) -> tuple[list[Any], PageEnvelope]:
+        """Read a boundary-validated draft/trash request through the shared content collection."""
+        params = {"type": "page", "status": status, "start": str(start), "limit": str(limit), "expand": expand}
         if space_key is not None:
             params["spaceKey"] = space_key
         payload = await self._transport.get_json(
             self._content_collection_route(), params=params, expected_username=expected_username
         )
-        rows, envelope = _page_envelope(payload, requested_start=start)
-        return RemoteTrashPage(
-            pages=[_trash_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
-            **envelope.model_dump(),
-        )
+        return _page_envelope(payload, requested_start=start)
 
     async def get_page_content(
         self,
@@ -509,19 +513,10 @@ class ConfluenceApi:
         expected_username: str,
     ) -> RemoteDraftPage:
         """Read one bounded page of new-page drafts; caller validates scope and cursor state."""
-        params = {
-            "type": "page",
-            "status": "draft",
-            "start": str(start),
-            "limit": str(limit),
-            "expand": "space,version,history",
-        }
-        if space_key is not None:
-            params["spaceKey"] = space_key
-        payload = await self._transport.get_json(
-            self._content_collection_route(), params=params, expected_username=expected_username
+        rows, envelope = await self._list_page_status(
+            "draft", space_key=space_key, start=start, limit=limit, expand="space,version,history",
+            expected_username=expected_username,
         )
-        rows, envelope = _page_envelope(payload, requested_start=start)
         return RemoteDraftPage(
             drafts=[_draft_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
             **envelope.model_dump(),

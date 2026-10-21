@@ -60,8 +60,9 @@ class AttachmentDownloads:
             for attachment_id in selected_ids
             if attachment_id not in by_id
         ]
+        directory = self._download_directory()
         tasks = [
-            self._download_one(by_id[attachment_id])
+            self.download_to_directory(by_id[attachment_id], directory)
             for attachment_id in selected_ids
             if attachment_id in by_id
         ]
@@ -102,10 +103,6 @@ class AttachmentDownloads:
         """Download one mapped attachment into a caller-owned temporary directory."""
         async with self._download_limit:
             return await self._download_to_directory(attachment, directory)
-
-    async def _download_one(self, attachment: PageAttachment) -> SavedAttachment:
-        async with self._download_limit:
-            return await self._download_to_directory(attachment, self._download_directory())
 
     async def _download_to_directory(self, attachment: PageAttachment, directory: Path) -> SavedAttachment:
         """Write a mapped attachment to a new sanitized name and remove partial files on failure."""
