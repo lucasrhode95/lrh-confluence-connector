@@ -391,3 +391,15 @@ zero failures and four prerequisite skips: timezone-derived filters, the two man
 checks and the unconfigured cross-space target. Same-space moves/order, drafts, labels, and all three
 delete policies plus restoration passed. The four reusable fixture pages remain; write-check scratch
 pages were returned to trash. This run does not establish the skipped capabilities.
+
+### 8.5 Calibration timestamp sources
+
+Live, 2026-10-20: the newest search hit's modification instant differed from the same page's REST
+`version.when` by one millisecond without an intervening edit. Comparing those two fields as strings
+made the calibration stability guard reject both attempts. Calibration now uses search only to select
+a page; REST metadata supplies the reference instant before and after the cutoff queries. The guard
+compares parsed UTC instants, preserving real-edit detection without depending on formatting or
+cross-field precision. No private configuration was changed during diagnosis.
+
+A read-only replay of the corrected calibration succeeded with effective offset zero on 2026-10-20.
+The private configuration remained unchanged; the normal operator-run CLI command owns persistence.

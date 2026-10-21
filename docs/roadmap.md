@@ -21,6 +21,17 @@ requests were made. Broader refactoring, implementation of the decided move rout
 
 ### Bugs
 
+#### Calibration treats cross-field timestamp precision as an edit (P2)
+
+- **Seen live, 2026-10-20:** search and REST modification instants differ by one millisecond. The
+  stability guard compares their strings, retries and fails calibration despite a stable page.
+- **Implemented, awaiting review:** use REST metadata for both initial and final timestamps, comparing
+  parsed UTC instants. Search only selects the page. Synthetic offset tests now include the search/REST
+  discrepancy and equivalent offset spellings; concurrent-edit tests still enforce retry and failure.
+- **Live verification:** the corrected read-only calibration succeeded with offset zero. Configuration
+  persistence through the operator-run CLI and the skipped date-filter checks remain pending.
+
+
 #### Acceptance view-file parameter has the wrong type (P2)
 
 - **Seen live, 2026-10-20:** root creation returns HTTP 500 because the macro's `name` parameter is
