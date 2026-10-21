@@ -445,13 +445,13 @@ class PageStructure:
         )
 
     async def _move_resolved(self, metadata: PageMetadata, target: PagePlacement) -> PageMoveResult:
-        """Apply a validated target; same-space parent changes are versioned REST updates."""
+        """Apply a validated target with one action for each same-space move."""
         if metadata.space_key is None:
             raise Upstream("Confluence did not return the page's current space.")
         old_parent_id = metadata.ancestors[-1].page_id if metadata.ancestors else None
         cross_space = metadata.space_key != target.space_key
+        action_position, target_id = await self._move_action_target(target, metadata.page_id)
         if cross_space:
-            action_position, target_id = await self._move_action_target(target, metadata.page_id)
             await self._api.move_page_action(
                 metadata.page_id,
                 space_key=target.space_key,
@@ -469,32 +469,6 @@ class PageStructure:
                 position_applied=True,
             )
 
-        action_position, target_id = await self._move_action_target(target, metadata.page_id)
-        parent_changed = old_parent_id != target.parent_id
-        if parent_changed and target.parent_id is not None:
-            if metadata.version is None:
-                raise Upstream("Confluence did not return the page version required for a parent change.")
-            await self._api.update_page_parent(
-                metadata.page_id,
-                title=metadata.title,
-                next_version=metadata.version + 1,
-                parent_id=target.parent_id,
-                expected_username=self._username,
-            )
-
-        parent_applied = parent_changed and target.parent_id is not None
-        needs_position = target.parent_id is None or target.position in {"before", "after", "last"} or (
-            target.position == "first" and target_id is not None
-        )
-        if not needs_position:
-            return PageMoveResult(
-                page_id=metadata.page_id,
-                title=metadata.title,
-                space_key=target.space_key,
-                parent_id=target.parent_id,
-                moved=parent_changed,
-                position_applied=True,
-            )
         try:
             await self._api.move_page_action(
                 metadata.page_id,
@@ -504,17 +478,21 @@ class PageStructure:
                 asynchronous=False,
                 expected_username=self._username,
             )
+        except (AuthenticationRequired, AccountMismatch):
+            raise
         except ConnectorError as exc:
             uncertain = isinstance(exc, UncertainWrite)
             return PageMoveResult(
                 page_id=metadata.page_id,
                 title=metadata.title,
                 space_key=target.space_key,
-                parent_id=target.parent_id if parent_applied else old_parent_id,
-                moved=parent_applied,
+                parent_id=None if uncertain else old_parent_id,
+                moved=False,
                 position_applied=None if uncertain else False,
                 warnings=[
-                    f"The page parent change was applied={parent_applied}, but its requested position was not confirmed ({type(exc).__name__})."
+                    f"The requested same-space move was not confirmed ({type(exc).__name__}); inspect the page before retrying."
+                    if uncertain
+                    else f"The requested same-space move was refused ({type(exc).__name__}); the page's previous placement remains in effect."
                 ],
             )
         return PageMoveResult(
@@ -522,7 +500,7 @@ class PageStructure:
             title=metadata.title,
             space_key=target.space_key,
             parent_id=target.parent_id,
-            moved=parent_changed or action_position is not None,
+            moved=True,
             position_applied=True,
         )
 
@@ -540,6 +518,11 @@ class PageStructure:
             if sibling_ids:
                 return "above", sibling_ids[0]
         if target.parent_id is None:
+            if target.position == "last":
+                siblings = await self._read_children(None, target.space_key)
+                sibling_ids = [row.content_id for row in siblings if row.content_id != moving_page_id]
+                if sibling_ids:
+                    return "below", sibling_ids[-1]
             return "topLevel", None
         return "append", target.parent_id
 
@@ -554,21 +537,19 @@ class PageStructure:
         await self._change_parent(current, None)
 
     async def _change_parent(self, metadata: PageMetadata, parent_id: str | None) -> None:
-        """Apply a validated same-space parent change; empty ancestors are ignored by Confluence."""
-        if parent_id is None:
-            if metadata.space_key is None:
-                raise Upstream("Confluence did not return the page space for its root move.")
-            await self._api.move_page_action(
-                metadata.page_id, space_key=metadata.space_key, position="topLevel",
-                target_id=None, asynchronous=False, expected_username=self._username,
-            )
-        else:
-            if metadata.version is None:
-                raise Upstream("Confluence did not return the page version for its parent change.")
-            await self._api.update_page_parent(
-                metadata.page_id, title=metadata.title, next_version=metadata.version + 1,
-                parent_id=parent_id, expected_username=self._username,
-            )
+        """Reparent a current same-space page without creating a content version."""
+        if metadata.space_key is None:
+            raise Upstream("Confluence did not return the page space for its parent change.")
+        target = PagePlacement(space_key=metadata.space_key, parent_id=parent_id)
+        position, target_id = await self._move_action_target(target, metadata.page_id)
+        await self._api.move_page_action(
+            metadata.page_id,
+            space_key=metadata.space_key,
+            position=position,
+            target_id=target_id,
+            asynchronous=False,
+            expected_username=self._username,
+        )
 
     async def _resolve_placement(
         self,
