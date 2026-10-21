@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,7 +48,7 @@ class TokenStoreChecks(unittest.TestCase):
         self.lock_patch = patch("confluence_connector.auth.store.CrossPlatLock", side_effect=new_lock)
         self.lock_patch.start()
         self.addCleanup(self.lock_patch.stop)
-        self.store = TokenStore(self.path)
+        self.store = TokenStore(self.path, base_url="https://confluence.example.test/wiki")
 
     def test_absent_store_is_signed_out_and_reads_are_locked(self) -> None:
         self.assertIsNone(self.store.load())
@@ -61,8 +62,29 @@ class TokenStoreChecks(unittest.TestCase):
         assert credential is not None
         self.assertEqual(credential.username, "sample-user")
         self.assertEqual(credential.token, "synthetic-pat")
-        self.assertEqual(self.persistence.value, '{"username": "sample-user", "token": "synthetic-pat"}')
+        self.assertEqual(json.loads(self.persistence.value)["base_url"], "https://confluence.example.test/wiki")
         self.assertTrue(all(lock.entered for lock in self.locks))
+
+    def test_instance_switch_fails_closed_but_sign_out_can_clear_the_record(self) -> None:
+        self.store.save(token="synthetic-pat", username="sample-user")
+        for base_url in ("https://other.example.test/wiki", "https://confluence.example.test/other"):
+            with self.subTest(base_url=base_url):
+                other = TokenStore(self.path, base_url=base_url)
+                with self.assertRaisesRegex(AccountMismatch, "different Confluence instance"):
+                    other.load()
+                with self.assertRaises(AccountMismatch):
+                    other.save(token="another-token", username="sample-user")
+        self.assertTrue(TokenStore(self.path).sign_out())
+
+    def test_unbound_record_is_rejected_without_migration(self) -> None:
+        self.persistence.value = '{"username":"sample-user","token":"synthetic-pat"}'
+        with self.assertRaisesRegex(SecureStorageUnavailable, "unbound"):
+            self.store.load()
+
+    def test_canonical_instance_url_accepts_default_port_and_trailing_slash(self) -> None:
+        self.store.save(token="synthetic-pat", username="sample-user")
+        same = TokenStore(self.path, base_url="https://CONFLUENCE.example.test:443/wiki/")
+        self.assertIsNotNone(same.load())
 
     def test_account_switch_requires_explicit_sign_out(self) -> None:
         self.store.save(token="synthetic-pat-a", username="sample-user-a")

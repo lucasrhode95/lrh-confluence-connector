@@ -143,46 +143,32 @@ class ConfluenceApi:
         self, space_key: str, title: str, *, expected_username: str, status: str | None = None
     ) -> str:
         """Resolve a legacy display URL by its validated space key and decoded title."""
-        if status == "trashed":
-            payload = await self._transport.get_json(
-                self._content_collection_route(),
-                params={"type": "page", "spaceKey": space_key, "title": title, "status": "trashed", "limit": "2"},
-                expected_username=expected_username,
-            )
-            rows = _result_rows(payload)
-            if len(rows) > 1:
-                raise Upstream("The display URL matched more than one trashed page.")
-            page_id = str(rows[0]["id"]) if rows and isinstance(rows[0], dict) and _page_id(rows[0].get("id")) else None
-        else:
-            page_id = await self.find_page_id_by_title(space_key, title, expected_username=expected_username)
+        page_id = await self.find_page_id_by_title(
+            space_key, title, expected_username=expected_username, status=status or "current"
+        )
         if page_id is None:
             raise NotFound("The page in this display URL no longer matches a page; it may have been renamed.")
         return page_id
 
     async def find_page_id_by_title(
-        self, space_key: str, title: str, *, expected_username: str
+        self, space_key: str, title: str, *, expected_username: str, status: str = "current"
     ) -> str | None:
-        """Return an exact page-title match, distinguishing no match from a failed search request."""
+        """Resolve a validated exact title through the content collection, without CQL/index limitations."""
         if not space_key or not title:
             raise InvalidRequest("A display URL must include both a space key and page title.")
-        cql = (
-            f"type = page AND space = {cql_literal(space_key)} "
-            f"AND title = {cql_literal(title)}"
-        )
         payload = await self._transport.get_json(
-            self._endpoint("search_pages"),
-            params={"cql": cql, "limit": "2", "expand": "space"},
+            self._content_collection_route(),
+            params={"type": "page", "spaceKey": space_key, "title": title, "status": status, "limit": "2"},
             expected_username=expected_username,
         )
-        rows = payload.get("results")
-        if not isinstance(rows, list):
-            raise Upstream("Confluence returned an unexpected page-title search response.")
-        matches = [row for row in rows if isinstance(row, dict) and _page_id(row.get("id"))]
-        if not matches:
-            return None
-        if len(matches) > 1:
+        rows = _result_rows(payload)
+        if len(rows) > 1 or _has_next_link(payload):
             raise Upstream("The display URL matched more than one page in its space.")
-        return str(matches[0]["id"])
+        if not rows:
+            return None
+        if not isinstance(rows[0], dict) or not _page_id(rows[0].get("id")):
+            raise Upstream("Confluence returned a page-title match without a usable page ID.")
+        return str(rows[0]["id"])
 
     async def search_content_page(
         self,
@@ -658,20 +644,10 @@ class ConfluenceApi:
         expected_username: str,
     ) -> None:
         """Use Confluence's isolated UI move action to place a page above or below a sibling."""
-        payload = await self._transport.send_json(
-            "POST",
-            "pages/movepage.action",
-            params={
-                "pageId": page_id,
-                "spaceKey": space_key,
-                "position": position,
-                "targetId": target_id,
-                "mode": "LEGACY",
-            },
-            skip_atlassian_token_check=True,
-            expected_username=expected_username,
+        await self.move_page_action(
+            page_id, space_key=space_key, position=position, target_id=target_id,
+            asynchronous=False, expected_username=expected_username,
         )
-        _raise_move_action_errors(payload)
 
     async def move_page_action(
         self,
@@ -730,12 +706,16 @@ class ConfluenceApi:
                 raise UncertainWrite("Confluence returned an unreadable move status; inspect the page.")
             successful = payload.get("successful")
             finished = payload.get("finished")
-            if successful is True:
-                return
-            if finished is True:
-                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
-            if successful is False and finished is not False:
-                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+            # successful describes progress too; it does not establish completion.
+            complete = finished is True or (
+                finished is None and payload.get("percentageComplete") == 100
+            )
+            if complete:
+                if successful is True:
+                    return
+                if successful is False:
+                    raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+                raise UncertainWrite("Confluence returned an unreadable terminal move status; inspect the page.")
             if attempt + 1 < LONGTASK_MAX_POLLS:
                 await asyncio.sleep(LONGTASK_POLL_INTERVAL_SECONDS)
         raise UncertainWrite("Confluence's page move is still pending; inspect the page before retrying.")
