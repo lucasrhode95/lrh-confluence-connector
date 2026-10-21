@@ -136,7 +136,7 @@ not a cleaned HTML page.
 |---|---|---|
 | `auth_status` | [`bootstrap.py`](src/confluence_connector/bootstrap.py) | Report the stored account offline |
 | `list_spaces` | [`service/spaces.py`](src/confluence_connector/service/spaces.py) | List visible current and archived spaces |
-| `search_content` | [`service/search.py`](src/confluence_connector/service/search.py) | Search text or titles with structured filters and cursors |
+| `search_content` | [`service/search.py`](src/confluence_connector/service/search.py) | Search text or list scoped pages without keywords; filter by contributor, sort, show the latest editor and page results with compact cursors |
 | `find_users` | [`service/users.py`](src/confluence_connector/service/users.py) | Find people by display name, or former users by exact username |
 | `get_page_tree` | [`service/tree.py`](src/confluence_connector/service/tree.py) | Read ordered child pages from a page or space root |
 | `get_page_metadata` | [`service/metadata.py`](src/confluence_connector/service/metadata.py) | Read versions, labels, contributors and ancestors |

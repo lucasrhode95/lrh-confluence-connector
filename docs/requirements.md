@@ -96,6 +96,8 @@ storage technique is shared (§5).
   fixed offset, atomically, keeping the other settings. An existing value is only compared, by
   `status --check`, with a warning on mismatch. A fixed offset does not follow daylight saving; replace
   it with an IANA zone where that applies.
+- `search_response_max_chars` (optional): JSON-character budget for one `search_content` response,
+  from 1,000 to 1,000,000; default 40,000. Oversized pages are reduced and continued by cursor.
 - `acceptance` (optional, research only): `personal_space_key` and `cross_space_key`, the two spaces the
   acceptance scripts may write to. A missing key skips only the checks that need it; the scripts never
   pick a space themselves.
@@ -109,12 +111,28 @@ storage technique is shared (§5).
   Terms split on whitespace only; punctuation inside a term is kept (code identifiers such as `x_y.z`
   are indexed whole) and punctuation at its edges is dropped. Query text is always literal: operators,
   quotes and wildcards are never interpreted.
+- **Queryless listing:** omit `query` only when scope includes at least one contributor, creator,
+  created/modified date bound, space key, label, parent or ancestor filter. This avoids an unbounded
+  listing. If `content_types` is omitted, a queryless search lists pages. `contributor` means anyone
+  who edited the content; `creator` means its original author. Resolve display names with `find_users`.
+- **Ordering:** `relevance` is the default for text searches; queryless searches default to
+  `modified_desc`. `modified_asc` and `created_desc` are also supported. Cursor state retains the
+  selected order and detail mode. Standard CQL documents `ORDER BY`; use with this instance's
+  observed `siteSearch` clause remains a live verification item (roadmap).
 - **Fields:** `all` (titles, bodies, comments, attachments) or `title`. Title search replaces
   punctuation with spaces, which found titles that quoting and escaping missed (research §4.3), and
   merges results from the private quick-navigation route, labelled by source; a quick-navigation
   failure is reported without failing the call.
 - **Results** report the query sent, a self-contained cursor built from the returned `start + size`,
-  and the server's total, labelled approximate.
+  and the server's total, labelled approximate. `detail="full"` preserves the existing hit shape;
+  `detail="compact"` returns only content ID/type, title, space key, URL, modified time, latest
+  editor, and parent ID. Every hit includes `last_modified_by` when the expanded latest version
+  provides it, otherwise null. A configured JSON-character budget (`search_response_max_chars`,
+  default 40,000) reduces server page size and returns a cursor so remaining hits are not skipped.
+  A single full-detail hit that exceeds the budget requires compact mode or a larger configured budget.
+- **Unsearchable terms:** punctuation-only and wildcard-only queries explain that wildcards are not
+  query operators and point to scoped listing. A small common-English stopword list adds a cautious
+  note; Confluence's actual analyzer depends on instance version and indexing-language configuration.
 - **Dates:** a date-only value (`2026-03-14`) means that whole day in Confluence's time zone and needs
   no calibration. A timestamp with an offset is an instant; one without is UTC. Timestamps become
   zone-less CQL minutes in `cql_timezone`, rounding lower bounds down and upper bounds up so minutes
