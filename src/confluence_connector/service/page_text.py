@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from bs4 import BeautifulSoup, Tag
 from markdownify import MarkdownConverter
 
 from confluence_connector.domain.models import PageAttachment, PageReference
+from confluence_connector.domain.urls import same_instance_link
 
 _PANELS = {"info": "Info", "note": "Note", "warning": "Warning", "tip": "Tip", "panel": "Panel"}
 _DROPPED_MACROS = frozenset({"toc", "numberedheadings", "numbered-headings"})
@@ -255,7 +256,7 @@ def _replace_image(
     attachment_id = image.get("data-linked-resource-id") or image.get("data-attachment-id")
     filename = image.get("data-linked-resource-filename") or image.get("data-linked-resource-default-alias") or storage_files.get(attachment_id or "", "")
     source_url = image.get("src") or ""
-    absolute = _instance_url(source_url, base_url) if source_url else None
+    absolute = same_instance_link(base_url, source_url) if source_url else None
     owner = _attachment_owner(image, page_id, absolute)
     local = owner == page_id and (not source_url or absolute is not None)
     attachment = (by_id.get(attachment_id) if attachment_id else by_name.get(filename.casefold())) if local else None
@@ -293,7 +294,7 @@ def _replace_link(
     references: list[PageReference],
 ) -> None:
     href = link.get("href")
-    absolute = _instance_url(href, base_url) if href else None
+    absolute = same_instance_link(base_url, href) if href else None
     if href and absolute is None:
         return
     resource_type = (link.get("data-linked-resource-type") or "").casefold()
@@ -325,7 +326,7 @@ def _replace_link(
     if not href:
         link.unwrap()
         return
-    absolute = _instance_url(href, base_url)
+    absolute = same_instance_link(base_url, href)
     if absolute is None:
         return  # an external link stays as written
     link["href"] = absolute
@@ -347,30 +348,6 @@ def _attachment_owner(node: Tag, page_id: str, url: str | None) -> str | None:
         if match:
             return match.group(1)
     return None if node.get("data-connector-included") else page_id or None
-
-
-def _instance_url(href: str, base_url: str | None) -> str | None:
-    """Return ``href`` as an absolute URL on the configured instance, or ``None`` for other hosts.
-
-    Root-relative links gain the configured context path (for example ``/wiki``) when they lack it.
-    Without a configured base URL, only relative links count as same-instance and stay relative.
-    """
-    try:
-        parts = urlsplit(href)
-    except ValueError:
-        return None
-    if base_url is None:
-        return href if not parts.scheme and not parts.netloc else None
-    base = urlsplit(base_url)
-    context = base.path.rstrip("/")
-    if not parts.scheme and not parts.netloc and href.startswith("/") and context:
-        if parts.path != context and not parts.path.startswith(context + "/"):
-            href = context + href
-    absolute = urljoin(base_url.rstrip("/") + "/", href)
-    target = urlsplit(absolute)
-    same_host = (target.scheme, target.netloc.casefold()) == (base.scheme, base.netloc.casefold())
-    in_context = not context or target.path == context or target.path.startswith(context + "/")
-    return absolute if same_host and in_context else None
 
 
 def _page_id_from_url(url: str) -> str | None:
