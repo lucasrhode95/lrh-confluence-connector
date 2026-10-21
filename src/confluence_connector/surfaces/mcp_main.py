@@ -32,7 +32,9 @@ from confluence_connector.domain.models import (
     PageTextFormat,
     PageWriteResult,
     SearchFields,
+    SearchDetail,
     SearchMatch,
+    SearchOrderBy,
     SearchScope,
     SpaceList,
     TrashListResult,
@@ -56,7 +58,9 @@ INSTRUCTIONS = """\
 Confluence Data Center access for one signed-in local account and the configured instance only.
 Read tools return typed source references; links to other products remain links. Attachment bytes
 are fetched only by explicit download/export options. Incomplete coverage is reported in results.
-Continue with the returned cursor alone; it contains the original request and pinned page version.
+Search can list pages without keywords when a narrowing scope is supplied; use find_users to resolve
+display names, contributor means anyone who edited content, and creator means its original author.
+Continue with the returned cursor alone; it contains the original search, scope, ordering and detail.
 Write tools require the user's explicit request. Never retry an uncertain write before inspecting
 its target. Recreating a page after a refused move is a separate recovery plan: it loses its ID,
 history and comments. Authenticate through `confluence-connector auth`, never through an MCP tool;
@@ -88,7 +92,14 @@ def build_server(context: AppContext) -> FastMCP:
     async def search_content(
         query: Annotated[
             str | None,
-            Field(description="Literal search text. Omit it only when continuing with cursor."),
+            Field(
+                description=(
+                    "Literal search text. Omit it to list pages by a narrowing scope such as "
+                    "contributor_usernames, creator_usernames, date bounds, spaces, labels, parent "
+                    "or ancestor. Use find_users to resolve display names. contributor means anyone "
+                    "who edited the content; creator means its original author."
+                )
+            ),
         ] = None,
         scope: Annotated[
             SearchScope | None,
@@ -103,6 +114,19 @@ def build_server(context: AppContext) -> FastMCP:
         fields: Annotated[
             SearchFields | None,
             Field(description="Search all supported fields (default) or title only."),
+        ] = None,
+        order_by: Annotated[
+            SearchOrderBy | None,
+            Field(
+                description=(
+                    "Sort by relevance (default with text), modified_desc (default without text), "
+                    "modified_asc or created_desc."
+                )
+            ),
+        ] = None,
+        detail: Annotated[
+            SearchDetail | None,
+            Field(description="Return compact hit fields only, or full details (default)."),
         ] = None,
         limit: Annotated[
             int | None,
@@ -122,7 +146,11 @@ def build_server(context: AppContext) -> FastMCP:
         day. ISO-8601 timestamps with offsets are accepted;
         timestamps without offsets are treated as UTC. Timestamp filters require cql_timezone; run
         `confluence-connector status --check` if it is unset. Quick-navigation supplements apply only
-        to unscoped title searches.
+        to unscoped title searches. Wildcards are not query operators; omit query and use scope to
+        list pages. Queryless searches default to pages ordered by modified time. Responses are kept
+        under the configured character budget, with smaller cursor pages when needed. Use detail='compact'
+        to omit excerpts and ancestor lists. Common English stopword-only queries may return no matches;
+        omit query to list by scope.
         """
         services = await context.services()
         result = await services.search.search_content(
@@ -130,6 +158,8 @@ def build_server(context: AppContext) -> FastMCP:
             scope=scope,
             match=match,
             fields=fields,
+            order_by=order_by,
+            detail=detail,
             limit=limit,
             cursor=cursor,
         )

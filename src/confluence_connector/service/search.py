@@ -15,10 +15,14 @@ from confluence_connector.domain.errors import (
 )
 from confluence_connector.domain.cql import cql_literal
 from confluence_connector.domain.models import (
+    CompactContentSearchHit,
     ContentSearchHit,
     ContentSearchResult,
+    RemoteContentSearchPage,
+    SearchDetail,
     SearchFields,
     SearchMatch,
+    SearchOrderBy,
     SearchQuery,
     SearchScope,
 )
@@ -40,6 +44,17 @@ MAX_QUERY_CHARS = 1_000
 MAX_SCOPE_VALUES = 50
 MAX_SCOPE_VALUE_CHARS = 255
 QUICKNAV_LIMIT = 20
+DEFAULT_RESPONSE_MAX_CHARS = 40_000
+COMMON_ENGLISH_STOPWORDS = frozenset(
+    "a an and are as at be but by for if in into is it no not of on or such that the their "
+    "then there these they this to was will with".split()
+)
+ORDER_BY_CQL: dict[SearchOrderBy, str | None] = {
+    "relevance": None,
+    "modified_desc": "lastmodified DESC",
+    "modified_asc": "lastmodified ASC",
+    "created_desc": "created DESC",
+}
 
 
 class ContentSearch:
@@ -51,11 +66,13 @@ class ContentSearch:
         links: PageLinkResolver,
         username: str,
         cql_timezone: str | None = None,
+        response_max_chars: int = DEFAULT_RESPONSE_MAX_CHARS,
     ) -> None:
         self._api = api
         self._links = links
         self._username = username
         self._cql_timezone = cql_timezone
+        self._response_max_chars = response_max_chars
 
     async def search_content(
         self,
@@ -64,46 +81,52 @@ class ContentSearch:
         scope: SearchScope | dict[str, Any] | None = None,
         match: SearchMatch | None = None,
         fields: SearchFields | None = None,
+        order_by: SearchOrderBy | None = None,
+        detail: SearchDetail | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> ContentSearchResult:
         """Return one CQL page, optionally supplementing title searches with quick-navigation hits.
 
         Entry point: validates query, scope, modes, limit and cursor. A cursor carries the complete
-        normalized request and must be passed alone. Internal query builders trust this contract.
+        normalized request and must be passed alone. A missing query is allowed only with a
+        narrowing scope; it defaults to pages ordered by modification time. Internal query builders
+        trust this contract.
         """
         if cursor is not None:
-            if any(value is not None for value in (query, scope, match, fields, limit)):
+            if any(value is not None for value in (query, scope, match, fields, order_by, detail, limit)):
                 raise InvalidRequest("Pass only the cursor; it already contains the search and scope.")
-            query, match, fields, normalized_scope, limit, start, seen_ids = self._resume(cursor)
+            query, match, fields, order_by, detail, normalized_scope, limit, start, seen_ids = self._resume(cursor)
         else:
-            if query is None:
-                raise InvalidRequest("Pass a query, or only the next_cursor of an earlier search.")
-            query, terms = _normalize_query(query)
             match = _search_match(match)
             fields = _search_fields(fields)
+            detail = _search_detail(detail)
             limit = _limit(limit)
             normalized_scope = await self._validate_scope(scope)
+            has_scope_filter = _has_queryless_scope_filter(normalized_scope)
+            if query is None:
+                if not has_scope_filter:
+                    raise InvalidRequest(
+                        "Pass searchable query text, or omit query and provide a narrowing scope "
+                        "filter such as contributor_usernames, creator_usernames, dates, spaces, "
+                        "labels, parent or ancestor."
+                    )
+                if normalized_scope.content_types is None:
+                    normalized_scope.content_types = ["page"]
+                terms = []
+            else:
+                query, terms = _normalize_query(query)
+            order_by = _search_order_by(order_by, has_query=bool(terms))
             start, seen_ids = 0, set()
-        terms = _search_terms(query)
+        terms = _search_terms(query) if query is not None else []
         query_terms = _title_terms(terms) if fields == "title" else terms
-        if not query_terms:
-            raise InvalidRequest("query must contain searchable text after punctuation handling.")
-        cql = _build_cql(query_terms, match, fields, normalized_scope, self._cql_timezone)
-        page = await self._api.search_content_page(
-            cql,
-            start=start,
-            limit=limit,
-            include_archived=normalized_scope.include_archived,
-            expected_username=self._username,
-        )
+        cql = _build_cql(query_terms, match, fields, normalized_scope, self._cql_timezone, order_by)
 
         quicknav_hits: list[ContentSearchHit] = []
         queries_sent = [SearchQuery(source="cql", value=cql)]
         notes: list[str] = []
-        next_seen_ids = set(seen_ids)
         quicknav_allowed = _quicknav_allowed(normalized_scope)
-        if fields == "title" and start == 0 and quicknav_allowed:
+        if query_terms and fields == "title" and start == 0 and quicknav_allowed:
             title_query = " ".join(query_terms)
             queries_sent.append(SearchQuery(source="quicknav", value=title_query))
             try:
@@ -119,53 +142,55 @@ class ContentSearch:
                     "Quick navigation was unavailable ("
                     f"{type(exc).__name__}); CQL title matches are returned."
                 )
-        hits = _merge_hits(page.hits, quicknav_hits, seen_ids)[:limit]
-        next_seen_ids.update(
-            hit.content_id
-            for hit in hits
-            if hit.content_id is not None and "quicknav" in hit.sources
-        )
-        next_start = page.start + page.size
-        # ``totalSize`` is approximate on this endpoint. A full server page is the
-        # reliable signal to offer a continuation; an extra empty page is harmless.
-        more = page.size == limit
-        next_cursor = None
-        if more and next_start <= MAX_OFFSET:
-            encoded = cursors.encode(
-                CURSOR_KIND,
+        fetch_limit = limit
+        page = await self._fetch_page(cql, normalized_scope, start, fetch_limit)
+        quicknav_was_omitted = False
+        while True:
+            result = _search_result(
+                page=page,
+                page_limit=fetch_limit,
                 query=query,
                 match=match,
                 fields=fields,
-                scope=normalized_scope.model_dump(mode="json"),
+                order_by=order_by,
+                detail=detail,
+                scope=normalized_scope,
                 limit=limit,
-                start=next_start,
-                seen_quicknav_ids=sorted(next_seen_ids),
+                seen_ids=seen_ids,
+                quicknav_hits=[] if quicknav_was_omitted else quicknav_hits,
+                cql=cql,
+                queries_sent=queries_sent,
+                notes=notes,
+                start=start,
+                quicknav_allowed=quicknav_allowed,
             )
-            if len(encoded) <= cursors.MAX_CURSOR_CHARS:
-                next_cursor = encoded
-            else:
-                notes.append("More results exist, but this search scope is too large to continue safely.")
-        elif more:
-            notes.append("More results exist, but the maximum supported search offset was reached.")
-        if page.total_size is not None:
-            notes.append("The total is Confluence's approximate count and can change between pages.")
-        if fields == "title" and quicknav_allowed:
-            notes.append("The first page can include additional title matches from quick navigation.")
-        elif fields == "title" and start == 0:
-            notes.append("Quick navigation was skipped so its unfiltered results cannot bypass scope filters.")
-        return ContentSearchResult(
-            query=query,
-            match=match,
-            fields=fields,
-            scope=normalized_scope,
-            queries_sent=queries_sent,
-            hits=hits,
-            start=page.start,
-            size=page.size,
-            approximate_total=page.total_size,
-            more_results_available=more,
-            next_cursor=next_cursor,
-            notes=notes,
+            if _serialized_size(result) <= self._response_max_chars:
+                return result
+            if quicknav_hits and not quicknav_was_omitted:
+                quicknav_was_omitted = True
+                notes.append(
+                    "Supplementary quick-navigation title matches were omitted to fit the response-size "
+                    "budget; CQL title matching may not find every punctuation-heavy title."
+                )
+                continue
+            if fetch_limit == 1:
+                raise InvalidRequest(
+                    "One search result exceeds the configured response-size budget; retry with "
+                    "detail='compact' or increase search_response_max_chars."
+                )
+            fetch_limit = max(1, fetch_limit // 2)
+            page = await self._fetch_page(cql, normalized_scope, start, fetch_limit)
+
+    async def _fetch_page(
+        self, cql: str, scope: SearchScope, start: int, limit: int
+    ) -> RemoteContentSearchPage:
+        """Read a CQL page using only validated scope and bounded service pagination."""
+        return await self._api.search_content_page(
+            cql,
+            start=start,
+            limit=limit,
+            include_archived=scope.include_archived,
+            expected_username=self._username,
         )
 
     async def _validate_scope(self, value: SearchScope | dict[str, Any] | None) -> SearchScope:
@@ -210,23 +235,26 @@ class ContentSearch:
 
     def _resume(
         self, cursor: str
-    ) -> tuple[str, SearchMatch, SearchFields, SearchScope, int, int, set[str]]:
+    ) -> tuple[str | None, SearchMatch, SearchFields, SearchOrderBy, SearchDetail, SearchScope, int, int, set[str]]:
         """Decode and revalidate a cursor; cursors are opaque encoding, not signed authorization."""
         state = cursors.decode(cursor, CURSOR_KIND)
         try:
-            query, terms = _normalize_query(state.get("query"))
+            raw_query = state.get("query")
+            query, terms = (None, []) if raw_query is None else _normalize_query(raw_query)
             match = _search_match(state.get("match"))
             fields = _search_fields(state.get("fields"))
+            order_by = _search_order_by(state.get("order_by"), has_query=bool(terms))
+            detail = _search_detail(state.get("detail"))
             scope = SearchScope.model_validate(state.get("scope"))
         except ValidationError:
             raise InvalidRequest("The search cursor contains an invalid scope.") from None
         limit = _limit(state.get("limit"))
         start = _offset(state.get("start"))
         seen_ids = _cursor_ids(state.get("seen_quicknav_ids"))
-        if not terms:
-            raise InvalidRequest("The search cursor contains no searchable text.")
+        if not terms and not _has_queryless_scope_filter(scope):
+            raise InvalidRequest("The search cursor contains neither query text nor a narrowing scope.")
         scope = _validate_resumed_scope(scope, self._cql_timezone)
-        return query, match, fields, scope, limit, start, seen_ids
+        return query, match, fields, order_by, detail, scope, limit, start, seen_ids
 
 
 def _normalize_query(value: Any) -> tuple[str, list[str]]:
@@ -236,7 +264,10 @@ def _normalize_query(value: Any) -> tuple[str, list[str]]:
         raise InvalidRequest("query cannot contain control characters.")
     terms = _search_terms(value)
     if not terms:
-        raise InvalidRequest("query must contain searchable text after punctuation handling.")
+        raise InvalidRequest(
+            "Wildcards and punctuation-only queries are not supported. To list content without "
+            "keywords, omit query and provide a narrowing scope filter."
+        )
     return " ".join(terms), terms
 
 
@@ -278,6 +309,150 @@ def _search_fields(value: Any) -> SearchFields:
     if not isinstance(value, str) or value not in {"all", "title"}:
         raise InvalidRequest("fields must be all or title.")
     return value
+
+
+def _search_order_by(value: Any, *, has_query: bool) -> SearchOrderBy:
+    if value is None:
+        return "relevance" if has_query else "modified_desc"
+    if not isinstance(value, str) or value not in ORDER_BY_CQL:
+        raise InvalidRequest("order_by must be relevance, modified_desc, modified_asc or created_desc.")
+    if value == "relevance" and not has_query:
+        raise InvalidRequest("order_by='relevance' requires a text query.")
+    return value
+
+
+def _search_detail(value: Any) -> SearchDetail:
+    if value is None:
+        return "full"
+    if not isinstance(value, str) or value not in {"compact", "full"}:
+        raise InvalidRequest("detail must be compact or full.")
+    return value
+
+
+def _has_queryless_scope_filter(scope: SearchScope) -> bool:
+    """Recognize only explicit narrowing filters that can safely replace text search."""
+    return any(
+        (
+            scope.contributor_usernames,
+            scope.creator_usernames,
+            scope.modified_after,
+            scope.modified_before,
+            scope.created_after,
+            scope.created_before,
+            scope.space_keys,
+            scope.labels,
+            scope.parent,
+            scope.ancestor,
+        )
+    )
+
+
+def _search_result(
+    *,
+    page: RemoteContentSearchPage,
+    page_limit: int,
+    query: str | None,
+    match: SearchMatch,
+    fields: SearchFields,
+    order_by: SearchOrderBy,
+    detail: SearchDetail,
+    scope: SearchScope,
+    limit: int,
+    seen_ids: set[str],
+    quicknav_hits: list[ContentSearchHit],
+    cql: str,
+    queries_sent: list[SearchQuery],
+    notes: list[str],
+    start: int,
+    quicknav_allowed: bool,
+) -> ContentSearchResult:
+    full_hits = _merge_hits(page.hits, quicknav_hits, seen_ids)[:limit]
+    next_seen_ids = set(seen_ids)
+    next_seen_ids.update(
+        hit.content_id
+        for hit in full_hits
+        if hit.content_id is not None and "quicknav" in hit.sources
+    )
+    if detail == "compact":
+        hits = [
+            CompactContentSearchHit(
+                content_id=hit.content_id,
+                content_type=hit.content_type,
+                title=hit.title,
+                space_key=hit.space_key,
+                url=hit.url,
+                modified_at=hit.modified_at,
+                last_modified_by=hit.last_modified_by,
+                parent_id=hit.parent_id,
+            )
+            for hit in full_hits
+        ]
+    else:
+        hits = full_hits
+    notes = list(notes)
+    more = page.size == page_limit
+    next_start = page.start + page.size
+    next_cursor = None
+    if more and next_start <= MAX_OFFSET:
+        encoded = cursors.encode(
+            CURSOR_KIND,
+            query=query,
+            match=match,
+            fields=fields,
+            order_by=order_by,
+            detail=detail,
+            scope=scope.model_dump(mode="json"),
+            limit=limit,
+            start=next_start,
+            seen_quicknav_ids=sorted(next_seen_ids),
+        )
+        if len(encoded) <= cursors.MAX_CURSOR_CHARS:
+            next_cursor = encoded
+        else:
+            notes.append("More results exist, but this search scope is too large to continue safely.")
+    elif more:
+        notes.append("More results exist, but the maximum supported search offset was reached.")
+    if page_limit < limit and more:
+        notes.append("The page size was reduced to fit the response budget; continue with next_cursor.")
+    if page.total_size is not None:
+        notes.append("The total is Confluence's approximate count and can change between pages.")
+    if query is not None and fields == "title" and quicknav_allowed:
+        notes.append("The first page can include additional title matches from quick navigation.")
+    elif query is not None and fields == "title" and start == 0:
+        notes.append("Quick navigation was skipped so its unfiltered results cannot bypass scope filters.")
+    if query is not None and _query_is_stopword_only(query):
+        note_terms = ", ".join(repr(term) for term in _search_terms(query))
+        notes.append(
+            f"Query term(s) {note_terms} are common English stopwords and may not be indexed by this "
+            "Confluence analyzer; this is a heuristic. Omit query to list by scope."
+        )
+    return ContentSearchResult(
+        query=query,
+        match=match,
+        fields=fields,
+        order_by=order_by,
+        detail=detail,
+        scope=scope,
+        queries_sent=queries_sent,
+        hits=hits,
+        start=page.start,
+        size=page.size,
+        approximate_total=page.total_size,
+        more_results_available=more,
+        next_cursor=next_cursor,
+        notes=notes,
+    )
+
+
+def _query_is_stopword_only(query: str) -> bool:
+    """Use a small Lucene-like English list as a hint, not as a claim about instance analyzers."""
+    terms = _search_terms(query)
+    return bool(terms) and all(term.casefold() in COMMON_ENGLISH_STOPWORDS for term in terms)
+
+
+def _serialized_size(result: ContentSearchResult) -> int:
+    """Measure the JSON text returned by FastMCP before it reaches the client."""
+    return len(result.model_dump_json())
 
 
 def _limit(value: Any) -> int:
@@ -354,6 +529,7 @@ def _build_cql(
     fields: SearchFields,
     scope: SearchScope,
     cql_timezone: str | None = None,
+    order_by: SearchOrderBy = "relevance",
 ) -> str:
     search_field = "title" if fields == "title" else "siteSearch"
     escaped_terms = [
@@ -400,6 +576,9 @@ def _build_cql(
     if scope.ancestor is not None:
         clauses.append(f"ancestor = {scope.ancestor}")
     cql = " AND ".join(clauses)
+    sort_clause = ORDER_BY_CQL[order_by]
+    if sort_clause is not None:
+        cql += f" ORDER BY {sort_clause}"
     if len(cql) > 8_000:
         raise InvalidRequest("The search query and scope produce an overly long CQL request.")
     return cql

@@ -11,6 +11,7 @@ from confluence_connector.domain.errors import (
     Upstream,
 )
 from confluence_connector.domain.models import (
+    CompactContentSearchHit,
     ContentSearchHit,
     RemoteContentSearchPage,
     SearchScope,
@@ -30,6 +31,115 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         terms = ["one", "two"]
         self.assertEqual(_build_cql(terms, "any", "all", SearchScope()), "siteSearch ~ 'one two'")
         self.assertEqual(_build_cql(terms, "phrase", "all", SearchScope()), 'siteSearch ~ \'"one two"\'')
+
+    async def test_queryless_cql_uses_scope_and_supported_orderings(self) -> None:
+        scope = SearchScope(contributor_usernames=["sample-user"], space_keys=["SYNTH"])
+        cql = _build_cql([], "all", "all", scope, order_by="modified_desc")
+        self.assertEqual(
+            cql,
+            "space IN ('SYNTH') AND contributor IN ('sample-user') ORDER BY lastmodified DESC",
+        )
+        self.assertIn(
+            "ORDER BY lastmodified ASC",
+            _build_cql(["alpha"], "all", "all", SearchScope(), order_by="modified_asc"),
+        )
+        self.assertIn(
+            "ORDER BY created DESC",
+            _build_cql(["alpha"], "all", "all", SearchScope(), order_by="created_desc"),
+        )
+        self.assertNotIn(
+            "ORDER BY",
+            _build_cql(["alpha"], "all", "all", SearchScope(), order_by="relevance"),
+        )
+        text_ordered = _build_cql(
+            ["alpha"], "all", "all", SearchScope(), order_by="modified_desc"
+        )
+        self.assertTrue(text_ordered.startswith("siteSearch ~ 'alpha' ORDER BY lastmodified DESC"))
+
+    async def test_queryless_scope_search_defaults_to_pages_and_keeps_order_in_cursor(self) -> None:
+        api = _SearchApi(pages=[_hit("1", "first"), _hit("2", "second")], page_size=1)
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        first = await service.search_content(
+            scope={"contributor_usernames": ["sample-user"]},
+            order_by="modified_desc",
+            detail="compact",
+            limit=1,
+        )
+        self.assertIsNone(first.query)
+        self.assertEqual(first.order_by, "modified_desc")
+        self.assertEqual(first.detail, "compact")
+        self.assertIsInstance(first.hits[0], CompactContentSearchHit)
+        self.assertEqual(
+            first.hits[0].model_dump(),
+            {
+                "content_id": "1",
+                "content_type": None,
+                "title": "first",
+                "space_key": None,
+                "url": None,
+                "modified_at": None,
+                "last_modified_by": None,
+                "parent_id": None,
+            },
+        )
+        self.assertIn("type IN (page)", api.search_calls[0][0])
+        self.assertIn("contributor IN ('sample-user')", api.search_calls[0][0])
+        self.assertIn("ORDER BY lastmodified DESC", api.search_calls[0][0])
+        second = await service.search_content(cursor=first.next_cursor)
+        self.assertEqual(second.order_by, "modified_desc")
+        self.assertEqual(second.detail, "compact")
+        self.assertIn("ORDER BY lastmodified DESC", api.search_calls[1][0])
+        self.assertEqual(api.search_calls[1][1], 1)
+
+    async def test_queryless_without_narrowing_scope_is_rejected(self) -> None:
+        service = ContentSearch(_SearchApi(), _Links(), "sample-user")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(InvalidRequest, "omit query and provide a narrowing scope"):
+            await service.search_content()
+        with self.assertRaisesRegex(InvalidRequest, "narrowing scope"):
+            await service.search_content(scope={"content_types": ["page"]})
+
+    async def test_queryless_defaults_modified_desc_and_rejects_relevance(self) -> None:
+        api = _SearchApi()
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        await service.search_content(scope={"labels": ["release"]})
+        self.assertIn("ORDER BY lastmodified DESC", api.search_calls[0][0])
+        with self.assertRaisesRegex(InvalidRequest, "requires a text query"):
+            await service.search_content(scope={"labels": ["release"]}, order_by="relevance")
+
+    async def test_wildcard_error_and_stopword_note_offer_scope_listing(self) -> None:
+        service = ContentSearch(_SearchApi(), _Links(), "sample-user")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(InvalidRequest, "Wildcards.*omit query.*narrowing scope"):
+            await service.search_content("*")
+        result = await service.search_content("the", scope={"contributor_usernames": ["sample-user"]})
+        self.assertTrue(any("'the'" in note and "Omit query" in note for note in result.notes))
+
+    async def test_compact_hundred_hits_stays_under_default_response_budget(self) -> None:
+        api = _SearchApi(pages=[_hit(str(i), f"Synthetic title {i}") for i in range(100)])
+        result = await ContentSearch(api, _Links(), "sample-user").search_content(
+            scope={"contributor_usernames": ["sample-user"]}, limit=100, detail="compact"
+        )  # type: ignore[arg-type]
+        self.assertEqual(len(result.hits), 100)
+        self.assertLess(len(result.model_dump_json()), 40_000)
+        self.assertEqual(
+            set(result.hits[0].model_dump()),
+            {
+                "content_id", "content_type", "title", "space_key", "url", "modified_at",
+                "last_modified_by", "parent_id",
+            },
+        )
+
+    async def test_oversized_full_pages_are_split_without_skipping_cql_rows(self) -> None:
+        api = _SearchApi(pages=[_hit(str(i), f"title-{i}") for i in range(4)])
+        for hit in api.pages:
+            hit.excerpt = "x" * 1_200
+        service = ContentSearch(api, _Links(), "sample-user", response_max_chars=3_000)  # type: ignore[arg-type]
+        first = await service.search_content("title", limit=4)
+        self.assertLess(len(first.hits), 4)
+        self.assertLessEqual(len(first.model_dump_json()), 3_000)
+        self.assertIsNotNone(first.next_cursor)
+        self.assertTrue(any("reduced to fit" in note for note in first.notes))
+        await service.search_content(cursor=first.next_cursor)
+        self.assertEqual(api.search_calls[-1][1], len(first.hits))
 
     async def test_text_syntax_metacharacters_are_escaped_inside_terms(self) -> None:
         query, terms = _normalize_query('foo*bar x?y a"b a-b')

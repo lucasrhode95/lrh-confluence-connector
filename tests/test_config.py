@@ -101,6 +101,23 @@ class ConfigurationChecks(unittest.TestCase):
                 config["cql_timezone"] = timezone_name
                 self.assertEqual(self.configure(config)["cql_timezone"], timezone_name)
 
+    def test_search_response_budget_is_optional_and_bounded(self) -> None:
+        config = settings()
+        self.assertNotIn("search_response_max_chars", self.configure(config))
+        for budget in (1_000, 40_000, 1_000_000):
+            with self.subTest(budget=budget):
+                _read_config.cache_clear()
+                configured = settings()
+                configured["search_response_max_chars"] = budget
+                self.assertEqual(self.configure(configured)["search_response_max_chars"], budget)
+        for budget in (True, 999, 1_000_001, "40000"):
+            with self.subTest(invalid_budget=budget):
+                _read_config.cache_clear()
+                configured = settings()
+                configured["search_response_max_chars"] = budget
+                with self.assertRaisesRegex(SystemExit, "search_response_max_chars"):
+                    self.configure(configured)
+
     def test_acceptance_spaces_are_optional_and_allow_personal_space_prefix(self) -> None:
         config = settings()
         config["acceptance"] = {

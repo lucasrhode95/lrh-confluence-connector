@@ -74,7 +74,10 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                                 "type": "page",
                                 "title": "Synthetic title",
                                 "space": {"key": "SYNTH", "name": "Synthetic space"},
-                                "version": {"when": "2026-10-01T00:00:00Z"},
+                                "version": {
+                                    "when": "2026-10-01T00:00:00Z",
+                                    "by": {"username": "sample-editor", "displayName": "Sample Editor"},
+                                },
                                 "ancestors": [{"id": "1", "title": "Root"}],
                                 "_links": {"webui": "/wiki/spaces/SYNTH/pages/123/Synthetic"},
                             },
@@ -98,10 +101,43 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.url.path, "/wiki/rest/api/search")
         self.assertEqual(request.url.params["includeArchivedSpaces"], "true")
         self.assertEqual(request.url.params["limit"], "1")
+        self.assertIn("content.version", request.url.params["expand"])
         self.assertEqual((page.start, page.size, page.total_size), (0, 1, 400))
         self.assertEqual(page.hits[0].content_id, "123")
+        self.assertEqual(page.hits[0].last_modified_by.username, "sample-editor")
+        self.assertEqual(page.hits[0].last_modified_by.display_name, "Sample Editor")
         self.assertEqual(page.hits[0].ancestors[0].title, "Root")
         self.assertEqual(page.hits[0].url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/123/Synthetic")
+
+    async def test_search_result_without_version_author_maps_to_null(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Synthetic title",
+                            "content": {
+                                "id": "123",
+                                "type": "page",
+                                "title": "Synthetic title",
+                                "version": {"when": "2026-10-01T00:00:00Z"},
+                            },
+                        }
+                    ],
+                    "start": 0,
+                    "size": 1,
+                },
+            )
+
+        page = await self.make_api(handler).search_content_page(
+            "contributor IN ('sample-editor')",
+            start=0,
+            limit=1,
+            include_archived=True,
+            expected_username="sample-user",
+        )
+        self.assertIsNone(page.hits[0].last_modified_by)
 
     async def test_quicknav_maps_known_fields_and_rejects_foreign_link(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

@@ -19,6 +19,7 @@ from confluence_connector.timezones import parse_cql_timezone
 APP_NAME = "lrh-confluence-connector"
 CLI_NAME = "confluence-connector"
 MCP_SERVER_NAME = "lrh-confluence-connector"
+DEFAULT_SEARCH_RESPONSE_MAX_CHARS = 40_000
 LOG_LEVEL_VARIABLE = "CONFLUENCE_CONNECTOR_LOG_LEVEL"
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = ROOT / "confluence_config.json"
@@ -93,12 +94,15 @@ def write_cql_timezone_if_missing(value: str, path: Path | None = None) -> bool:
 def _validate_settings(settings: object) -> None:
     """Validate configuration once at the file boundary before callers trust its values."""
     required = {"base_url", "query", "form_auth_path", "endpoints"}
-    optional = {"cql_timezone", "acceptance"}
+    optional = {"cql_timezone", "acceptance", "search_response_max_chars"}
     if not isinstance(settings, dict) or not required <= set(settings) or set(settings) - required - optional:
         raise SystemExit(
             "Configuration must contain base_url, query, form_auth_path, endpoints and only the optional "
-            "cql_timezone and acceptance settings."
+            "cql_timezone, acceptance and search_response_max_chars settings."
         )
+    response_max_chars = settings.get("search_response_max_chars", DEFAULT_SEARCH_RESPONSE_MAX_CHARS)
+    if type(response_max_chars) is not int or not 1_000 <= response_max_chars <= 1_000_000:
+        raise SystemExit("search_response_max_chars must be an integer from 1,000 through 1,000,000.")
     cql_timezone = settings.get("cql_timezone")
     if cql_timezone is not None:
         try:

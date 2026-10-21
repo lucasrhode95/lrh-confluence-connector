@@ -1,6 +1,7 @@
 {
   "base_url": "https://confluence.example.com",
   "cql_timezone": null,
+  "search_response_max_chars": 40000,
   "acceptance": {
     "personal_space_key": null,
     "cross_space_key": null

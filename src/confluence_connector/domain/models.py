@@ -11,6 +11,8 @@ from confluence_connector.domain.errors import Upstream
 ContentType = Literal["page", "blogpost", "comment", "attachment", "space", "user"]
 SearchMatch = Literal["all", "any", "phrase"]
 SearchFields = Literal["all", "title"]
+SearchOrderBy = Literal["relevance", "modified_desc", "modified_asc", "created_desc"]
+SearchDetail = Literal["compact", "full"]
 SearchSource = Literal["cql", "quicknav"]
 PageTextFormat = Literal["text", "rich"]
 PageWriteStatus = Literal["current", "draft"]
@@ -102,6 +104,11 @@ class PageSummary(BaseModel):
     position: int | None = None
 
 
+class ContentAuthor(BaseModel):
+    username: str | None = None
+    display_name: str | None = None
+
+
 class ContentSearchHit(BaseModel):
     content_id: str | None = None
     content_type: str | None = None
@@ -111,10 +118,22 @@ class ContentSearchHit(BaseModel):
     url: str | None = None
     excerpt: str | None = None
     modified_at: str | None = None
+    last_modified_by: ContentAuthor | None = None
     parent_id: str | None = None
     ancestors: list[PageSummary] = Field(default_factory=list)
     position: int | None = None
     sources: list[SearchSource] = Field(default_factory=list)
+
+
+class CompactContentSearchHit(BaseModel):
+    content_id: str | None = None
+    content_type: str | None = None
+    title: str
+    space_key: str | None = None
+    url: str | None = None
+    modified_at: str | None = None
+    last_modified_by: ContentAuthor | None = None
+    parent_id: str | None = None
 
 
 class PageEnvelope(BaseModel):
@@ -145,12 +164,14 @@ class RemoteContentSearchPage(PageEnvelope):
 
 
 class ContentSearchResult(BaseModel):
-    query: str
+    query: str | None
     match: SearchMatch
     fields: SearchFields
+    order_by: SearchOrderBy
+    detail: SearchDetail
     scope: SearchScope
     queries_sent: list[SearchQuery]
-    hits: list[ContentSearchHit]
+    hits: list[ContentSearchHit | CompactContentSearchHit]
     start: int
     size: int
     approximate_total: int | None = None
