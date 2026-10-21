@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from confluence_connector.domain.models import PageAttachment
-from confluence_connector.service.page_text import render_page_body, storage_top_level_blocks
+from confluence_connector.service.page_text import parse_storage, render_page_body
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "page_text"
 _BASE_URL = "https://wiki.example.test/wiki"
@@ -87,15 +87,15 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertIn("(https://other.example.test/wiki/spaces/S/pages/7/B)", text)
         self.assertEqual({item.page_id for item in rendered.references if item.kind == "page"}, {"5", "6"})
 
-    def test_merged_cells_repeat_and_complex_tables_keep_minimal_html(self) -> None:
+    def test_merged_and_nested_tables_keep_minimal_html(self) -> None:
         merged = _text(
             '<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">wide</td></tr>'
             '<tr><td rowspan="2">tall</td><td>1</td></tr><tr><td>2</td></tr></table>'
         )
         self.assertEqual(
             merged,
-            "| A | B |\n| --- | --- |\n| wide | wide |\n| tall | 1 |\n| tall | 2 |\n"
-            "[Table: merged cells repeated]",
+            '<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">wide</td></tr>'
+            '<tr><td rowspan="2">tall</td><td>1</td></tr><tr><td>2</td></tr></table>',
         )
         complex_table = _text(
             '<table class="confluenceTable"><tr><td class="confluenceTd" style="color:red">x</td>'
@@ -105,6 +105,17 @@ class PageTextRenderingChecks(unittest.TestCase):
             complex_table,
             '<table><tr><td>x</td><td><table><tr><td colspan="2">inner</td></tr></table></td></tr></table>',
         )
+
+    def test_complex_table_preserves_links_and_is_one_budget_block(self) -> None:
+        rendered = _render('<table class="layout"><tr><td><pre>first\n\nsecond</pre>'
+            '<a href="https://example.test/guide" style="color:red">Guide</a>'
+            '<a href="javascript:bad()">Unsafe</a></td></tr></table>')
+        self.assertEqual(len(rendered.blocks), 1)
+        text = rendered.blocks[0].text
+        self.assertIn('<a href="https://example.test/guide">Guide</a>', text)
+        self.assertIn('first\n\nsecond', text)
+        self.assertNotIn('javascript:', text)
+        self.assertNotIn('style=', text)
 
     def test_active_content_is_dropped_and_the_html_macro_is_marked(self) -> None:
         text = _text(
@@ -122,7 +133,7 @@ class PageTextRenderingChecks(unittest.TestCase):
 
     def test_storage_blocks_split_top_level_elements_verbatim(self) -> None:
         storage = (_FIXTURES / "runbook.storage.xml").read_text(encoding="utf-8")
-        blocks = storage_top_level_blocks(storage)
+        blocks = parse_storage(storage, page_id="100", include_top_level_blocks=True).top_level_blocks
         self.assertEqual("".join(blocks), storage)
         self.assertTrue(blocks[0].startswith("<h1>Overview</h1>"))
         code = next(block for block in blocks if 'ac:name="code"' in block)

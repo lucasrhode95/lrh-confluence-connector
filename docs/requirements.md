@@ -145,8 +145,9 @@ storage technique is shared (§5).
   else without text. Code blocks are fenced with their language. Scripts, styles and tables of contents
   are dropped. The HTML macro has no wrapper in `view`, so only its scripts are dropped and an
   `[Unrendered macro: html]` marker follows the body.
-- Tables are pipe tables; merged cells repeat their value, with a `[Table: merged cells repeated]`
-  note. Tables with nested tables or code fall back to minimal HTML.
+- Ordinary tables use the library's pipe tables. Merged cells, nested tables and tables containing
+  code blocks retain minimal ordinary HTML, including spans, link destinations and code whitespace.
+  Agents see this markup directly in the text response; it is not Confluence storage markup.
 - Accepted limitations: exotic nesting (lists or panels in table cells) follows the library, and list
   numbering, spacing and indentation may differ from Confluence's display.
 - Layout: a short header (title, link, version and total versions, last modified, extracted at), the
