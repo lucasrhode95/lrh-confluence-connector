@@ -462,3 +462,9 @@ applied and whether it worked; a refused placement leaves the page at the root w
 | Bounds | Every list and read is bounded with a cursor or a cap reported in the result. Attachment bytes go to files, never into tool results. |
 | Errors | Domain errors with Confluence's status and message. 401 → `AuthenticationRequired`; 403 → `PermissionDenied`; changed account → `AccountMismatch`; uncertain write → `UncertainWrite`. |
 | Security | Configured host only; no arbitrary URL fetching; short links followed only on the configured origin; no browser cookies; tokens never in tool inputs or results. |
+
+The transport snapshots already-decoded response bytes without compression headers, and applies the
+same conservative write policy to JSON and multipart fixture uploads. Encrypted PAT records bind the
+account to the canonical configured instance URL, including its installation context; an instance
+mismatch fails before a credential is sent. Exact-title resolution uses the content collection rather
+than the CQL index. Async moves require a terminal task state before reporting success.

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import httpx
 from typing import Any
 
 from msal_extensions import CrossPlatLock, build_encrypted_persistence
@@ -23,11 +25,13 @@ class StoredCredential:
 class TokenStore:
     """Read and replace the encrypted record while holding the shared cache lock.
 
+    Only sign-out can use an unbound store. Reads and saves require the validated configured base URL.
     Public methods accept an already-verified username and nonempty PAT. Internal decoding trusts
     no stored bytes and fails closed when the current encrypted record is malformed.
     """
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, *, base_url: str | None = None) -> None:
+        self._base_url = str(httpx.URL(base_url)).rstrip("/") if base_url else None
         self.path = path or config.data_dir() / "token-cache.bin"
         self.lock_path = Path(f"{self.path}.acquire.lock")
 
@@ -40,6 +44,8 @@ class TokenStore:
         """Persist a verified credential without silently changing the bound Confluence account."""
         if not token or not token.strip() or not username or not username.strip():
             raise ValueError("A nonempty verified token and username are required.")
+        if self._base_url is None:
+            raise ValueError("A configured instance is required to store a token.")
         credential = StoredCredential(username=username.strip(), token=token.strip())
         with self._lock():
             persistence = self._persistence()
@@ -50,7 +56,7 @@ class TokenStore:
                     "`confluence-connector auth --sign-out` before switching accounts."
                 )
             try:
-                persistence.save(json.dumps({"username": credential.username, "token": credential.token}))
+                persistence.save(json.dumps({"username": credential.username, "token": credential.token, "base_url": self._base_url}))
             except Exception as exc:
                 raise SecureStorageUnavailable(
                     f"Encrypted token storage could not save the credential ({type(exc).__name__})."
@@ -101,16 +107,23 @@ class TokenStore:
         try:
             data = json.loads(raw)
         except (TypeError, json.JSONDecodeError):
-            raise SecureStorageUnavailable("The encrypted credential record is malformed; sign-in is blocked.")
+            raise SecureStorageUnavailable("The encrypted credential record is malformed or unbound; run `confluence-connector auth --sign-out`, then `auth`.")
         if (
             not isinstance(data, dict)
-            or set(data) != {"username", "token"}
+            or set(data) != {"username", "token", "base_url"}
+            or not isinstance(data.get("base_url"), str)
+            or not data["base_url"]
             or not isinstance(data.get("username"), str)
             or not data["username"].strip()
             or not isinstance(data.get("token"), str)
             or not data["token"].strip()
         ):
-            raise SecureStorageUnavailable("The encrypted credential record is malformed; sign-in is blocked.")
+            raise SecureStorageUnavailable("The encrypted credential record is malformed or unbound; run `confluence-connector auth --sign-out`, then `auth`.")
+        if self._base_url is None or data["base_url"] != self._base_url:
+            raise AccountMismatch(
+                "The stored token belongs to a different Confluence instance; run "
+                "`confluence-connector auth --sign-out` before signing in to this instance."
+            )
         return StoredCredential(username=data["username"].strip(), token=data["token"].strip())
 
     def _lock(self) -> CrossPlatLock:

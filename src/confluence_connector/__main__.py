@@ -77,14 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _auth(sign_out: bool, config_path: Path | None) -> int:
-    store = TokenStore()
     if sign_out:
         print("This clears the local token. It cannot be recovered and is not revoked on the Confluence server.")
-        existed = store.sign_out()
+        existed = TokenStore().sign_out()
         print("Local Confluence token cleared." if existed else "No local Confluence token was stored.")
         return EXIT_OK
 
     settings = load_config(config_path)
+    store = TokenStore(base_url=str(settings["base_url"]))
     token = getpass.getpass("Confluence personal access token: ").strip()
     if not token:
         raise AuthenticationRequired("The Confluence token cannot be empty.")

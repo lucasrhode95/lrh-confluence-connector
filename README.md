@@ -172,3 +172,7 @@ Project references: [documentation index](docs/README.md) · [requirements](docs
 > Confluence web routes. Check your organization's AI and data policies before giving an agent your work
 > data. Provided as is, without warranty. Atlassian and Confluence are Atlassian trademarks; this
 > project is not affiliated with Atlassian.
+
+Tokens are bound to the configured instance URL (including its installation path) as well as the account.
+Switching instances requires `confluence-connector auth --sign-out` followed by `auth`. An encrypted
+record without instance binding is rejected; clear it and sign in once to store the current format.
