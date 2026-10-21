@@ -85,6 +85,29 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual((result.pages_failed, result.attachments_failed), (0, 0))
 
+    async def test_export_reuses_its_attachment_list_for_downloads(self) -> None:
+        attachments = [PageAttachment(attachment_id="att-1", filename="guide.txt")]
+        pages = _Pages(
+            {
+                "55": _record(
+                    "55", "Synthetic export", "Export body", attachments=attachments
+                )
+            }
+        )
+        service, api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages("55", include_attachments=True)
+            with zipfile.ZipFile(result.path) as archive:
+                self.assertEqual(
+                    archive.read("Synthetic export (55) v2/guide.txt"),
+                    b"synthetic attachment",
+                )
+            self.assertEqual(api.list_calls, 1)
+            self.assertEqual(api.download_calls, ["att-1"])
+
     async def test_rich_export_keeps_storage_body_and_appends_escaped_comments(
         self,
     ) -> None:
@@ -279,6 +302,7 @@ class _Api:
         self.failed_downloads = failed_downloads
         self.attachments = attachments
         self.list_calls = 0
+        self.download_calls: list[str] = []
 
     async def list_page_attachments(
         self, page_id: str, *, expected_username: str
@@ -293,6 +317,7 @@ class _Api:
         *,
         expected_username: str,
     ) -> tuple[str | None, int]:
+        self.download_calls.append(attachment.attachment_id)
         if attachment.attachment_id in self.failed_downloads:
             destination.write(b"partial")
             raise Upstream("Synthetic attachment failure")
