@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from confluence_connector.domain.errors import (
     AccountMismatch,
@@ -12,6 +11,7 @@ from confluence_connector.domain.errors import (
     InvalidRequest,
 )
 from confluence_connector.domain.models import PageMetadata, PageMetadataFailure, PageMetadataResult
+from confluence_connector.domain.validation import page_references
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 
@@ -32,7 +32,7 @@ class PageMetadataService:
         The public boundary validates count and text shape before any request. Each page's source
         fields and history are mapped by the adapter; rendered page text is never parsed for metadata.
         """
-        references = _references(pages)
+        references = page_references(pages, maximum=MAX_METADATA_PAGES)
         semaphore = asyncio.Semaphore(6)
 
         async def read(reference: str) -> tuple[PageMetadata | None, PageMetadataFailure | None]:
@@ -68,25 +68,3 @@ class PageMetadataService:
             pages=[metadata for metadata, _ in results if metadata is not None],
             failures=[failure for _, failure in results if failure is not None],
         )
-
-
-def _references(value: Any) -> list[str]:
-    if isinstance(value, str):
-        values = [value]
-    elif isinstance(value, list):
-        values = value
-    else:
-        raise InvalidRequest("pages must be one page reference or a list of page references.")
-    if not values or len(values) > MAX_METADATA_PAGES:
-        raise InvalidRequest(f"pages must contain 1 to {MAX_METADATA_PAGES} page references.")
-    references: list[str] = []
-    for item in values:
-        if (
-            not isinstance(item, str)
-            or not item.strip()
-            or len(item.strip()) > 2_048
-            or any(ord(char) < 32 for char in item)
-        ):
-            raise InvalidRequest("pages contains an invalid page reference.")
-        references.append(item.strip())
-    return references

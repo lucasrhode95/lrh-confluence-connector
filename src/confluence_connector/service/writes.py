@@ -25,7 +25,7 @@ from confluence_connector.domain.validation import (
     optional_space_key,
     page_reference,
     require_current_page,
-    space_key as validate_space_key,
+    placement_inputs,
 )
 from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
@@ -74,12 +74,9 @@ class PageWrites:
         storage_body = _write_body(body, format)
         if not isinstance(status, str) or status not in {"current", "draft"}:
             raise InvalidRequest("status must be current or draft.")
-        placement_kind = _placement_kind(position, sibling)
-        validated_sibling = page_reference(sibling, field="sibling") if sibling is not None else None
-        if (parent_id is None) == (space_key is None):
-            raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
-        parent_reference = page_reference(parent_id, field="parent_id") if parent_id is not None else None
-        selected_space = validate_space_key(space_key) if space_key is not None else None
+        placement_kind, parent_reference, selected_space, validated_sibling = placement_inputs(
+            parent_id=parent_id, space_key=space_key, position=position, sibling=sibling,
+        )
         placement = await self._placement_resolver.resolve(
             parent_reference=parent_reference,
             space_key=selected_space,
@@ -384,19 +381,6 @@ def _expected_version(value: Any) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise InvalidRequest("expected_version must be a positive integer.")
     return value
-
-
-def _placement_kind(position: Any, sibling: Any) -> str:
-    selected = "last" if position is None else position
-    if not isinstance(selected, str) or selected not in {"first", "last", "before", "after"}:
-        raise InvalidRequest("position must be first, last, before or after.")
-    if sibling is not None and not isinstance(sibling, str):
-        raise InvalidRequest("sibling must be a page ID or supported same-instance page URL.")
-    if selected in {"before", "after"} and sibling is None:
-        raise InvalidRequest("position before or after requires a sibling page reference.")
-    if selected not in {"before", "after"} and sibling is not None:
-        raise InvalidRequest("sibling is only valid with position before or after.")
-    return selected
 
 
 def _action_position(position: str) -> str | None:

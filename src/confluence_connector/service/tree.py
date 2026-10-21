@@ -13,7 +13,7 @@ from confluence_connector.domain.models import (
     PageTreeResult,
     RemoteContentSearchPage,
 )
-from confluence_connector.domain.validation import space_key as validate_space_key
+from confluence_connector.domain.validation import page_reference, space_key as validate_space_key
 from confluence_connector.remote.confluence import CHILD_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 
@@ -46,9 +46,8 @@ class PageTree:
             raise InvalidRequest("Pass exactly one of page or space_key.")
         depth = _depth(max_depth)
         if page is not None:
-            if not isinstance(page, str) or not page.strip() or len(page.strip()) > 2_048:
-                raise InvalidRequest("page must be a page ID or supported same-instance URL.")
-            resolved = await self._links.resolve(page, expected_username=self._username)
+            reference = page_reference(page)
+            resolved = await self._links.resolve(reference, expected_username=self._username)
             page_id = _page_id(resolved.page_id)
             metadata = await self._api.get_page_metadata(page_id, expected_username=self._username)
             if metadata.content_type != "page":

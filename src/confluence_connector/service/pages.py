@@ -36,6 +36,7 @@ from confluence_connector.service.page_text import (
     PageTextBlock,
     parse_storage,
     render_page_body,
+    unique_references,
 )
 
 MAX_PAGE_REFERENCES = 20
@@ -409,7 +410,7 @@ class PageTextService:
             attachments=tuple(attachments),
             comments=comments,
             blocks=tuple(blocks),
-            references=tuple(_unique_references(references)),
+            references=tuple(unique_references(references)),
             header=header,
             notes=tuple(notes),
         )
@@ -717,14 +718,3 @@ def _utc_now() -> str:
 
 def _block(text: str, references: tuple[PageReference, ...]) -> PageTextBlock:
     return PageTextBlock(text=text, references=references)
-
-
-def _unique_references(references: list[PageReference]) -> list[PageReference]:
-    unique: list[PageReference] = []
-    seen: set[tuple[tuple[str, str], ...]] = set()
-    for reference in references:
-        key = tuple(sorted((name, str(value)) for name, value in reference.model_dump(exclude_none=True).items()))
-        if key not in seen:
-            seen.add(key)
-            unique.append(reference)
-    return unique
