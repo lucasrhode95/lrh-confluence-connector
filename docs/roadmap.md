@@ -350,9 +350,13 @@ Architecture now records the shared modules.
 
 #### One placement resolver
 
-`create_page`, `move_page` and `restore_page` resolve `parent_id`, `space_key`, `position` and `sibling`
-through two implementations (`_Placement`/`_create_placement` and `PagePlacement`/`_resolve_placement`).
-Share one.
+**Implemented, awaiting review (2026-10-21).** Added `service/placement.py` and routed page creation,
+movement, restoration and root recovery through its shared resolver. The service entry points retain
+their distinct status rules and page-reference handling. The resolver checks sibling scope and move
+cycles and selects first or root-last action targets. Removed the duplicate `_Placement` and create
+placement helpers. Offline regressions cover first-sibling ordering, descendant protection, and the
+status difference between create and move. The full suite passes (282 tests, one platform skip), and
+compilation passes.
 
 #### Rich-body checks on BeautifulSoup
 
