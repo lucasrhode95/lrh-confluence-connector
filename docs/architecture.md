@@ -88,6 +88,8 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
   timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
   across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
+- JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
+  destination stream while the transport applies the shared retry, status and account checks.
 - **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
   `Retry-After`, otherwise with short jittered backoff.
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
@@ -141,6 +143,12 @@ account by `AppContext` ([`bootstrap.py`](../src/confluence_connector/bootstrap.
 Account-boundary error propagation is shared in `errors.py`. Attachment downloads and exports share
 filename sanitization and filesystem component limits from `filenames.py`.
 
+`placement.py` resolves parent, space, position and sibling inputs for page creation, movement and
+restoration. Service entry points validate public references and provide their existing page resolver;
+the shared resolver checks page state and sibling scope, and selects the sibling action target for
+first and root-last placement. Move and restore allow missing status metadata; page creation requires
+an explicit `current` status.
+
 **[`search.py`](../src/confluence_connector/service/search.py)** builds CQL from literal terms and
 validated scope only; terms escape text-query syntax separately from CQL string quoting. Title search
 replaces punctuation with spaces and, on an unscoped first page, merges up to 20 quick-navigation
@@ -160,8 +168,9 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 **[`pages.py`](../src/confluence_connector/service/pages.py) and
 [`page_text.py`](../src/confluence_connector/service/page_text.py)** convert a body in three steps:
 
-1. Storage is parsed with BeautifulSoup for macro parameters (Jira keys, PlantUML source, titles,
-   include targets) and typed references (`ri:page`, `ri:attachment`, inline-comment markers).
+1. `parse_storage` parses storage once per page read. It extracts macro parameters (Jira keys,
+   PlantUML source, titles, include targets), typed references (`ri:page`, `ri:attachment`,
+   inline-comment markers), and—on rich reads—verbatim top-level source slices from the same tree.
 2. A BeautifulSoup pass over `view` replaces each `data-macro-name` wrapper with its marker, pairing
    wrappers with storage macros by name and document order (wrappers inside a resolved include take no
    local source); turns images and attachment links into markers with typed references; renders
@@ -178,8 +187,11 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 
 **[`writes.py`](../src/confluence_connector/service/writes.py) and
 [`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: `to_storage` converts and
-checks `rich` input (requirements §10.1); `content_loss` compares inline-comment anchors, macro names
-and attachment references between the stored and new bodies.
+checks `rich` input with BeautifulSoup, converts code blocks and expand sections, and refuses active
+content and excessive nesting (requirements §10.1). The HTML parser repairs some malformed input
+before sending it to Confluence; the roadmap tracks whether that matches the D5 error contract.
+`content_loss` compares inline-comment anchors, macro names and attachment references between the
+stored and new bodies.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.

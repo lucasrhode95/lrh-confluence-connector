@@ -92,6 +92,25 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.move_calls[0]["target_id"], "20")
         self.assertEqual(self.api.pages["10"].version, 1)
 
+    async def test_first_position_uses_the_first_sibling_after_the_moving_page(self) -> None:
+        self.api.pages["10"] = _page("10", "Moving")
+        self.api.pages["11"] = _page("11", "Next root page")
+
+        result = await self.service.move_page("10", space_key="SYNTH", position="first")
+
+        self.assertTrue(result.moved)
+        self.assertEqual(self.api.move_calls[0]["position"], "above")
+        self.assertEqual(self.api.move_calls[0]["target_id"], "11")
+
+    async def test_move_placement_rejects_a_descendant_parent_before_writing(self) -> None:
+        self.api.pages["10"] = _page("10", "Moving")
+        self.api.pages["11"] = _page("11", "Descendant", parent_id="10")
+
+        with self.assertRaisesRegex(InvalidRequest, "itself or one of its descendants"):
+            await self.service.move_page("10", parent_id="11")
+
+        self.assertEqual(self.api.move_calls, [])
+
     async def test_delete_refuses_children_and_lists_them_before_permission_checks(self) -> None:
         self.api.pages["10"] = _page("10", "Parent")
         self.api.add_child("10", "11", "Child")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urljoin
 
@@ -11,14 +10,12 @@ from confluence_connector.domain.errors import (
     Conflict,
     ConnectorError,
     InvalidRequest,
-    Upstream,
 )
 from confluence_connector.domain.models import (
     DraftDeletionResult,
     DraftListResult,
     LabelChangeFailure,
     LabelChangeResult,
-    PageMetadata,
     PageWriteStatus,
     PageWriteResult,
     RemoteDraftPage,
@@ -33,6 +30,7 @@ from confluence_connector.domain.validation import (
 from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
+from confluence_connector.service.placement import PagePlacementResolver
 from confluence_connector.service.write_markup import content_loss, to_storage
 
 MAX_TITLE_CHARS = 255
@@ -41,14 +39,6 @@ MAX_DRAFT_OFFSET = 1_000_000
 MAX_DRAFT_LIMIT = DRAFT_PAGE_SIZE
 _LABEL = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
 _DRAFT_CURSOR_KIND = "list_drafts"
-
-
-@dataclass(frozen=True)
-class _Placement:
-    space_key: str
-    parent_id: str | None
-    position: str
-    target_id: str | None
 
 
 class PageWrites:
@@ -65,6 +55,7 @@ class PageWrites:
         self._links = links
         self._username = username
         self._base_url = base_url.rstrip("/")
+        self._placement_resolver = PagePlacementResolver(api, username)
 
     async def create_page(
         self,
@@ -85,11 +76,16 @@ class PageWrites:
             raise InvalidRequest("status must be current or draft.")
         placement_kind = _placement_kind(position, sibling)
         validated_sibling = page_reference(sibling, field="sibling") if sibling is not None else None
-        placement = await self._create_placement(
-            parent_id=parent_id,
-            space_key=space_key,
+        if (parent_id is None) == (space_key is None):
+            raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
+        parent_reference = page_reference(parent_id, field="parent_id") if parent_id is not None else None
+        selected_space = validate_space_key(space_key) if space_key is not None else None
+        placement = await self._placement_resolver.resolve(
+            parent_reference=parent_reference,
+            space_key=selected_space,
             position=placement_kind,
-            sibling=validated_sibling,
+            sibling_reference=validated_sibling,
+            resolve_page=self._resolve_page,
         )
         await self._assert_title_available(clean_title, placement.space_key)
         created = await self._api.create_page(
@@ -102,13 +98,13 @@ class PageWrites:
         )
         warnings: list[str] = []
         action_position = _action_position(placement.position)
-        if placement.target_id is not None and action_position is not None:
+        if placement.sibling_id is not None and action_position is not None:
             try:
                 await self._api.position_page(
                     created.page_id,
                     space_key=placement.space_key,
                     position=action_position,
-                    target_id=placement.target_id,
+                    target_id=placement.sibling_id,
                     expected_username=self._username,
                 )
             except ConnectorError as exc:
@@ -346,74 +342,6 @@ class PageWrites:
                 )
                 break
         return result
-
-    async def _create_placement(
-        self,
-        *,
-        parent_id: str | None,
-        space_key: str | None,
-        position: str,
-        sibling: str | None,
-    ) -> _Placement:
-        if (parent_id is None) == (space_key is None):
-            raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
-        resolved_parent_id = None
-        if parent_id is not None:
-            resolved_parent = await self._resolve_page(page_reference(parent_id, field="parent_id"))
-            parent_metadata = await self._api.get_page_metadata(
-                resolved_parent.page_id, expected_username=self._username
-            )
-            require_current_page(parent_metadata)
-            if parent_metadata.space_key is None:
-                raise InvalidRequest("Confluence did not return the parent's space.")
-            resolved_parent_id = parent_metadata.page_id
-            selected_space = parent_metadata.space_key
-        else:
-            selected_space = validate_space_key(space_key)
-        target_id: str | None = None
-        if position in {"before", "after"}:
-            if sibling is None:
-                raise InvalidRequest("position before or after requires a sibling page reference.")
-            target = await self._sibling(sibling)
-            target_parent_id = target.ancestors[-1].page_id if target.ancestors else None
-            if target_parent_id != resolved_parent_id or target.space_key != selected_space:
-                raise InvalidRequest("The sibling must be in the same space and under the selected parent.")
-            target_id = target.page_id
-        elif sibling is not None:
-            raise InvalidRequest("sibling is only valid with position before or after.")
-        elif position == "first":
-            target_id = await self._first_sibling(resolved_parent_id, selected_space)
-        return _Placement(
-            space_key=selected_space,
-            parent_id=resolved_parent_id,
-            position=position,
-            target_id=target_id,
-        )
-
-    async def _first_sibling(self, parent_id: str | None, space_key: str) -> str | None:
-        if parent_id is None:
-            page = await self._api.list_space_root_pages(
-                space_key, start=0, expected_username=self._username
-            )
-        else:
-            page = await self._api.list_child_pages(
-                parent_id, start=0, expected_username=self._username
-            )
-        if not page.hits:
-            return None
-        first_id = page.hits[0].content_id
-        if first_id is None or not first_id.isdecimal():
-            raise Upstream("Confluence did not return a page ID for the first sibling.")
-        return first_id
-
-    async def _sibling(self, reference: str) -> PageMetadata:
-        """Resolve a page reference validated at the create_page public boundary."""
-        resolved = await self._resolve_page(reference)
-        metadata = await self._api.get_page_metadata(
-            resolved.page_id, expected_username=self._username
-        )
-        require_current_page(metadata)
-        return metadata
 
     async def _resolve_page(self, reference: str) -> ResolvedPageReference:
         resolved = await self._links.resolve(reference, expected_username=self._username)
