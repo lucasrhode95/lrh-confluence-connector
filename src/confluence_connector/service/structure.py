@@ -42,6 +42,7 @@ from confluence_connector.remote.confluence import (
 )
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
+from confluence_connector.service.placement import PagePlacementResolver
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class PageStructure:
         self._api = api
         self._links = links
         self._username = username
+        self._placement_resolver = PagePlacementResolver(api, username)
 
     async def move_page(
         self,
@@ -454,7 +456,7 @@ class PageStructure:
             raise Upstream("Confluence did not return the page's current space.")
         old_parent_id = metadata.ancestors[-1].page_id if metadata.ancestors else None
         cross_space = metadata.space_key != target.space_key
-        action_position, target_id = await self._move_action_target(target, metadata.page_id)
+        action_position, target_id = self._move_action_target(target)
         if cross_space:
             await self._api.move_page_action(
                 metadata.page_id,
@@ -508,25 +510,19 @@ class PageStructure:
             position_applied=True,
         )
 
-    async def _move_action_target(
-        self, target: PagePlacement, moving_page_id: str
-    ) -> tuple[str, str | None]:
+    def _move_action_target(self, target: PagePlacement) -> tuple[str, str | None]:
         """Translate public placement into the UI action's documented position/target pair."""
         if target.position == "before":
             return "above", target.sibling_id
         if target.position == "after":
             return "below", target.sibling_id
         if target.position == "first":
-            siblings = await self._read_children(target.parent_id, target.space_key)
-            sibling_ids = [row.content_id for row in siblings if row.content_id != moving_page_id]
-            if sibling_ids:
-                return "above", sibling_ids[0]
+            if target.sibling_id is not None:
+                return "above", target.sibling_id
         if target.parent_id is None:
             if target.position == "last":
-                siblings = await self._read_children(None, target.space_key)
-                sibling_ids = [row.content_id for row in siblings if row.content_id != moving_page_id]
-                if sibling_ids:
-                    return "below", sibling_ids[-1]
+                if target.sibling_id is not None:
+                    return "below", target.sibling_id
             return "topLevel", None
         return "append", target.parent_id
 
@@ -544,8 +540,20 @@ class PageStructure:
         """Reparent a current same-space page without creating a content version."""
         if metadata.space_key is None:
             raise Upstream("Confluence did not return the page space for its parent change.")
-        target = PagePlacement(space_key=metadata.space_key, parent_id=parent_id)
-        position, target_id = await self._move_action_target(target, metadata.page_id)
+        if parent_id is None:
+            target = await self._placement_resolver.resolve(
+                parent_reference=None,
+                space_key=metadata.space_key,
+                position="last",
+                sibling_reference=None,
+                resolve_page=self._resolve_page,
+                allow_missing_status=True,
+                moving_page_id=metadata.page_id,
+                resolve_root_last=True,
+            )
+        else:
+            target = PagePlacement(space_key=metadata.space_key, parent_id=parent_id)
+        position, target_id = self._move_action_target(target)
         await self._api.move_page_action(
             metadata.page_id,
             space_key=metadata.space_key,
@@ -564,48 +572,16 @@ class PageStructure:
         sibling_reference: str | None,
         moving_page_id: str,
     ) -> PagePlacement:
-        """Resolve a validated parent and sibling to a target space and numeric IDs."""
-        if parent_reference is not None:
-            parent = await self._resolve_page(parent_reference)
-            parent_metadata = await self._api.get_page_metadata(
-                parent.page_id, expected_username=self._username
-            )
-            require_current_page(parent_metadata, allow_missing_status=True)
-            if parent_metadata.space_key is None:
-                raise Upstream("Confluence did not return the target parent's space.")
-            if parent_metadata.page_id == moving_page_id or any(
-                ancestor.page_id == moving_page_id for ancestor in parent_metadata.ancestors
-            ):
-                raise InvalidRequest("A page cannot be moved under itself or one of its descendants.")
-            selected_space = parent_metadata.space_key
-            parent_id = parent_metadata.page_id
-        else:
-            selected_space = validate_space_key(space_key)
-            parent_id = None
-
-        sibling_id: str | None = None
-        if position in {"before", "after"}:
-            if sibling_reference is None:
-                raise InvalidRequest("position before or after requires a sibling page reference.")
-            sibling = await self._resolve_page(sibling_reference)
-            sibling_metadata = await self._api.get_page_metadata(
-                sibling.page_id, expected_username=self._username
-            )
-            require_current_page(sibling_metadata, allow_missing_status=True)
-            sibling_parent_id = sibling_metadata.ancestors[-1].page_id if sibling_metadata.ancestors else None
-            if sibling_metadata.space_key != selected_space or sibling_parent_id != parent_id:
-                raise InvalidRequest("The sibling must be in the target space and under the selected parent.")
-            if sibling_metadata.page_id == moving_page_id:
-                raise InvalidRequest("A page cannot be positioned before or after itself.")
-            sibling_id = sibling_metadata.page_id
-        elif sibling_reference is not None:
-            raise InvalidRequest("sibling is only valid with position before or after.")
-
-        return PagePlacement(
-            space_key=selected_space,
-            parent_id=parent_id,
+        """Delegate validated placement inputs to the shared resolver."""
+        return await self._placement_resolver.resolve(
+            parent_reference=parent_reference,
+            space_key=space_key,
             position=position,  # type: ignore[arg-type]
-            sibling_id=sibling_id,
+            sibling_reference=sibling_reference,
+            resolve_page=self._resolve_page,
+            allow_missing_status=True,
+            moving_page_id=moving_page_id,
+            resolve_root_last=True,
         )
 
     async def _saved_placement(
