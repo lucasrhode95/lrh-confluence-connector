@@ -355,15 +355,15 @@ movement, restoration and root recovery through its shared resolver. The service
 their distinct status rules and page-reference handling. The resolver checks sibling scope and move
 cycles and selects first or root-last action targets. Removed the duplicate `_Placement` and create
 placement helpers. Offline regressions cover first-sibling ordering, descendant protection, and the
-status difference between create and move. The full suite passes (282 tests, one platform skip), and
-compilation passes.
+status difference between create and move. The current consolidated suite passes (274 tests, one
+platform skip), as do compilation and pyflakes.
 
 #### Rich-body checks on BeautifulSoup
 
 **Implemented, awaiting review (2026-10-21).** Replaced the hand-built `HTMLParser` span tree with
 BeautifulSoup for rich-body safety checks, nesting limits, code/expand conversion and content-loss
-identity. Existing focused tests and the full offline suite pass (282 tests, one platform skip); source
-and test compilation passes.
+identity. Existing focused tests pass in the current consolidated suite (274 tests, one platform skip);
+source and test compilation and pyflakes pass.
 
 **Validation:** BeautifulSoup repairs some malformed markup during serialization (`<p>unclosed` becomes
 `<p>unclosed</p>`). D5 describes Confluence returning a 400 with row and column for unparseable markup.
@@ -403,6 +403,12 @@ cursor rejection and config-path caching. Search and page-read MCP round trips s
 attachment-list reuse is tested at the export-service boundary. Repeated trash checks now assert
 preflight-before-write ordering and both route statuses together. The offline suite passes 274 tests
 with one platform skip; compilation, pyflakes and whitespace checks pass.
+
+#### Keep offline check lists aligned
+
+**Implemented, awaiting review (2026-10-21).** Added the repository's required pyflakes command to the
+research guide's offline checks. Updated the placement and rich-body summaries to the current
+consolidated suite count; dated acceptance-run counts remain historical results.
 
 ### Enhancements
 

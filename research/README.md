@@ -67,6 +67,7 @@ reports check names, statuses, timings and exception types, never response text 
 ```bash
 uv run python -m unittest discover -s tests
 uv run python -m compileall -q src research tests
+uv run pyflakes src research tests
 uv run python research/probe_auth.py --help
 ```
 
