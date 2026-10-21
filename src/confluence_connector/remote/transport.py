@@ -126,6 +126,7 @@ class ConfluenceTransport:
         body: Any = None,
         skip_atlassian_token_check: bool = False,
         expected_username: str,
+        files: Mapping[str, tuple[str, bytes, str]] | None = None,
     ) -> Any:
         """Send one write request, retrying only when the response proves it was not applied."""
         result = await self._exchange(
@@ -133,6 +134,7 @@ class ConfluenceTransport:
             path,
             params=params,
             body=body,
+            files=files,
             expected_username=expected_username,
             skip_atlassian_token_check=skip_atlassian_token_check,
         )
@@ -175,6 +177,7 @@ class ConfluenceTransport:
         skip_atlassian_token_check: bool = False,
         accept: str = "application/json",
         stream_to: BinaryIO | None = None,
+        files: Mapping[str, tuple[str, bytes, str]] | None = None,
     ) -> _ExchangeResult:
         _validate_route(path)
         method = method.upper()
@@ -184,7 +187,7 @@ class ConfluenceTransport:
             headers = {"Accept": accept, "Authorization": f"Bearer {token}"}
             if skip_atlassian_token_check:
                 headers["X-Atlassian-Token"] = "no-check"
-            request = self._client.build_request(method, path, params=params, json=body, headers=headers)
+            request = self._client.build_request(method, path, params=params, json=body, files=files, headers=headers)
             response: httpx.Response | None = None
             retry_delay: float | None = None
             streamed_bytes: int | None = None
@@ -297,7 +300,10 @@ async def _read_response(response: httpx.Response) -> httpx.Response:
             raise Upstream("Confluence returned a response larger than the connector limit.")
         chunks.extend(chunk)
     status = response.status_code
-    headers = response.headers
+    # aiter_bytes has already decoded Content-Encoding. Do not decode the snapshot again.
+    headers = response.headers.copy()
+    for name in ("content-encoding", "content-length"):
+        headers.pop(name, None)
     request = response.request
     extensions = response.extensions
     await response.aclose()

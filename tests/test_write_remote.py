@@ -213,7 +213,21 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             "SYNTH", "Synthetic title", expected_username="sample-user"
         )
         self.assertIsNone(match)
-        self.assertIn("title = 'Synthetic title'", observed[0].url.params["cql"])
+        self.assertEqual(observed[0].url.params["title"], "Synthetic title")
+        self.assertEqual(observed[0].url.path, "/wiki/rest/api/content")
+
+    async def test_exact_title_lookup_preserves_quotes_and_uses_current_or_trash_collection(self) -> None:
+        observed = []
+        def handler(request):
+            observed.append(request)
+            return httpx.Response(200, json={"results": [{"id": "42"}]})
+        api = self.make_api(handler)
+        for status in (None, "trashed"):
+            self.assertEqual(await api.find_page_by_title("ARCHIVED", 'A "quoted" title', status=status, expected_username="sample-user"), "42")
+        for request, status in zip(observed, ("current", "trashed"), strict=True):
+            self.assertEqual(request.url.path, "/wiki/rest/api/content")
+            self.assertEqual(request.url.params["status"], status)
+            self.assertEqual(request.url.params["title"], 'A "quoted" title')
 
     async def test_publish_delete_and_label_routes_use_documented_status_and_payloads(self) -> None:
         observed: list[httpx.Request] = []
@@ -374,7 +388,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value, {"parent_id": "100"})
         self.assertEqual(restored.status, "current")
         self.assertEqual((trash.pages[0].page_id, trash.pages[0].modified_at), ("301", "2026-10-01T00:00:00Z"))
-        self.assertTrue(trash.has_more)
+        self.assertEqual(trash.next_start(100), 11)
         self.assertEqual((observed[2].method, observed[3].method), ("GET", "PUT"))
         property_body = json.loads(observed[3].content)
         self.assertEqual(property_body["version"], {"number": 4})
@@ -399,7 +413,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={"longTaskId": "task-7", "successful": False})
             polls += 1
             if polls == 1:
-                return httpx.Response(200, json={"finished": False, "successful": False})
+                return httpx.Response(200, json={"finished": False, "successful": True, "percentageComplete": 18})
             return httpx.Response(200, json={"finished": True, "successful": True})
 
         await self.make_api(handler).move_page_action(

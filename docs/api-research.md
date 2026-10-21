@@ -68,6 +68,9 @@ Live (browser), 2026-10-19:
 - About 100 macros from standard plugins, plus multi-excerpt, PlantUML, numbered headings, a Git
   plugin, tree view, image map and the **HTML macro**, which is enabled. No draw.io or Gliffy.
 
+Live REST, 2026-10-20: personal-space keys can contain dots and `@` after `~`; preserve account-name
+punctuation when configuring or resolving personal spaces.
+
 ### 2.2 Credentials
 
 - **PAT, Live (script), 2026-10-07 and 2026-10-19:** a bearer PAT works for every read and write the
@@ -164,6 +167,12 @@ Live (browser), 2026-10-19:
   `/rest/api/user/current` exposes no zone.
 - A date-only upper bound includes the whole day (2026-10-20). `now("-Nm")` works at minute precision.
 
+Live REST, 2026-10-20: search modification times and REST `version.when` differed by one millisecond
+on a stable page. Calibration must compare REST reference instants before/after the measurement;
+search only selects the sample. Corrected calibration and date-only/offset-timestamp filters passed
+with the saved effective offset zero. This does not resolve profile-versus-server zone selection or
+repeated daylight-saving hours.
+
 ### 4.5 Users
 
 Live (browser), 2026-10-19:
@@ -200,6 +209,10 @@ Inline-comment anchors appear as `ac:inline-comment-marker` in storage and in th
 Of 200 pages edited since 2025, 19 use `ac:layout` columns; of 105 with headings, 16 have headings
 inside layout cells and 9 inside macro bodies.
 
+Live REST, 2026-10-20: `view-file` requires an attachment resource in its `name` parameter:
+`<ri:attachment ri:filename="synthetic.txt" />`. Filename text instead returned HTTP 500 because
+Confluence attempted to cast a string to `AttachmentResourceIdentifier`; the resource form succeeded.
+
 ### 5.2 Paging
 
 Live (browser and PAT), 2026-10-19 and 2026-10-20:
@@ -216,6 +229,9 @@ Live (browser and PAT), 2026-10-19 and 2026-10-20:
   exist, with `start` equal to `start + size`; a short page without one was final in every case
   (2026-10-20). All 115 visible global spaces returned their root listing in one request at 500, and
   `/rest/api/space` returned all 115 at 500.
+
+Live REST, 2026-10-20: newly created pages and ancestors can report `position: -1` with extension
+position `"none"`. These denote unordered placement, not invalid counts or versions.
 
 ### 5.3 Labels
 
@@ -290,6 +306,10 @@ repeated create, update, label, parent change, trash and the move action.
     complete.", after about 0.3 s. ID, version, children, attachments, comments and labels were kept,
     and the move back worked the same way.
 
+Live REST, 2026-10-20: a separately authorized cross-space round trip preserved the page version;
+independent metadata confirmed both destinations, and child listing confirmed immediate cleanup of
+the temporary destination. No destination identifiers or private configuration were retained.
+
 ### 6.4 Trash and restore
 
 - `DELETE /rest/api/content/{id}` is 204; the page is then 404 unless read with `?status=trashed`. A
@@ -314,6 +334,9 @@ repeated create, update, label, parent change, trash and the move action.
   in the personal space and missing in a space where the user cannot delete. On a space it returns an
   empty list. `GET /rest/api/space/{key}?expand=permissions` lists permissions only in a space the user
   administers and is 500 elsewhere. `/rest/api/content/{id}/permission/check` is 404.
+
+Live REST, 2026-10-20: a successful restore response omitted space/version expansions. A fresh current
+read returned them, with version unchanged; placement must use fresh metadata after confirmed restore.
 
 ### 6.5 Rich-text input
 
@@ -345,74 +368,3 @@ Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a re
 | `/plugins/viewstorage/viewpagestorage.action?pageId=` | Storage as `text/plain`, the same as `body.storage` |
 | `/rest/prototype/1/search/user.json` | Prototype user search |
 | `/pages/reorderpages.action`, tree-copy and tree-delete actions | Source only |
-
-## 8. Personal-space keys
-
-Live REST discovery, 2026-10-20: the spaces listing returned the authenticated user's personal space
-with a `~` key containing dots and `@`. Personal keys derived from account usernames must preserve
-those characters; the configured acceptance target was confirmed against the authenticated username.
-
-### 8.1 Acceptance setup result
-
-Live, 2026-10-20: after accepting the personal-space key, setup reached `POST /rest/api/content`
-for a synthetic current root page containing the acceptance macro fixture. The instance returned
-HTTP 500 with a JSON content type. The connector reported `UncertainWrite`; the write was not
-automatically retried. Direct content-collection lookups by exact title and personal space found no
-current fixture pages after inspection. A subsequent manually inspected setup attempt also returned
-500; final direct reads again found zero current fixture pages. This does not establish that REST
-creation is generally unavailable; the fixture body or instance-side processing still needs diagnosis.
-
-Isolation on 2026-10-20 confirmed the cause: the `view-file` macro's `name` parameter must contain
-`<ri:attachment ri:filename="synthetic.txt" />`, not filename text. Passing text made creation return
-500 (`java.lang.String` cannot cast to `AttachmentResourceIdentifier`). The reference form succeeded
-even with a nonexistent synthetic filename, and that page was trashed afterwards. Plain text and the
-other isolated macro groups also created successfully. The acceptance fixture now uses the reference
-form. This is a fixture defect, not an authentication failure or a general creation restriction.
-
-### 8.2 Unordered page positions
-
-Live, 2026-10-20: newly created synthetic pages and their expanded ancestors reported `position: -1`,
-with extension position `"none"`. These mean no explicit position, not malformed page metadata.
-The adapter maps these position-only sentinels to null; counts and version numbers stay strict.
-This also blocked metadata reads during fixture setup after the macro fix.
-
-### 8.3 Restore response metadata
-
-Live, 2026-10-20: the successful restore response omitted expanded space and version fields. A fresh
-current-page read returned both, with version 1 unchanged after restoration. Applying placement from
-the sparse response therefore failed. The structure service now rereads current metadata after a
-confirmed restore before applying placement. The isolated diagnostic page was trashed afterwards.
-
-### 8.4 Acceptance completion
-
-Live, 2026-10-20: after the fixture and mapper corrections, full setup succeeded with four fixture pages,
-two attachments, two comments and a label. The opt-in runner with writes completed with 13 passes,
-zero failures and four prerequisite skips: timezone-derived filters, the two manual inline-comment
-checks and the unconfigured cross-space target. Same-space moves/order, drafts, labels, and all three
-delete policies plus restoration passed. The four reusable fixture pages remain; write-check scratch
-pages were returned to trash. This run does not establish the skipped capabilities.
-
-### 8.5 Calibration timestamp sources
-
-Live, 2026-10-20: the newest search hit's modification instant differed from the same page's REST
-`version.when` by one millisecond without an intervening edit. Comparing those two fields as strings
-made the calibration stability guard reject both attempts. Calibration now uses search only to select
-a page; REST metadata supplies the reference instant before and after the cutoff queries. The guard
-compares parsed UTC instants, preserving real-edit detection without depending on formatting or
-cross-field precision. No private configuration was changed during diagnosis.
-
-A read-only replay of the corrected calibration succeeded with effective offset zero on 2026-10-20.
-The private configuration remained unchanged; the normal operator-run CLI command owns persistence.
-
-### 8.6 Date and cross-space follow-up
-
-Live, 2026-10-20, using the saved CQL timezone: date-only created/modified scopes, an inclusive timestamp
-interval with an explicit non-UTC input offset, and a timestamp bound excluding the fixture all passed.
-This verifies the configured conversion on this instance; it does not resolve profile-versus-server
-zone selection or repeated daylight-saving hours.
-
-A synthetic page moved under a separately authorized parent in another space and returned immediately
-under the personal fixture root. Independent metadata reads confirmed both destinations and an unchanged
-page version. This round trip took 3.82 seconds. The scratch page was then trashed in the personal
-space; a direct child listing confirmed its absence from the temporary destination. The destination
-was supplied for this run only, with no real key, page ID or URL retained in the research record.

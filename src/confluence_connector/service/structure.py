@@ -32,7 +32,7 @@ from confluence_connector.domain.validation import (
     optional_space_key,
     page_reference,
     require_current_page,
-    space_key as validate_space_key,
+    placement_inputs,
 )
 from confluence_connector.remote.confluence import (
     CHILD_PAGE_SIZE,
@@ -79,12 +79,11 @@ class PageStructure:
         target placement.
         """
         reference = page_reference(page)
-        selected_position, parent_reference, selected_space, sibling_reference = _placement_inputs(
+        selected_position, parent_reference, selected_space, sibling_reference = placement_inputs(
             parent_id=parent_id,
             space_key=space_key,
             position=position,
             sibling=sibling,
-            required=True,
         )
         source = await self._resolve_page(reference)
         metadata = await self._api.get_page_metadata(
@@ -216,14 +215,9 @@ class PageStructure:
             limit=page_limit,
             expected_username=self._username,
         )
-        next_start = page.start + page.size
-        if page.has_more is not None:
-            server_has_more = page.has_more
-        elif page.total_size is not None:
-            server_has_more = next_start < page.total_size
-        else:
-            server_has_more = page.size == page_limit
-        more = page.size > 0 and server_has_more and next_start <= MAX_TRASH_OFFSET
+        next_start = page.next_start(page_limit)
+        server_has_more = next_start is not None
+        more = server_has_more and next_start <= MAX_TRASH_OFFSET
         return TrashListResult(
             pages=page.pages,
             start=page.start,
@@ -258,12 +252,11 @@ class PageStructure:
             value is not None for value in (parent_id, space_key, position, sibling)
         )
         if has_caller_placement:
-            selected_position, parent_reference, selected_space, sibling_reference = _placement_inputs(
+            selected_position, parent_reference, selected_space, sibling_reference = placement_inputs(
                 parent_id=parent_id,
                 space_key=space_key,
                 position=position,
                 sibling=sibling,
-                required=True,
             )
         else:
             selected_position, parent_reference, selected_space, sibling_reference = (
@@ -351,7 +344,7 @@ class PageStructure:
                     else:
                         placement_source = "saved_property"
 
-        placement_status: Literal["applied", "root", "partial", "unknown"] = "root"
+        placement_status: Literal["applied", "root", "unknown"] = "root"
         actual_parent_id: str | None = None
         actual_space_key: str | None = metadata.space_key
         if chosen is not None:
@@ -387,31 +380,7 @@ class PageStructure:
                 actual_parent_id = move_result.parent_id
                 if move_result.position_applied is False:
                     warnings.extend(move_result.warnings)
-                    if move_result.moved:
-                        try:
-                            await self._return_to_space_root(metadata.page_id)
-                        except (AuthenticationRequired, AccountMismatch, UncertainWrite) as exc:
-                            placement_status = "unknown"
-                            skip_property_cleanup = True
-                            actual_parent_id = None
-                            warnings.append(
-                                f"The requested placement failed and returning the page to the space root could not be confirmed ({type(exc).__name__}); inspect the page."
-                            )
-                        except ConnectorError as exc:
-                            placement_status = "partial"
-                            actual_space_key = move_result.space_key
-                            warnings.append(
-                                f"The requested placement failed and the page could not be returned to the space root ({type(exc).__name__}); it remains under parent {move_result.parent_id}."
-                            )
-                        else:
-                            placement_status = "root"
-                            actual_parent_id = None
-                            actual_space_key = metadata.space_key
-                            warnings.append(
-                                "The requested placement failed; the page was returned to the space root."
-                            )
-                    else:
-                        placement_status = "root"
+                    placement_status = "root"
                 elif move_result.position_applied is None:
                     placement_status = "unknown"
                     skip_property_cleanup = True
@@ -525,16 +494,6 @@ class PageStructure:
                     return "below", target.sibling_id
             return "topLevel", None
         return "append", target.parent_id
-
-    async def _return_to_space_root(self, page_id: str) -> None:
-        """Compensate a confirmed restore parent change after a definitive position refusal."""
-        current = await self._api.get_page_metadata(
-            page_id, expected_username=self._username
-        )
-        require_current_page(current, allow_missing_status=True)
-        if not current.ancestors:
-            return
-        await self._change_parent(current, None)
 
     async def _change_parent(self, metadata: PageMetadata, parent_id: str | None) -> None:
         """Reparent a current same-space page without creating a content version."""
@@ -729,23 +688,14 @@ class PageStructure:
                 page = await self._api.list_child_pages(
                     parent_id, start=start, expected_username=self._username
                 )
-            if page.start != start or page.size != len(page.hits):
-                raise Upstream("Confluence returned an inconsistent page-hierarchy offset or size.")
             rows.extend(page.hits)
             if len(rows) > MAX_HIERARCHY_READ_PAGES:
                 raise InvalidRequest(
                     f"A page's child list exceeds the {MAX_HIERARCHY_READ_PAGES}-page read safety cap."
                 )
-            next_start = page.start + page.size
-            more = page.has_more if page.has_more is not None else (
-                next_start < page.total_size if page.total_size is not None else page.size == CHILD_PAGE_SIZE
-            )
-            if more and page.size == 0:
-                raise Upstream("Confluence returned an empty hierarchy page with a continuation.")
-            if not more:
+            next_start = page.next_start(CHILD_PAGE_SIZE)
+            if next_start is None:
                 return rows
-            if next_start <= start:
-                raise Upstream("Confluence did not advance the page-hierarchy offset.")
             start = next_start
 
     async def _resolve_page(self, reference: str, *, status: str | None = None) -> ResolvedPageReference:
@@ -768,31 +718,6 @@ class _PageNode:
     parent_id: str | None
     position: int | None
     next_sibling_id: str | None
-
-
-def _placement_inputs(
-    *,
-    parent_id: Any,
-    space_key: Any,
-    position: Any,
-    sibling: Any,
-    required: bool,
-) -> tuple[str, str | None, str | None, str | None]:
-    if required and (parent_id is None) == (space_key is None):
-        raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
-    if not required and parent_id is None and space_key is None:
-        raise InvalidRequest("A page placement requires parent_id or space_key.")
-    parent_reference = page_reference(parent_id, field="parent_id") if parent_id is not None else None
-    selected_space = validate_space_key(space_key) if space_key is not None else None
-    selected_position = "last" if position is None else position
-    if not isinstance(selected_position, str) or selected_position not in {"first", "last", "before", "after"}:
-        raise InvalidRequest("position must be first, last, before or after.")
-    sibling_reference = page_reference(sibling, field="sibling") if sibling is not None else None
-    if selected_position in {"before", "after"} and sibling_reference is None:
-        raise InvalidRequest("position before or after requires a sibling page reference.")
-    if selected_position not in {"before", "after"} and sibling_reference is not None:
-        raise InvalidRequest("sibling is only valid with position before or after.")
-    return selected_position, parent_reference, selected_space, sibling_reference
 
 
 def _children_mode(value: Any) -> Literal["refuse", "move_up", "trash"]:

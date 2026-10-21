@@ -96,7 +96,7 @@ def render_page_body(
         for macro in macros:
             if macro.name == "html":
                 blocks.append(PageTextBlock("[Unrendered macro: html]", (_macro_reference(macro, page_id),)))
-    return RenderedPageBody(blocks=tuple(blocks), references=tuple(_unique(references)))
+    return RenderedPageBody(blocks=tuple(blocks), references=tuple(unique_references(references)))
 
 
 def parse_storage(
@@ -116,14 +116,15 @@ def parse_storage(
     return ParsedStorage(macros=macros, references=references, top_level_blocks=blocks)
 
 
-def storage_top_level_blocks(storage_html: str) -> list[str]:
-    """Split storage markup between top-level elements, returning verbatim source slices.
-
-    Joining the slices reproduces the source exactly, so ``rich`` continuation never rewrites stored
-    markup. Whitespace-only slices are kept with the element before them.
-    """
-    soup = BeautifulSoup(storage_html, "html.parser")
-    return _storage_top_level_blocks(storage_html, soup)
+def unique_references(references: list[PageReference]) -> list[PageReference]:
+    seen: set[str] = set()
+    result: list[PageReference] = []
+    for reference in references:
+        key = reference.model_dump_json()
+        if key not in seen:
+            seen.add(key)
+            result.append(reference)
+    return result
 
 
 def _storage_top_level_blocks(storage_html: str, soup: BeautifulSoup) -> list[str]:
@@ -402,7 +403,7 @@ def _page_id_from_url(url: str) -> str | None:
 
 
 class _ConfluenceMarkdown(MarkdownConverter):
-    """markdownify with the D3 table rule: repeated merged cells, minimal HTML for complex tables."""
+    """Use library tables, retaining minimal HTML when Markdown would lose table structure."""
 
     def convert_pre(self, el, text, parent_tags):
         rendered = super().convert_pre(el, text, parent_tags)
@@ -417,18 +418,10 @@ class _ConfluenceMarkdown(MarkdownConverter):
         return rendered
 
     def convert_table(self, el, text, parent_tags):
-        if any(cell.find(["table", "pre"]) for cell in el.find_all(["td", "th"])):
+        cells = el.find_all(["td", "th"])
+        if any(cell.find(["table", "pre"]) or cell.get("colspan") or cell.get("rowspan") for cell in cells):
             return "\n\n" + _minimal_table_html(el) + "\n\n"
-        grid = _table_grid(el)
-        if not grid:
-            return ""
-        width = max(len(row) for row in grid)
-        rows = [row + [""] * (width - len(row)) for row in grid]
-        lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
-        lines.extend("| " + " | ".join(row) + " |" for row in rows[1:])
-        if any(cell.get("colspan") or cell.get("rowspan") for cell in el.find_all(["td", "th"])):
-            lines.append("[Table: merged cells repeated]")
-        return "\n\n" + "\n".join(lines) + "\n\n"
+        return super().convert_table(el, text, parent_tags)
 
 
 def _to_markdown(soup: BeautifulSoup) -> str:
@@ -437,6 +430,7 @@ def _to_markdown(soup: BeautifulSoup) -> str:
 
 def _converter() -> _ConfluenceMarkdown:
     return _ConfluenceMarkdown(
+        table_infer_header=True,
         heading_style="ATX",
         bullets="-",
         escape_underscores=False,
@@ -446,58 +440,24 @@ def _converter() -> _ConfluenceMarkdown:
     )
 
 
-def _table_grid(table: Tag) -> list[list[str]]:
-    """Lay a table out as rows of cell text, repeating merged cells into every covered position."""
-    grid: list[list[str]] = []
-    carried: dict[int, tuple[str, int]] = {}
-    for row in (tr for tr in table.find_all("tr") if tr.find_parent("table") is table):
-        cells = iter(row.find_all(["td", "th"], recursive=False))
-        values: list[str] = []
-        column = 0
-        cell = next(cells, None)
-        while cell is not None or column in carried:
-            if column in carried:
-                value, remaining = carried.pop(column)
-                if remaining > 1:
-                    carried[column] = (value, remaining - 1)
-                values.append(value)
-                column += 1
-                continue
-            value = _cell_text(cell)
-            down = _span(cell.get("rowspan"))
-            for _ in range(_span(cell.get("colspan"))):
-                values.append(value)
-                if down > 1:
-                    carried[column] = (value, down - 1)
-                column += 1
-            cell = next(cells, None)
-        grid.append(values)
-    return grid
-
-
-def _cell_text(cell: Tag) -> str:
-    text = _converter().convert_soup(BeautifulSoup(cell.decode_contents(), "html.parser"))
-    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    return " <br> ".join(lines).replace("|", "\\|")
-
-
 def _minimal_table_html(table: Tag) -> str:
-    """Keep only table structure, spans and simple text formatting from a complex table."""
-    kept_tags = {"table", "tr", "th", "td", "pre", "code", "p", "br", "ul", "ol", "li", "strong", "em"}
+    """Keep table structure, code, formatting and passive link destinations without layout attributes."""
+    kept_tags = {"table", "tr", "th", "td", "pre", "code", "p", "br", "ul", "ol", "li", "strong", "em", "b", "i", "del", "blockquote", "a"}
     copy = BeautifulSoup(str(table), "html.parser")
     for tag in copy.find_all(True):
         if tag.name not in kept_tags:
             tag.unwrap()
-        else:
-            tag.attrs = {key: value for key, value in tag.attrs.items() if key in {"colspan", "rowspan"}}
+            continue
+        allowed = {"colspan", "rowspan"} if tag.name in {"th", "td"} else set()
+        if tag.name == "a":
+            href = re.sub(r"[\x00-\x20\x7f]+", "", str(tag.get("href", "")))
+            try:
+                if urlsplit(href).scheme.casefold() in {"", "http", "https", "mailto"}:
+                    allowed.add("href")
+            except ValueError:
+                pass  # Malformed destinations retain their visible label only.
+        tag.attrs = {key: value for key, value in tag.attrs.items() if key in allowed}
     return str(copy)
-
-
-def _span(value: str | None) -> int:
-    try:
-        return max(1, min(int(value or 1), 1000))
-    except ValueError:
-        return 1
 
 
 # Block splitting for budgets: blank lines outside fenced code separate blocks.
@@ -507,16 +467,20 @@ def _split_blocks(markdown: str) -> list[str]:
     blocks: list[str] = []
     current: list[str] = []
     fence: str | None = None
+    table_depth = 0
     for line in markdown.splitlines():
         line = line.rstrip()
-        match = _FENCE.match(line)
+        if fence is None:
+            for tag in re.finditer(r"</?table\b[^>]*>", line, re.IGNORECASE):
+                table_depth += -1 if tag.group().startswith("</") else 1
+        match = _FENCE.match(line) if table_depth == 0 else None
         if match:
             delimiter, suffix = match.groups()
             if fence is None:
                 fence = delimiter
             elif delimiter[0] == fence[0] and len(delimiter) >= len(fence) and not suffix.strip():
                 fence = None
-        if not line and fence is None:
+        if not line and fence is None and table_depth == 0:
             if current:
                 blocks.append("\n".join(current))
                 current = []
@@ -606,14 +570,3 @@ def _macro_reference(macro: _Macro, page_id: str) -> PageReference | None:
 
 def _text(node: Tag | None) -> str:
     return " ".join(node.get_text(" ").split()) if node is not None else ""
-
-
-def _unique(references: list[PageReference]) -> list[PageReference]:
-    seen: set[str] = set()
-    result: list[PageReference] = []
-    for reference in references:
-        key = reference.model_dump_json()
-        if key not in seen:
-            seen.add(key)
-            result.append(reference)
-    return result

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import unittest
 from collections.abc import AsyncIterator, Callable
 from io import BytesIO
@@ -54,6 +55,34 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         transport = ConfluenceTransport(settings(), credentials or FakeCredentialSource(), client=client, sleep=sleep or AsyncMock())
         self.addAsyncCleanup(client.aclose)
         return client, transport
+
+    async def test_compressed_json_is_decoded_once_for_reads_and_writes(self) -> None:
+        attempts = []
+        def handler(request):
+            attempts.append(request)
+            return httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=gzip.compress(b'{"ok":true}'))
+        _, transport = self.make_client(handler)
+        self.assertEqual(await transport.get_json("rest/api/content"), {"ok": True})
+        self.assertEqual(await transport.send_json("POST", "rest/api/content", expected_username="sample-user"), {"ok": True})
+        self.assertEqual(len(attempts), 2)
+        with patch("confluence_connector.remote.transport.MAX_JSON_BYTES", 4):
+            with self.assertRaisesRegex(Upstream, "larger than"):
+                await transport.get_json("rest/api/content")
+
+    async def test_multipart_upload_reuses_safe_retries_and_retains_file_bytes(self) -> None:
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(503, headers={"Retry-After": "0"}) if len(requests) == 1 else httpx.Response(200, json={})
+        _, transport = self.make_client(handler)
+        await transport.send_json("POST", "rest/api/content/42/child/attachment",
+            files={"file": ("guide.txt", b"synthetic file", "text/plain")},
+            skip_atlassian_token_check=True, expected_username="sample-user")
+        self.assertEqual(len(requests), 2)
+        for request in requests:
+            self.assertIn(b"synthetic file", request.content)
+            self.assertIn("multipart/form-data", request.headers["Content-Type"])
+            self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
 
     async def test_attachment_download_streams_binary_and_keeps_source_query(self) -> None:
         observed: list[httpx.Request] = []
@@ -455,7 +484,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(
             lambda _: httpx.Response(200, json={"results": [{"key": "SPACE", "name": "Synthetic"}], "size": 2})
         )
-        with self.assertRaisesRegex(Upstream, "inconsistent spaces page size"):
+        with self.assertRaisesRegex(Upstream, "inconsistent collection page offset or size"):
             await ConfluenceApi(settings(), transport).list_spaces(expected_username="sample-user")
 
     async def test_display_url_resolves_page_id_by_space_and_title(self) -> None:
@@ -473,14 +502,14 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
             expected_username="sample-user",
         )
         self.assertEqual((result.page_id, result.version), ("789", 4))
-        self.assertIn("space = 'ENG'", calls[0].url.params["cql"])
-        self.assertIn("title = 'Synthetic Page'", calls[0].url.params["cql"])
+        self.assertEqual(calls[0].url.params["spaceKey"], "ENG")
+        self.assertEqual(calls[0].url.params["title"], "Synthetic Page")
 
     async def test_display_url_uses_exact_escaped_title(self) -> None:
         observed: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            observed.append(request.url.params["cql"])
+            observed.append(request.url.params["title"])
             return httpx.Response(200, json={"results": [{"id": "789"}]})
 
         _, transport = self.make_client(handler)
@@ -490,7 +519,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
             "https://confluence.example.test/wiki/display/ENG/Guide%20O%27Brien",
             expected_username="sample-user",
         )
-        self.assertIn("title = 'Guide O\\'Brien'", observed[0])
+        self.assertEqual(observed[0], "Guide O'Brien")
 
     async def test_display_url_after_rename_fails_clearly(self) -> None:
         _, transport = self.make_client(lambda _: httpx.Response(200, json={"results": []}))

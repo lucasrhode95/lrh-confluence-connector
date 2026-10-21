@@ -55,12 +55,12 @@ Diagram: [Image: flow.png — release flow]
 
 [File: checklist.pptx]
 
-| Region | Item | Qty |
-| --- | --- | --- |
-| North | a \| b | 1 |
-| North | first <br> second | 2 |
-| Total | Total | 3 |
-[Table: merged cells repeated]
+<table>
+<tr><th>Region</th><th>Item</th><th>Qty</th></tr>
+<tr><td rowspan="2">North</td><td>a | b</td><td>1</td></tr>
+<tr><td><p>first</p><p>second</p></td><td>2</td></tr>
+<tr><td colspan="2">Total</td><td>3</td></tr>
+</table>
 
 <table>
 <tr><th>Step</th><th>Command</th></tr>

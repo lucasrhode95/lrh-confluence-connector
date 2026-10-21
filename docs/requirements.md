@@ -1,9 +1,9 @@
 # Confluence Connector — Requirements
 
-**Evidence:** [Confluence API research](api-research.md) · **Contract per tool:** [architecture §8](architecture.md#8-mcp-tools) · **Open work:** [roadmap](roadmap.md)
+**Evidence:** [Confluence API research](api-research.md) · **Tool schemas:** [MCP declarations](../src/confluence_connector/surfaces/mcp_main.py) · **Open work:** [roadmap](roadmap.md)
 
 This document records what the connector must do and the decisions behind it, D1–D10, decided
-2026-10-19 unless dated otherwise. How each tool behaves in detail is in architecture §8; open decisions
+2026-10-19 unless dated otherwise. Tool input/output schemas are published by MCP; open decisions
 are in the roadmap. Do not resolve an open decision by assumption.
 
 ---
@@ -71,12 +71,13 @@ storage technique is shared (§5).
 - A user-generated personal access token (PAT); no administrator registration or assistance. Native
   OAuth needs an administrator-registered client and is not used (research §2.2).
 - `confluence-connector auth` prompts for the token without echoing it, verifies it with the configured
-  current-user endpoint, and only then stores it with the returned username. Tokens never pass
-  through MCP tools.
+  current-user endpoint, and only then stores it with the returned username and canonical instance URL
+  (including context path). Tokens never pass through MCP tools.
 - Storage is `msal-extensions` encrypted persistence under its cross-process lock, as in
   `lrh-m365-auth`, with no plaintext fallback: if encryption is unavailable, the connector refuses to
   run. The token is read for every request, not kept in process memory.
-- A different username is refused until `auth --sign-out`, so switching accounts is explicit.
+- A different username or instance is refused until `auth --sign-out`, so switching is explicit.
+  Unbound or malformed encrypted records fail closed; they are not migrated automatically.
   `--sign-out` warns that the token cannot be recovered, then deletes it locally; it does not revoke it
   in Confluence.
 - `status` reports the stored account offline; `status --check` verifies it. `mcp` runs the stdio
@@ -129,7 +130,7 @@ storage technique is shared (§5).
 
 ## 8. Reading and parsing (D3, D4)
 
-### 8.1 Text form (D3, revised 2026-10-20)
+### 8.1 Text form (D3, revised 2026-10-21)
 
 - Confluence has no plain-text output (research §5.1), so the connector converts the `view` body,
   where includes, excerpts and expand sections are already resolved. Jira keys, PlantUML source, macro
@@ -145,8 +146,9 @@ storage technique is shared (§5).
   else without text. Code blocks are fenced with their language. Scripts, styles and tables of contents
   are dropped. The HTML macro has no wrapper in `view`, so only its scripts are dropped and an
   `[Unrendered macro: html]` marker follows the body.
-- Tables are pipe tables; merged cells repeat their value, with a `[Table: merged cells repeated]`
-  note. Tables with nested tables or code fall back to minimal HTML.
+- Ordinary tables use the library's pipe tables. Merged cells, nested tables and tables containing
+  code blocks retain minimal ordinary HTML, including spans, link destinations and code whitespace.
+  Agents see this markup directly in the text response; it is not Confluence storage markup.
 - Accepted limitations: exotic nesting (lists or panels in table cells) follows the library, and list
   numbering, spacing and indentation may differ from Confluence's display.
 - Layout: a short header (title, link, version and total versions, last modified, extracted at), the

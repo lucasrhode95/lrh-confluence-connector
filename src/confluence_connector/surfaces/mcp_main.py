@@ -6,7 +6,7 @@ import functools
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -15,6 +15,11 @@ from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
+    PageReadResult,
+    PageMetadataResult,
+    PageTreeResult,
+    UserSearchResult,
+    ContentSearchResult,
     AttachmentDownloadResult,
     DraftDeletionResult,
     DraftListResult,
@@ -39,80 +44,23 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotent
 OFFLINE_READ = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
-# These tools write local outputs, may delete expired outputs during cleanup, and read Confluence.
-LOCAL_FILE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
 WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
-REPLACE_PAGE = ToolAnnotations(
+# Replacement/deletion and local output cleanup can remove existing data.
+DESTRUCTIVE_WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-PERMANENT_DELETE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-LABEL_WRITE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-PUBLISH_DRAFT = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-MOVE_PAGE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-TRASH_PAGE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True
-)
-RESTORE_PAGE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
 )
 
 INSTRUCTIONS = """\
-Confluence Data Center access for the signed-in local account. Confluence owns its pages, spaces,
-drafts, comments and attachment references; links to other products remain links.
-
-- auth_status reports the configured instance and the account name stored with the encrypted local token.
-  It is offline; status is not proof that Confluence will accept the token.
-- list_spaces returns current and archived spaces visible to the stored account. The result is paged
-  internally using the server's actual page size.
-- search_content searches page and content fields, or titles only. It accepts literal query text,
-  structured scope filters, match=all/any/phrase, and a continuation cursor. Archived spaces are
-  included by default. An unscoped title search may add first-page quick-navigation results, labelled
-  by source; the supplement is skipped when filters cannot be applied to that source. Date-only
-  filters mean a calendar day in Confluence's timezone. ISO-8601 timestamps with offsets are accepted;
-  timestamps without offsets are treated as UTC. Timestamp filters require calibrated cql_timezone;
-  run `confluence-connector status --check` if it is unset.
-- find_users searches current people by display name. Pass username alone for an exact lookup, including
-  former users; a cursor continues a display-name search.
-- get_page_tree returns ordered child pages from a page or space root, with ancestors for page roots.
-  Its maximum depth is bounded; a result reports if the safety cap made it incomplete.
-- get_page_metadata accepts one or more page IDs or same-instance URLs and returns page history,
-  retained versions, labels, contributors and ancestors. Per-reference failures are returned alongside
-  successful pages.
-- get_pages reads up to 20 pages as Markdown-like text or unchanged storage markup. Text reads include
-  typed attachment references and, by default, attachment and threaded comment sections; they never
-  download attachment content. Use the returned cursor alone to continue an oversized page at its
-  original version. Page-read timestamps remain the UTC values returned by REST.
-- download_attachments saves selected attachment IDs from one page into the local downloads folder.
-  Attachment IDs come from get_pages references or the page's attachment list; the tool verifies each
-  ID belongs to the selected page and returns a path or per-attachment failure.
-- export_pages writes full text or rich exports for up to 500 pages into the local exports folder.
-  Attachment bytes are excluded by default; large exports may take minutes and incomplete items are
-  listed in the ZIP report.
-- create_page makes a published page or new-page draft. update_page replaces the entire published
-  page body and requires expected_version; it refuses to detach inline comments unless explicitly
-  confirmed. publish_draft publishes a new-page draft without changing its ID. delete_draft is
-  permanent and bypasses the trash. set_labels adds or removes global page labels. move_page changes
-  one page's parent or position. delete_page moves a page to the trash; children default to refusal,
-  and can instead move up or be trashed as a bounded subtree. list_trash pages through visible
-  trashed pages. restore_page restores a trashed page and best-effort returns it to its saved or
-  caller-selected placement. If Confluence refuses a cross-space move, recreating the page in the
-  target space and trashing the original is a separate recovery plan; it loses the page ID, history
-  and comments. These tools write to Confluence and require the user's explicit request.
-- Authenticate or remove the local token with `confluence-connector auth` or
-  `confluence-connector auth --sign-out`. A token is never accepted through an MCP tool.
-- Use only the configured Confluence instance. Page URLs on another host are refused by page tools.
+Confluence Data Center access for one signed-in local account and the configured instance only.
+Read tools return typed source references; links to other products remain links. Attachment bytes
+are fetched only by explicit download/export options. Incomplete coverage is reported in results.
+Continue with the returned cursor alone; it contains the original request and pinned page version.
+Write tools require the user's explicit request. Never retry an uncertain write before inspecting
+its target. Recreating a page after a refused move is a separate recovery plan: it loses its ID,
+history and comments. Authenticate through `confluence-connector auth`, never through an MCP tool;
+`auth_status` is offline and does not establish token validity.
 """
 
 
@@ -122,18 +70,18 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=OFFLINE_READ)
     @_logged
-    async def auth_status() -> dict[str, Any]:
+    async def auth_status() -> AuthStatus:
         """Report the local token and account status without contacting Confluence."""
         status: AuthStatus = await context.auth_status()
-        return status.model_dump(mode="json")
+        return status
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
-    async def list_spaces() -> dict[str, Any]:
+    async def list_spaces() -> SpaceList:
         """List spaces visible to the stored account; pages internally in batches of up to 500."""
         services = await context.services()
         spaces: SpaceList = await services.spaces.list_spaces()
-        return spaces.model_dump(mode="json")
+        return spaces
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -164,7 +112,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Continuation cursor from an earlier result. Pass it alone."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> ContentSearchResult:
         """Search Confluence using literal text and structured scope filters.
 
         For continuation, pass only the returned cursor. `match` is all, any or phrase; `fields`
@@ -185,7 +133,7 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -206,7 +154,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Continuation cursor for a display-name search. Pass it alone."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> UserSearchResult:
         """Find current users by display-name query, or look up one exact username.
 
         Former users are available only by exact username. Pass only cursor to continue a name search.
@@ -218,7 +166,7 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -235,7 +183,7 @@ def build_server(context: AppContext) -> FastMCP:
             int | None,
             Field(ge=1, le=5, description="Maximum tree depth, 1 through 5 (default 3)."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageTreeResult:
         """Return ordered child pages from exactly one page reference or space root.
 
         Page references may be numeric IDs or supported same-instance Confluence URLs. Depth is
@@ -247,7 +195,7 @@ def build_server(context: AppContext) -> FastMCP:
             space_key=space_key,
             max_depth=max_depth,
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -256,11 +204,11 @@ def build_server(context: AppContext) -> FastMCP:
             list[str] | str,
             Field(description="One to 20 numeric page IDs or supported same-instance page URLs."),
         ]
-    ) -> dict[str, Any]:
+    ) -> PageMetadataResult:
         """Return history, versions, labels, contributors and ancestors for up to 20 page references."""
         services = await context.services()
         result = await services.metadata.get_page_metadata(pages)
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -287,7 +235,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Version-pinned continuation cursor. Pass it alone."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageReadResult:
         """Read up to 20 page IDs or same-instance URLs as text or rich storage.
 
         Text is the default. Rich returns storage body markup unchanged. The default parse_scope
@@ -305,9 +253,9 @@ def build_server(context: AppContext) -> FastMCP:
             parse_scope=parse_scope,
             cursor=cursor,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=LOCAL_FILE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def download_attachments(
         page: Annotated[str, Field(description="Page ID or supported same-instance page URL.")],
@@ -319,7 +267,7 @@ def build_server(context: AppContext) -> FastMCP:
                 description="One to 500 attachment IDs belonging to the page.",
             ),
         ],
-    ) -> dict[str, Any]:
+    ) -> AttachmentDownloadResult:
         """Save selected attachment IDs from one page into the local downloads folder.
 
         Pass page as a numeric ID or same-instance URL, and attachment_ids from a typed reference or
@@ -330,9 +278,9 @@ def build_server(context: AppContext) -> FastMCP:
         result: AttachmentDownloadResult = await services.attachments.download_attachments(
             page, attachment_ids
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=LOCAL_FILE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def export_pages(
         pages: Annotated[
@@ -351,7 +299,7 @@ def build_server(context: AppContext) -> FastMCP:
             bool,
             Field(description="Download attachment bytes into the export (default false)."),
         ] = False,
-    ) -> dict[str, Any]:
+    ) -> PageExportResult:
         """Export up to 500 pages in full as a local file or ZIP archive.
 
         Text is the default; rich includes unchanged storage markup and selected comments at the end.
@@ -366,7 +314,7 @@ def build_server(context: AppContext) -> FastMCP:
             parse_scope=parse_scope,
             include_attachments=include_attachments,
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=WRITE)
     @_logged
@@ -400,7 +348,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageWriteResult:
         """Create a page or new-page draft in exactly one parent or space root.
 
         Rich is the default format: provide HTML and Confluence storage tags, not Markdown or wiki
@@ -422,9 +370,9 @@ def build_server(context: AppContext) -> FastMCP:
             position=position,
             sibling=sibling,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=REPLACE_PAGE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def update_page(
         page: Annotated[str, Field(description="Published page ID or supported same-instance page URL.")],
@@ -445,7 +393,7 @@ def build_server(context: AppContext) -> FastMCP:
             bool,
             Field(description="Confirm if replacement would detach inline-comment anchors."),
         ] = False,
-    ) -> dict[str, Any]:
+    ) -> PageWriteResult:
         """Replace a published page's complete body, with an optional title change.
 
         expected_version is required; a stale version is never overwritten. Rich is the default:
@@ -466,7 +414,7 @@ def build_server(context: AppContext) -> FastMCP:
             title=title,
             allow_comment_loss=allow_comment_loss,
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -479,7 +427,7 @@ def build_server(context: AppContext) -> FastMCP:
         cursor: Annotated[
             str | None, Field(description="Draft-list continuation cursor; pass it alone.")
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> DraftListResult:
         """List the signed-in user's new-page drafts; pass only cursor to continue."""
         services = await context.services()
         result: DraftListResult = await services.writes.list_drafts(
@@ -487,29 +435,29 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=PUBLISH_DRAFT)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def publish_draft(
         draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
-    ) -> dict[str, Any]:
+    ) -> PageWriteResult:
         """Publish a new-page draft without changing its page ID."""
         services = await context.services()
         result: PageWriteResult = await services.writes.publish_draft(draft)
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=PERMANENT_DELETE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def delete_draft(
         draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
-    ) -> dict[str, Any]:
+    ) -> DraftDeletionResult:
         """Permanently delete a new-page draft. This bypasses the trash and cannot be restored."""
         services = await context.services()
         result: DraftDeletionResult = await services.writes.delete_draft(draft)
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=LABEL_WRITE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def set_labels(
         page: Annotated[str, Field(description="Published page ID or supported same-instance page URL.")],
@@ -521,7 +469,7 @@ def build_server(context: AppContext) -> FastMCP:
             list[str] | None,
             Field(description="Global labels to remove; removals are destructive."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> LabelChangeResult:
         """Add or remove global labels on one published page; removals are destructive.
 
         Changes run sequentially and stop at the first failure. Prior successful operations remain
@@ -534,9 +482,9 @@ def build_server(context: AppContext) -> FastMCP:
             add=add,
             remove=remove,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=MOVE_PAGE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def move_page(
         page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
@@ -556,12 +504,12 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageMoveResult:
         """Move one current page under a parent or to a space root.
 
         Pass exactly one of parent_id or space_key. Position defaults to last; before/after require
-        a sibling in the selected parent. A failed follow-up position leaves a confirmed parent move
-        in place and is reported in the result. Cross-space moves are waited on through Confluence's
+        a sibling in the selected parent. Same-space moves use one action without creating a version;
+        a definite refusal preserves placement. Cross-space moves are waited on through Confluence's
         long-task status route. If Confluence refuses one, recreating the page in the target space
         and trashing the original is a separate recovery plan; it loses the page ID, history and
         comments.
@@ -574,9 +522,9 @@ def build_server(context: AppContext) -> FastMCP:
             position=position,
             sibling=sibling,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=TRASH_PAGE)
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def delete_page(
         page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
@@ -584,7 +532,7 @@ def build_server(context: AppContext) -> FastMCP:
             Literal["refuse", "move_up", "trash"] | None,
             Field(description="Direct-child handling: refuse (default), move_up, or trash subtree."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageDeleteResult:
         """Move a page to the trash after checking delete permission on every affected page.
 
         children defaults to refuse. move_up reparents direct children in order before trashing the
@@ -596,7 +544,7 @@ def build_server(context: AppContext) -> FastMCP:
             page,
             children=children if children is not None else "refuse",
         )
-        return result.model_dump(mode="json")
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged
@@ -609,7 +557,7 @@ def build_server(context: AppContext) -> FastMCP:
         cursor: Annotated[
             str | None, Field(description="Trash-list continuation cursor; pass it alone.")
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> TrashListResult:
         """List trashed pages in one space or across spaces visible to the signed-in account.
 
         Results are bounded to 100 pages. Pass only the returned cursor to continue; the result has
@@ -621,9 +569,9 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
         )
-        return result.model_dump(mode="json")
+        return result
 
-    @mcp.tool(annotations=RESTORE_PAGE)
+    @mcp.tool(annotations=WRITE)
     @_logged
     async def restore_page(
         page: Annotated[str, Field(description="Trashed page ID or supported same-instance page URL.")],
@@ -643,7 +591,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageRestoreResult:
         """Restore a trashed page, then use caller placement, saved placement or the space root.
 
         Pass exactly one of parent_id or space_key to choose placement explicitly. Without placement,
@@ -658,7 +606,7 @@ def build_server(context: AppContext) -> FastMCP:
             position=position,
             sibling=sibling,
         )
-        return result.model_dump(mode="json")
+        return result
 
     return mcp
 

@@ -62,6 +62,12 @@ Steps 2, 5 and 6 need the user's authorization for that run. Missing settings or
 the dependent checks `skipped`. After an interrupted run, inspect the fixture before retrying. The runner
 reports check names, statuses, timings and exception types, never response text or page content.
 
+
+Disposable write checks clean confirmed creations even when an assertion fails: drafts are deleted,
+current pages are trashed, and pages in a foreign space are returned first. `ScratchCleanupRequired`
+means cleanup failed or stopped after an uncertain write/account change; inspect that fixture run
+before retrying. The same-space move check verifies the version as well as parent and sibling order.
+
 ## Offline checks
 
 ```bash
@@ -97,7 +103,7 @@ coverage:
 ## Investigating the web UI
 
 Probes test routes we already know how to call. To find a new route or request shape, watch what
-Confluence's own UI does during one controlled action, following the [UI runbook](ui-runbook.md):
+Confluence's own UI does during one explicitly authorized, controlled action:
 
 1. Sign in in a browser and perform **one** action with a unique marker, such as a search for
    `MARKER-1234`, or moving a named `Connector Lab` page.

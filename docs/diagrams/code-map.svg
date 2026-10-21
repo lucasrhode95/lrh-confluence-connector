@@ -126,7 +126,7 @@
 
   <rect x="1340" y="912" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="group-title" x="1356" y="944">Shared helpers</text>
-  <g><title>Self-contained, versioned cursors; nothing is kept in process memory between calls.</title><text class="detail" x="1356" y="980">• <tspan class="code">cursors.py</tspan>: encode, decode</text></g>
+  <g><title>Self-contained, versioned cursors; continuation needs no retained session state.</title><text class="detail" x="1356" y="980">• <tspan class="code">cursors.py</tspan>: encode, decode</text></g>
   <g><title>Account-specific output folders, seven-day cleanup and exclusive file claims.</title><text class="detail" x="1356" y="1010">• <tspan class="code">localfiles.py</tspan>: kept_dir, claim</text></g>
   <g><title>Measures the effective CQL offset with bounded read-only searches; run by the CLI only.</title><text class="detail" x="1356" y="1040">• <tspan class="code">timezone_calibration.py</tspan></text></g>
 
@@ -139,7 +139,7 @@
 
   <rect x="920" y="1088" width="800" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="936" y="1120"><tspan class="code">PageStructure</tspan><tspan class="detail" dx="10">structure.py</tspan></text>
-  <g><title>Same-space parent change through the content update, then position through the move action; cross-space moves wait on the long task. → ConfluenceApi.update_page_parent, position_page, move_page_action</title><text class="detail" x="936" y="1154">• <tspan class="code">move_page</tspan>: parent, position, cross-space long task</text></g>
+  <g><title>One same-space move action preserves the content version; cross-space moves wait for terminal long-task completion. → ConfluenceApi.move_page_action</title><text class="detail" x="936" y="1154">• <tspan class="code">move_page</tspan>: parent, position, cross-space long task</text></g>
   <g><title>Checks delete permission on every affected page, saves placement in a content property, then trashes. → ConfluenceApi.page_supports_delete, set_page_property, trash_page</title><text class="detail" x="936" y="1182">• <tspan class="code">delete_page</tspan>: refuse · move_up · trash (≤ 100 pages)</text></g>
   <g><title>Trash listing in batches of 100; restore through the documented status update. → ConfluenceApi.list_trash_page, restore_trashed_page, get_page_property</title><text class="detail" x="936" y="1210">• <tspan class="code">list_trash</tspan> · <tspan class="code">restore_page</tspan>: caller → saved → root</text></g>
   <g><title>Every write stops at its first failure; results separate done, unknown and unattempted steps.</title><text class="detail" x="936" y="1238">• exact partial results, nothing undone</text></g>
@@ -157,7 +157,7 @@
   <g><title>Page bodies (view, storage), children, versions, attachments and comments, mapped to domain models.</title><text class="detail" x="96" y="1480">• reads: <tspan class="code">get_page_content</tspan> · <tspan class="code">list_child_pages</tspan> · <tspan class="code">list_page_versions</tspan></text></g>
   <g><title>CQL content search, the private quick-navigation title route, and user search.</title><text class="detail" x="96" y="1506">• search: <tspan class="code">search_content_page</tspan> · <tspan class="code">quicknav_title_matches</tspan></text></g>
   <g><title>Documented content create, update, draft publish and delete.</title><text class="detail" x="96" y="1532">• writes: <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan> · <tspan class="code">publish_draft</tspan></text></g>
-  <g><title>Documented ancestors update for parent changes; the private movepage.action for positions and cross-space moves, with long-task polling (40 polls, 10 s at most).</title><text class="detail" x="96" y="1558">• moves: <tspan class="code">update_page_parent</tspan> · <tspan class="code">move_page_action</tspan></text></g>
+  <g><title>Private movepage.action for parent and position changes; cross-space moves use terminal long-task polling (40 polls, 10 s at most).</title><text class="detail" x="96" y="1558">• moves: <tspan class="code">move_page_action</tspan></text></g>
   <g><title>Trash, restore, content properties for saved placement, and expand=operations permission checks.</title><text class="detail" x="96" y="1584">• trash: <tspan class="code">trash_page</tspan> · <tspan class="code">restore_trashed_page</tspan> · properties</text></g>
   <text class="muted" x="96" y="1614">labels, attachments, comments and permissions too</text>
 

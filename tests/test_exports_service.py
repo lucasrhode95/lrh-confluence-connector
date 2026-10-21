@@ -37,7 +37,7 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
         ):
             result = await service.export_pages("55", parse_scope={"header": False})
             self.assertTrue(result.filename.endswith("Sample (55) v2.txt"))
-            self.assertTrue(result.filename.startswith("2026"))
+            self.assertRegex(result.filename, r"^\d{8}T\d{6}Z - ")
             self.assertLessEqual(len(result.filename), 160)
             self.assertEqual(Path(result.path).read_bytes(), body.encode("utf-8"))
             if os.name == "posix":

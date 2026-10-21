@@ -254,6 +254,8 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
             },
         )
         tools_by_name = {tool.name: tool for tool in tools}
+        self.assertIn("pages", tools_by_name["get_pages"].outputSchema["properties"])
+        self.assertIn("warnings", tools_by_name["update_page"].outputSchema["properties"])
         for name in ("download_attachments", "export_pages"):
             annotations = tools_by_name[name].annotations
             self.assertIsNotNone(annotations)

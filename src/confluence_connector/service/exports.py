@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import html
 import os
-import re
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -233,14 +232,6 @@ class PageExports:
                 attachment_override = await self._api.list_page_attachments(
                     page_id, expected_username=self._username
                 )
-                if len(attachment_override) == 500:
-                    outcome.report_items.append(
-                        _ReportItem(
-                            "attachment list",
-                            _page_label(page_id, None),
-                            "The attachment list reached its 500-item request limit and may be incomplete.",
-                        )
-                    )
             except ConnectorError as exc:
                 raise_account_error(exc)
                 attachment_override = []
@@ -379,7 +370,7 @@ class PageExports:
                     if outcome.metadata is None or outcome.staged_file is None:
                         continue
                     page_name = _unique_archive_name(
-                        _page_filename(outcome.metadata, page_format), used_names
+                        outcome.metadata, page_format, used_names
                     )
                     archive.write(outcome.staged_file, arcname=page_name)
                     if outcome.attachment_directory is None:
@@ -457,10 +448,12 @@ def _page_filename(
     page_format: PageTextFormat,
     *,
     maximum_length: int = MAX_EXPORT_MEMBER_LENGTH,
+    copy_number: int = 1,
     maximum_component_units: int = MAX_FILENAME_COMPONENT_UNITS,
 ) -> str:
     extension = ".txt" if page_format == "text" else ".html"
-    suffix = f" ({metadata.page_id}) v{metadata.version}{extension}"
+    duplicate = f" ({copy_number})" if copy_number > 1 else ""
+    suffix = f"{duplicate} ({metadata.page_id}) v{metadata.version}{extension}"
     if len(suffix) >= maximum_length or filename_component_units(suffix) >= maximum_component_units:
         raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
     title = sanitize_filename_component(metadata.title) or "Untitled page"
@@ -477,37 +470,12 @@ def _page_filename(
     return filename
 
 
-def _unique_archive_name(filename: str, used_names: set[str]) -> str:
-    if filename.casefold() not in used_names:
-        used_names.add(filename.casefold())
-        return filename
-    path = Path(filename)
-    match = re.search(r" \(\d+\) v\d+$", path.stem)
-    if match:
-        title = path.stem[: match.start()]
-        identity = path.stem[match.start() :]
-    else:
-        title = path.stem
-        identity = ""
-    counter = 2
+def _unique_archive_name(metadata: _PageMetadata, page_format: PageTextFormat, used_names: set[str]) -> str:
+    """Reserve an archive name from source metadata, with shared filename bounds for collisions."""
+    counter = 1
     while True:
-        duplicate_suffix = f" ({counter})"
-        tail = f"{duplicate_suffix}{identity}{path.suffix}"
-        title_limit = MAX_EXPORT_MEMBER_LENGTH - len(tail)
-        candidate_title = title[: max(0, title_limit)].rstrip(" .")
-        while candidate_title and (
-            len(candidate_title + tail) > MAX_EXPORT_MEMBER_LENGTH
-            or filename_component_units(candidate_title + tail) > MAX_FILENAME_COMPONENT_UNITS
-        ):
-            candidate_title = candidate_title[:-1].rstrip(" .")
-        candidate_title = candidate_title or "Page"
-        candidate = f"{candidate_title}{tail}"
+        candidate = _page_filename(metadata, page_format, copy_number=counter)
         if candidate.casefold() not in used_names:
-            if (
-                len(candidate) > MAX_EXPORT_MEMBER_LENGTH
-                or filename_component_units(candidate) > MAX_FILENAME_COMPONENT_UNITS
-            ):
-                raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
             used_names.add(candidate.casefold())
             return candidate
         counter += 1

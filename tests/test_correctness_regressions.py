@@ -31,8 +31,8 @@ from confluence_connector.service.timezone_calibration import calibrate_cql_time
 from confluence_connector.service.writes import PageWrites
 from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
-from test_structure_service import _StructureApi, _Links, _page
-from test_timezone_calibration import _REFERENCE_UTC, _page_row
+from fakes.structure import _StructureApi, _Links, _page
+from fakes.calibration import _REFERENCE_UTC, _page_row
 
 
 class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
@@ -307,14 +307,15 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         services = SimpleNamespace(
             username="sample-user",
             writes=SimpleNamespace(create_page=AsyncMock(return_value=SimpleNamespace(page_id="42"))),
-            structure=SimpleNamespace(move_page=AsyncMock(return_value=SimpleNamespace(moved=True, parent_id="20", position_applied=False))),
+            structure=SimpleNamespace(move_page=AsyncMock(return_value=SimpleNamespace(moved=True, parent_id="20", position_applied=False)), delete_page=AsyncMock(return_value=SimpleNamespace(complete=True, pages=[]))),
+            api=SimpleNamespace(get_page_metadata=AsyncMock(return_value=_page("42", "Scratch"))),
         )
         pages = SimpleNamespace(root="10", child_one="20", personal_space="SYNTH")
         with self.assertRaisesRegex(AssertionError, "did not complete"):
             await run_acceptance._check_move_and_order(services, new_fixture("deadbeef"), pages)
         services.api = SimpleNamespace(
             get_page_metadata=AsyncMock(return_value=_page("42", "Moved", parent_id="20")),
-            list_child_pages=AsyncMock(return_value=SimpleNamespace(start=0, size=2, has_more=False, hits=[SimpleNamespace(content_id="42"), SimpleNamespace(content_id="99")])),
+            list_child_pages=AsyncMock(return_value=RemoteContentSearchPage(start=0, size=2, has_more=False, hits=[{"content_id": "42", "title": "Moved"}, {"content_id": "99", "title": "Other"}])),
         )
         with self.assertRaisesRegex(AssertionError, "sibling order"):
             await run_acceptance._assert_placement(services, "42", "SYNTH", "20", "last")

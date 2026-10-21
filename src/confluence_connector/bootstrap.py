@@ -62,7 +62,7 @@ class AppContext:
     ) -> None:
         """Settings are validated by the CLI config boundary; injected clients are caller-owned."""
         self.settings = settings if settings is not None else config.load_config()
-        self.store = store or TokenStore()
+        self.store = store or TokenStore(base_url=str(self.settings["base_url"]))
         self._http_client = http_client
         self._transport: ConfluenceTransport | None = None
         self._services: Services | None = None
@@ -137,7 +137,7 @@ class AppContext:
             username=username,
             api=api,
             links=links,
-            spaces=SpaceService(self.store, api, username),
+            spaces=SpaceService(api, username),
             search=ContentSearch(api, links, username, self.settings.get("cql_timezone")),
             users=UserSearch(api, username),
             tree=PageTree(api, links, username),

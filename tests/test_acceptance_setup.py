@@ -16,21 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 import run_acceptance
 import setup_acceptance
-from acceptance_fixtures import attachment_text, new_fixture
+from acceptance_fixtures import new_fixture
 from confluence_connector.auth.store import StoredCredential
 from fakes.settings import settings
 
 
 class AcceptanceFixtureChecks(unittest.TestCase):
-    def test_run_id_builds_synthetic_tree_names_and_search_markers(self) -> None:
-        fixture = new_fixture("deadbeef")
-
-        self.assertIn("[deadbeef]", fixture.root_title)
-        self.assertIn("!", fixture.root_title)
-        self.assertEqual(fixture.marker, "orchidbeacondeadbeef")
-        self.assertEqual(fixture.code_identifier, "beacon_x.y_deadbeef")
-        self.assertIn(b"cedarattachmentdeadbeef", attachment_text(fixture))
-
     def test_invalid_run_id_is_rejected(self) -> None:
         for value in ("ABCDEF12", "short", "00000000!", "x" * 17):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -104,8 +95,7 @@ class AcceptanceSetupCliChecks(unittest.TestCase):
             )
 
         with (
-            patch.object(setup_acceptance.httpx, "AsyncClient", side_effect=client_factory),
-            patch.object(setup_acceptance.asyncio, "sleep", new_callable=AsyncMock),
+            patch("confluence_connector.remote.transport.httpx.AsyncClient", side_effect=client_factory),
         ):
             import asyncio
 
@@ -122,42 +112,6 @@ class AcceptanceSetupCliChecks(unittest.TestCase):
             )
         self.assertEqual(calls, ["Bearer synthetic-pat", "Bearer synthetic-pat"])
 
-    def test_upload_does_not_retry_an_uncertain_timeout(self) -> None:
-        calls = 0
-        real_async_client = httpx.AsyncClient
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            nonlocal calls
-            calls += 1
-            raise httpx.ReadTimeout("synthetic timeout", request=request)
-
-        class Store:
-            def load(self) -> StoredCredential:
-                return StoredCredential(username="sample-user", token="synthetic-pat")
-
-        def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
-            return real_async_client(
-                *args,
-                **kwargs,
-                transport=httpx.MockTransport(handler),
-            )
-
-        with patch.object(setup_acceptance.httpx, "AsyncClient", side_effect=client_factory):
-            import asyncio
-
-            with self.assertRaisesRegex(SystemExit, "outcome is uncertain"):
-                asyncio.run(
-                    setup_acceptance._upload_file(
-                        Store(),
-                        "https://confluence.example.test/wiki",
-                        "rest/api/content/101/child/attachment",
-                        "synthetic.txt",
-                        b"synthetic",
-                        "text/plain",
-                        expected_username="sample-user",
-                    )
-                )
-        self.assertEqual(calls, 1)
 
 
 class AcceptanceRunnerSafetyChecks(unittest.TestCase):

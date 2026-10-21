@@ -8,6 +8,7 @@ import unittest
 
 import httpx
 
+from fakes.calibration import _REFERENCE_UTC, _PAGE_ID, _page_row
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.transport import ConfluenceTransport
 from confluence_connector.service.timezone_calibration import calibrate_cql_timezone
@@ -16,8 +17,6 @@ from fakes.settings import settings
 
 
 _CUTOFF = re.compile(r"lastmodified >= '([^']+)'")
-_REFERENCE_UTC = datetime(2026, 10, 19, 12, 34, 56, tzinfo=timezone.utc)
-_PAGE_ID = "24680"
 
 
 class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
@@ -74,15 +73,6 @@ class TimezoneCalibrationChecks(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(query.startswith(f"id = {_PAGE_ID} AND") for query in queries[1:]))
 
 
-def _page_row() -> dict[str, object]:
-    return {
-        "content": {
-            "id": _PAGE_ID,
-            "type": "page",
-            "title": "Synthetic calibration page",
-            "version": {"when": _REFERENCE_UTC.isoformat().replace("+00:00", "Z")},
-        }
-    }
 
 
 if __name__ == "__main__":

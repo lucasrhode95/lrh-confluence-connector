@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import email.utils
 import re
-import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 
 from acceptance_fixtures import (
     AcceptanceFixture,
@@ -26,7 +23,7 @@ from confluence_connector.auth.store import TokenStore
 from confluence_connector.bootstrap import AppContext, Services
 from confluence_connector.domain.errors import ConnectorError
 
-WRITE_ATTEMPTS = 3
+from confluence_connector.remote.transport import ConfluenceTransport
 
 
 def main() -> int:
@@ -223,7 +220,7 @@ async def _ensure_page(
     elif parent_id is not None and position is not None:
         await services.structure.move_page(page_id, parent_id=parent_id, position=position)
     if _fixture_body_needs_refresh(current.storage_body, body):
-        # A parent move may have created a new version. Pin the fresh version before updating.
+        # Same-space placement preserves the content version. Pin the fresh version before updating.
         current = await services.api.get_page_content(
             page_id, expected_username=services.username, include_storage=True
         )
@@ -321,59 +318,15 @@ async def _upload_file(
     *,
     expected_username: str,
 ) -> None:
-    """Upload one deterministic fixture file with bounded safe retries and no diagnostic body output."""
-    token = _current_token(store, expected_username)
-    async with httpx.AsyncClient(
-        base_url=base_url.rstrip("/") + "/",
-        timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
-        follow_redirects=False,
-    ) as client:
-        for attempt in range(WRITE_ATTEMPTS):
-            token = _current_token(store, expected_username)
-            request = client.build_request(
-                "POST",
-                route,
-                files={"file": (filename, content, media_type)},
-                headers={"Accept": "application/json", "Authorization": f"Bearer {token}", "X-Atlassian-Token": "no-check"},
-            )
-            try:
-                response = await client.send(request)
-            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
-                if attempt + 1 < WRITE_ATTEMPTS:
-                    await asyncio.sleep(0.2 * (2**attempt))
-                    continue
-                raise SystemExit("The fixture attachment upload could not connect after safe retries.") from None
-            except httpx.RequestError:
-                raise SystemExit("The fixture attachment upload outcome is uncertain; inspect it before retrying.") from None
-            if response.status_code in {429, 503} and attempt + 1 < WRITE_ATTEMPTS:
-                await asyncio.sleep(_retry_delay(response.headers.get("retry-after"), attempt))
-                continue
-            if not response.is_success:
-                raise SystemExit(f"The fixture attachment upload failed with HTTP {response.status_code}.")
-            _current_token(store, expected_username)
-            return
-    raise SystemExit("The fixture attachment upload failed after the allowed attempts.")
-
-
-def _current_token(store: TokenStore, expected_username: str) -> str:
-    """Read a fresh encrypted credential and enforce the account that passed the status check."""
-    credential = store.load()
-    if credential is None or credential.username.casefold() != expected_username.casefold():
-        raise SystemExit("The Confluence account changed during fixture setup; inspect partial writes.")
-    return credential.token
-
-
-def _retry_delay(value: str | None, attempt: int) -> float:
-    """Honor numeric or HTTP-date Retry-After values for explicit 429/503 responses."""
-    if value:
-        try:
-            return max(0.0, float(value))
-        except ValueError:
-            try:
-                return max(0.0, email.utils.parsedate_to_datetime(value).timestamp() - time.time())
-            except (TypeError, ValueError, OverflowError):
-                pass
-    return 0.2 * (2**attempt)
+    """Upload trusted synthetic bytes using the product transport's conservative write policy."""
+    transport = ConfluenceTransport({"base_url": base_url}, store)
+    try:
+        await transport.send_json(
+            "POST", route, files={"file": (filename, content, media_type)},
+            skip_atlassian_token_check=True, expected_username=expected_username,
+        )
+    finally:
+        await transport.aclose()
 
 
 if __name__ == "__main__":

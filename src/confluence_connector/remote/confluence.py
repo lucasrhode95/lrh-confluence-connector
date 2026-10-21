@@ -23,6 +23,7 @@ from confluence_connector.domain.models import (
     ContentSearchHit,
     CurrentUser,
     DraftSummary,
+    PageEnvelope,
     PageMetadata,
     PageAttachment,
     RemotePageComment,
@@ -44,6 +45,7 @@ SPACE_PAGE_SIZE = 500
 CHILD_PAGE_SIZE = 500
 VERSION_PAGE_SIZE = 200
 MAX_PAGE_VERSIONS = 5_000
+MAX_COLLECTION_ITEMS = 5_000
 DRAFT_PAGE_SIZE = 100
 TRASH_PAGE_SIZE = 100
 LONGTASK_MAX_POLLS = 40
@@ -93,44 +95,20 @@ class ConfluenceApi:
                     params={"limit": str(SPACE_PAGE_SIZE), "start": str(start), "status": status},
                     expected_username=expected_username,
                 )
-                raw_items = payload.get("results")
-                if not isinstance(raw_items, list):
-                    raise Upstream("Confluence returned an unexpected spaces response.")
-                page_start = _nonnegative_int(payload.get("start"), default=start)
-                if page_start != start:
-                    raise Upstream("Confluence returned an inconsistent spaces page offset.")
-                page_size = _nonnegative_int(payload.get("size"), default=len(raw_items))
-                if page_size != len(raw_items):
-                    raise Upstream("Confluence returned an inconsistent spaces page size.")
-                total = payload.get("totalSize", payload.get("totalCount"))
-                if total is not None and (
-                    not isinstance(total, int) or isinstance(total, bool) or total < 0
-                ):
-                    raise Upstream("Confluence returned an invalid total space count.")
-                if isinstance(total, int):
-                    reported_totals[status] = total
+                raw_items, envelope = _page_envelope(payload, requested_start=start)
+                if envelope.total_size is not None:
+                    reported_totals[status] = envelope.total_size
+                    envelope.has_more = None  # The spaces endpoint reports an exact total.
                 page = [self._space_summary(item) for item in raw_items]
                 for space in page:
                     if space.key in seen_keys:
                         raise Upstream("Confluence repeated a space while paging the result.")
                     seen_keys.add(space.key)
                 results.extend(page)
-                returned_counts[status] += page_size
-                if page_size == 0:
+                returned_counts[status] += envelope.size
+                next_start = envelope.next_start(SPACE_PAGE_SIZE)
+                if next_start is None:
                     break
-                next_start = page_start + page_size
-                reported_total = reported_totals[status]
-                if reported_total is not None and next_start >= reported_total:
-                    break
-                if reported_total is None:
-                    if "_links" in payload:
-                        more = _has_next_link(payload)
-                    else:
-                        more = page_size == SPACE_PAGE_SIZE
-                    if not more:
-                        break
-                if next_start <= start:
-                    raise Upstream("Confluence did not advance the spaces page offset.")
                 start = next_start
         total_count = sum(
             reported if reported is not None else returned_counts[status]
@@ -143,46 +121,32 @@ class ConfluenceApi:
         self, space_key: str, title: str, *, expected_username: str, status: str | None = None
     ) -> str:
         """Resolve a legacy display URL by its validated space key and decoded title."""
-        if status == "trashed":
-            payload = await self._transport.get_json(
-                self._content_collection_route(),
-                params={"type": "page", "spaceKey": space_key, "title": title, "status": "trashed", "limit": "2"},
-                expected_username=expected_username,
-            )
-            rows = _result_rows(payload)
-            if len(rows) > 1:
-                raise Upstream("The display URL matched more than one trashed page.")
-            page_id = str(rows[0]["id"]) if rows and isinstance(rows[0], dict) and _page_id(rows[0].get("id")) else None
-        else:
-            page_id = await self.find_page_id_by_title(space_key, title, expected_username=expected_username)
+        page_id = await self.find_page_id_by_title(
+            space_key, title, expected_username=expected_username, status=status or "current"
+        )
         if page_id is None:
             raise NotFound("The page in this display URL no longer matches a page; it may have been renamed.")
         return page_id
 
     async def find_page_id_by_title(
-        self, space_key: str, title: str, *, expected_username: str
+        self, space_key: str, title: str, *, expected_username: str, status: str = "current"
     ) -> str | None:
-        """Return an exact page-title match, distinguishing no match from a failed search request."""
+        """Resolve a validated exact title through the content collection, without CQL/index limitations."""
         if not space_key or not title:
             raise InvalidRequest("A display URL must include both a space key and page title.")
-        cql = (
-            f"type = page AND space = {cql_literal(space_key)} "
-            f"AND title = {cql_literal(title)}"
-        )
         payload = await self._transport.get_json(
-            self._endpoint("search_pages"),
-            params={"cql": cql, "limit": "2", "expand": "space"},
+            self._content_collection_route(),
+            params={"type": "page", "spaceKey": space_key, "title": title, "status": status, "limit": "2"},
             expected_username=expected_username,
         )
-        rows = payload.get("results")
-        if not isinstance(rows, list):
-            raise Upstream("Confluence returned an unexpected page-title search response.")
-        matches = [row for row in rows if isinstance(row, dict) and _page_id(row.get("id"))]
-        if not matches:
-            return None
-        if len(matches) > 1:
+        rows = _result_rows(payload)
+        if len(rows) > 1 or _has_next_link(payload):
             raise Upstream("The display URL matched more than one page in its space.")
-        return str(matches[0]["id"])
+        if not rows:
+            return None
+        if not isinstance(rows[0], dict) or not _page_id(rows[0].get("id")):
+            raise Upstream("Confluence returned a page-title match without a usable page ID.")
+        return str(rows[0]["id"])
 
     async def search_content_page(
         self,
@@ -434,36 +398,27 @@ class ConfluenceApi:
         expected_username: str,
     ) -> RemoteTrashPage:
         """Read one bounded page of visible trashed pages from the content collection."""
-        params = {
-            "type": "page",
-            "status": "trashed",
-            "start": str(start),
-            "limit": str(limit),
-            "expand": "space,version",
-        }
+        rows, envelope = await self._list_page_status(
+            "trashed", space_key=space_key, start=start, limit=limit, expand="space,version",
+            expected_username=expected_username,
+        )
+        return RemoteTrashPage(
+            pages=[_trash_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
+            **envelope.model_dump(),
+        )
+
+    async def _list_page_status(
+        self, status: str, *, space_key: str | None, start: int, limit: int,
+        expand: str, expected_username: str,
+    ) -> tuple[list[Any], PageEnvelope]:
+        """Read a boundary-validated draft/trash request through the shared content collection."""
+        params = {"type": "page", "status": status, "start": str(start), "limit": str(limit), "expand": expand}
         if space_key is not None:
             params["spaceKey"] = space_key
         payload = await self._transport.get_json(
             self._content_collection_route(), params=params, expected_username=expected_username
         )
-        rows = payload.get("results")
-        if not isinstance(rows, list):
-            raise Upstream("Confluence returned an unexpected trash-list response.")
-        actual_start = _nonnegative_int(payload.get("start"), default=start)
-        actual_size = _nonnegative_int(payload.get("size"), default=len(rows))
-        if actual_start != start or actual_size != len(rows):
-            raise Upstream("Confluence returned an inconsistent trash-list page envelope.")
-        total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
-        pages = [_trash_summary(row, base_url=str(self._settings["base_url"])) for row in rows]
-        next_start = actual_start + actual_size
-        has_more = next_start < total if total is not None else _has_next_link(payload)
-        return RemoteTrashPage(
-            pages=pages,
-            start=actual_start,
-            size=actual_size,
-            total_size=total,
-            has_more=has_more,
-        )
+        return _page_envelope(payload, requested_start=start)
 
     async def get_page_content(
         self,
@@ -558,41 +513,13 @@ class ConfluenceApi:
         expected_username: str,
     ) -> RemoteDraftPage:
         """Read one bounded page of new-page drafts; caller validates scope and cursor state."""
-        params = {
-            "type": "page",
-            "status": "draft",
-            "start": str(start),
-            "limit": str(limit),
-            "expand": "space,version,history",
-        }
-        if space_key is not None:
-            params["spaceKey"] = space_key
-        payload = await self._transport.get_json(
-            self._content_collection_route(), params=params, expected_username=expected_username
+        rows, envelope = await self._list_page_status(
+            "draft", space_key=space_key, start=start, limit=limit, expand="space,version,history",
+            expected_username=expected_username,
         )
-        rows = _result_rows(payload)
-        actual_start = _nonnegative_int(payload.get("start"), default=start)
-        if actual_start != start:
-            raise Upstream("Confluence returned an inconsistent draft-list offset.")
-        actual_size = _nonnegative_int(payload.get("size"), default=len(rows))
-        if actual_size != len(rows):
-            raise Upstream("Confluence returned an inconsistent draft-list size.")
-        total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
-        links = payload.get("_links")
-        has_more = None
-        if isinstance(links, dict):
-            next_link = links.get("next")
-            if next_link is not None and not isinstance(next_link, str):
-                raise Upstream("Confluence returned an invalid draft-list next link.")
-            has_more = bool(next_link)
-        elif links is not None:
-            raise Upstream("Confluence returned invalid draft-list links.")
         return RemoteDraftPage(
             drafts=[_draft_summary(row, base_url=str(self._settings["base_url"])) for row in rows],
-            start=actual_start,
-            size=actual_size,
-            total_size=total,
-            has_more=has_more,
+            **envelope.model_dump(),
         )
 
     async def publish_draft(
@@ -658,20 +585,10 @@ class ConfluenceApi:
         expected_username: str,
     ) -> None:
         """Use Confluence's isolated UI move action to place a page above or below a sibling."""
-        payload = await self._transport.send_json(
-            "POST",
-            "pages/movepage.action",
-            params={
-                "pageId": page_id,
-                "spaceKey": space_key,
-                "position": position,
-                "targetId": target_id,
-                "mode": "LEGACY",
-            },
-            skip_atlassian_token_check=True,
-            expected_username=expected_username,
+        await self.move_page_action(
+            page_id, space_key=space_key, position=position, target_id=target_id,
+            asynchronous=False, expected_username=expected_username,
         )
-        _raise_move_action_errors(payload)
 
     async def move_page_action(
         self,
@@ -730,12 +647,16 @@ class ConfluenceApi:
                 raise UncertainWrite("Confluence returned an unreadable move status; inspect the page.")
             successful = payload.get("successful")
             finished = payload.get("finished")
-            if successful is True:
-                return
-            if finished is True:
-                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
-            if successful is False and finished is not False:
-                raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+            # successful describes progress too; it does not establish completion.
+            complete = finished is True or (
+                finished is None and payload.get("percentageComplete") == 100
+            )
+            if complete:
+                if successful is True:
+                    return
+                if successful is False:
+                    raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
+                raise UncertainWrite("Confluence returned an unreadable terminal move status; inspect the page.")
             if attempt + 1 < LONGTASK_MAX_POLLS:
                 await asyncio.sleep(LONGTASK_POLL_INTERVAL_SECONDS)
         raise UncertainWrite("Confluence's page move is still pending; inspect the page before retrying.")
@@ -744,14 +665,9 @@ class ConfluenceApi:
         self, page_id: str, *, expected_username: str
     ) -> list[PageAttachment]:
         """Read the documented attachment child list; the service validates ``page_id``."""
-        payload = await self._transport.get_json(
-            f"{self._content_route(page_id)}/child/attachment",
-            params={"limit": "500"},
-            expected_username=expected_username,
+        rows = await self._collection_rows(
+            f"{self._content_route(page_id)}/child/attachment", expected_username=expected_username
         )
-        rows = payload.get("results")
-        if not isinstance(rows, list):
-            raise Upstream("Confluence returned an unexpected page-attachment response.")
         attachments = []
         for row in rows:
             attachment = _page_attachment(row, base_url=str(self._settings["base_url"]))
@@ -785,15 +701,11 @@ class ConfluenceApi:
     async def list_page_comments(
         self, page_id: str, *, expected_username: str
     ) -> list[RemotePageComment]:
-        """Read footer and inline comments with replies, using one bounded child-list request."""
-        payload = await self._transport.get_json(
+        """Read footer and inline comments with replies, paging to the collection safety cap."""
+        rows = await self._collection_rows(
             f"{self._content_route(page_id)}/child/comment",
-            params={"limit": "500", "depth": "all", "expand": "body.view,history"},
-            expected_username=expected_username,
+            params={"depth": "all", "expand": "body.view,history"}, expected_username=expected_username,
         )
-        rows = payload.get("results")
-        if not isinstance(rows, list):
-            raise Upstream("Confluence returned an unexpected page-comment response.")
         comments = []
         for row in rows:
             comment = _page_comment(row)
@@ -801,6 +713,27 @@ class ConfluenceApi:
                 raise Upstream("Confluence returned a comment without its ID.")
             comments.append(comment)
         return comments
+
+    async def _collection_rows(
+        self, route: str, *, expected_username: str, params: Mapping[str, str] | None = None
+    ) -> list[Any]:
+        """Read a complete attachment/comment collection or explicitly fail at the 5,000-item cap."""
+        rows: list[Any] = []
+        start = 0
+        while len(rows) < MAX_COLLECTION_ITEMS:
+            payload = await self._transport.get_json(
+                route, params={**(params or {}), "start": str(start), "limit": "500"},
+                expected_username=expected_username,
+            )
+            items, envelope = _page_envelope(payload, requested_start=start)
+            rows.extend(items)
+            next_start = envelope.next_start(500)
+            if next_start is None:
+                if len(rows) > MAX_COLLECTION_ITEMS:
+                    break
+                return rows
+            start = next_start
+        raise Upstream("The attachment/comment collection exceeds the 5,000-item safety cap and is incomplete.")
 
     async def create_page_comment(
         self,
@@ -847,27 +780,13 @@ class ConfluenceApi:
                 params={"start": str(start), "limit": str(VERSION_PAGE_SIZE)},
                 expected_username=expected_username,
             )
-            rows = payload.get("results")
-            if not isinstance(rows, list):
-                raise Upstream("Confluence returned an unexpected page-version response.")
-            actual_start = _nonnegative_int(payload.get("start"), default=start)
-            if actual_start != start:
-                raise Upstream("Confluence returned an inconsistent page-version offset.")
-            actual_size = _nonnegative_int(payload.get("size"), default=len(rows))
-            if actual_size != len(rows):
-                raise Upstream("Confluence returned an inconsistent page-version size.")
+            rows, envelope = _page_envelope(payload, requested_start=start)
             versions.extend(_page_version(row) for row in rows)
-            if actual_size == 0:
-                return versions, False
-            next_start = actual_start + actual_size
-            total = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
-            has_next = _has_next_link(payload)
-            if total is not None and next_start >= total:
-                return versions, False
-            if total is None and not has_next:
-                return versions, False
-            if next_start <= start:
-                raise Upstream("Confluence did not advance the page-version offset.")
+            if envelope.total_size is not None:
+                envelope.has_more = None  # Version-list totals are exact, unlike CQL search totals.
+            next_start = envelope.next_start(VERSION_PAGE_SIZE)
+            if next_start is None:
+                return versions[:MAX_PAGE_VERSIONS], len(versions) > MAX_PAGE_VERSIONS
             start = next_start
         return versions[:MAX_PAGE_VERSIONS], True
 
@@ -943,21 +862,28 @@ def _content_search_page(
     payload: dict[str, Any], *, requested_start: int, base_url: str
 ) -> RemoteContentSearchPage:
     """Validate the server page envelope and map source rows before service-level processing."""
-    rows = _result_rows(payload)
-    start = _nonnegative_int(payload.get("start"), default=requested_start)
-    if start != requested_start:
-        raise Upstream("Confluence returned an inconsistent content-search offset.")
-    size = _nonnegative_int(payload.get("size"), default=len(rows))
-    if size != len(rows):
-        raise Upstream("Confluence returned an inconsistent content-search size.")
-    total_size = _optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount")))
+    rows, envelope = _page_envelope(payload, requested_start=requested_start)
     return RemoteContentSearchPage(
         hits=[_content_search_hit(row, base_url=base_url) for row in rows],
-        start=start,
-        size=size,
-        total_size=total_size,
+        **envelope.model_dump(),
+    )
+
+
+def _page_envelope(payload: dict[str, Any], *, requested_start: int) -> tuple[list[Any], PageEnvelope]:
+    """Validate one collection envelope at the remote boundary, before any consumer sees it."""
+    rows = _result_rows(payload)
+    start = _nonnegative_int(payload.get("start"), default=requested_start)
+    size = _nonnegative_int(payload.get("size"), default=len(rows))
+    if start != requested_start or size != len(rows):
+        raise Upstream("Confluence returned an inconsistent collection page offset or size.")
+    envelope = PageEnvelope(
+        start=start, size=size,
+        total_size=_optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount"))),
         has_more=_has_next_link(payload) if "_links" in payload else None,
     )
+    # Explicit continuations/totals cannot make progress through an empty page.
+    envelope.next_start(max(1, size))
+    return rows, envelope
 
 
 def _result_rows(payload: dict[str, Any]) -> list[Any]:

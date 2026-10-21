@@ -71,3 +71,26 @@ def require_current_page(metadata: PageMetadata, *, allow_missing_status: bool =
         raise InvalidRequest("This tool accepts Confluence pages only.")
     if metadata.status != "current" and not (allow_missing_status and metadata.status is None):
         raise InvalidRequest("This tool accepts current published pages only.")
+
+
+def placement_inputs(
+    *,
+    parent_id: Any,
+    space_key: Any,
+    position: Any,
+    sibling: Any,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Validate public placement references and options once, before resolving remote page state."""
+    if (parent_id is None) == (space_key is None):
+        raise InvalidRequest("Pass exactly one of parent_id or space_key for page placement.")
+    parent_reference = page_reference(parent_id, field="parent_id") if parent_id is not None else None
+    selected_space = optional_space_key(space_key) if space_key is not None else None
+    selected_position = "last" if position is None else position
+    if not isinstance(selected_position, str) or selected_position not in {"first", "last", "before", "after"}:
+        raise InvalidRequest("position must be first, last, before or after.")
+    sibling_reference = page_reference(sibling, field="sibling") if sibling is not None else None
+    if selected_position in {"before", "after"} and sibling_reference is None:
+        raise InvalidRequest("position before or after requires a sibling page reference.")
+    if selected_position not in {"before", "after"} and sibling_reference is not None:
+        raise InvalidRequest("sibling is only valid with position before or after.")
+    return selected_position, parent_reference, selected_space, sibling_reference

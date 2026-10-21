@@ -105,6 +105,18 @@ class WriteMarkupChecks(unittest.TestCase):
         )
         self.assertEqual(content_loss(before, replacement), (False, ["1 include macro(s) would be removed."]))
 
+    def test_target_ownership_changes_are_reported(self) -> None:
+        cases = [
+            ('<ri:attachment ri:filename="guide.pdf"><ri:page ri:content-title="Owner" ri:space-key="A"/></ri:attachment>', 'attachment reference'),
+            ('<ac:structured-macro ac:name="include"><ri:page ri:content-title="Guide" ri:space-key="A"/></ac:structured-macro>', 'include macro'),
+        ]
+        for original, warning in cases:
+            with self.subTest(target=warning):
+                self.assertEqual(content_loss(original, original), (False, []))
+                has_anchor_loss, warnings = content_loss(original, original.replace('ri:space-key="A"', 'ri:space-key="B"'))
+                self.assertFalse(has_anchor_loss)
+                self.assertTrue(any(warning in value for value in warnings))
+
     def test_nested_macro_change_does_not_report_its_unchanged_parent(self) -> None:
         before = (
             '<ac:structured-macro ac:name="panel">'
