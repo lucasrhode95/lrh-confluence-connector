@@ -72,15 +72,16 @@ are under [`research/`](../research/README.md) and are never run as routine chec
 
 ## 5. Module responsibilities
 
-Only rules that the code layout does not make obvious are listed here. The per-tool contract is §8.
+Only design rules that the code layout does not make obvious are listed here. Tool schemas are in §8.
 
 ### 5.1 [`auth/store.py`](../src/confluence_connector/auth/store.py)
 
-- `TokenStore` keeps one record, the PAT and its username, in `msal-extensions` encrypted persistence
+- `TokenStore` keeps one record, the PAT, username and canonical instance URL (including installation path), in `msal-extensions` encrypted persistence
   under `CrossPlatLock`. No plaintext fallback: if encryption is unavailable, every command fails with
   `SecureStorageUnavailable`.
 - Explicit sign-out clears even malformed JSON without decoding it, under the same encrypted-store lock.
-- `save` refuses a different username until `sign_out`. Every request loads the record again, so a
+- An instance mismatch is refused before sending credentials; unbound records are rejected, with no
+  automatic migration. `save` refuses a different username until `sign_out`. Every request loads the record again, so a
   sign-out or account switch takes effect on the next request in every process.
 
 ### 5.2 [`remote/transport.py`](../src/confluence_connector/remote/transport.py)
@@ -89,7 +90,8 @@ Only rules that the code layout does not make obvious are listed here. The per-t
   timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
   across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
 - JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
-  destination stream while the transport applies the shared retry, status and account checks.
+  destination stream while the transport applies the shared retry, status and account checks. Fixture
+  multipart uploads use the same write policy. Decoded response snapshots omit compression headers.
 - **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
   `Retry-After`, otherwise with short jittered backoff.
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
@@ -116,7 +118,10 @@ Only rules that the code layout does not make obvious are listed here. The per-t
   /pages/movepage.action` with `pageId`, `spaceKey`, `position`, `targetId` and `mode`. Application
   errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise. Cross-space moves use
   `ASYNC` and poll the documented `/rest/api/longtask/{id}` up to 40 times, at most 10 s; a task still
-  running then is `UncertainWrite`.
+  running then is `UncertainWrite`. `successful` alone is not terminal: completion also needs
+  `finished: true`, or 100 percent when `finished` is absent.
+- **Exact titles** use the content collection for current and trashed pages, avoiding CQL indexing
+  and quote limitations. Draft and trash listings share the collection request and envelope mapping.
 - **Placement properties** (`get_page_property`, `set_page_property`, `remove_page_property`) store a
   page's former parent and position in a content property before it is trashed (research §6.4).
 
@@ -125,7 +130,7 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 `PageLinkResolver.resolve` turns a numeric ID or a same-instance URL into a page ID and optional
 version: `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=` directly; `/x/…` by following up to 5
 redirects that must stay on the configured HTTPS origin and context path; `/display/KEY/Title` by an
-exact-title CQL lookup in that space. Any other host or path is refused with `InvalidRequest`.
+exact-title content-collection lookup in that space. Any other host or path is refused with `InvalidRequest`.
 
 ### 5.5 [`domain/`](../src/confluence_connector/domain/)
 
@@ -142,10 +147,11 @@ Every input is validated once, at the service entry point, for every caller. Ser
 account by `AppContext` ([`bootstrap.py`](../src/confluence_connector/bootstrap.py)).
 
 Account-boundary error propagation is shared in `errors.py`. Attachment downloads and exports share
-filename sanitization and filesystem component limits from `filenames.py`.
+filename sanitization and filesystem component limits from `filenames.py`. Download batches prepare
+the output folder once; export collision names are rebuilt from typed source metadata.
 
 `placement.py` resolves parent, space, position and sibling inputs for page creation, movement and
-restoration. Service entry points validate public references and provide their existing page resolver;
+restoration. Service entry points share public reference and placement validation and provide their existing page resolver;
 the shared resolver checks page state and sibling scope, and selects the sibling action target for
 first and root-last placement. Move and restore allow missing status metadata; page creation requires
 an explicit `current` status.
@@ -180,7 +186,8 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
    local attachment IDs by filename. Jira without a known storage key keeps its rendered text.
 3. markdownify converts the result, with table handling (merged cells, nested tables or
    code fall back to minimal HTML) and code fences longer than any backtick run in the source code.
-   The text is split at blank lines outside matching fenced blocks, preserving fence-like code lines.
+   Ordinary tables use markdownify directly. Minimal tables retain links and remain whole budget
+   blocks; other text splits at blank lines outside matching code fences.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body
@@ -191,7 +198,7 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 checks `rich` input with BeautifulSoup, converts code blocks and expand sections, and refuses active
 content and excessive nesting (requirements §10.1). The HTML parser repairs some malformed input
 before sending it to Confluence; the roadmap tracks whether that matches the D5 error contract.
-`content_loss` compares inline-comment anchors, macro names and attachment references between the
+`content_loss` compares inline-comment anchors and full macro/attachment target identities between the
 stored and new bodies.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
@@ -202,6 +209,8 @@ folders, cleanup of files older than seven days when a folder is next used (tole
 process removed), exclusive name claims with ` (2)` suffixes, owner-only permissions on POSIX.
 
 ### 5.7 [`surfaces/mcp_main.py`](../src/confluence_connector/surfaces/mcp_main.py)
+
+Returns typed models directly; FastMCP handles serialization and result schemas.
 
 `build_server` declares the tools with their annotations and the server instructions; each tool calls
 `await context.services()` and one service method, and logs its name, outcome and duration.
@@ -264,213 +273,8 @@ the adapter. The service and surface stay unchanged.
 
 ## 8. MCP tools
 
-The server (`lrh-confluence-connector`) exposes 19 tools, grouped below by task. The
-[README](../README.md#mcp-tools) lists them in a short table; this section gives each tool's inputs,
-results and caveats.
-
-### 8.1 Shared rules
-
-- **Page references.** Every `page`, `pages`, `parent_id`, `sibling` and `draft` input takes a numeric
-  ID or a same-instance URL (§5.4). A URL with `pageVersion` selects that version where a tool reads;
-  write and structure tools refuse it.
-- **Cursors.** Pass a returned cursor **alone**; it restores the original request. Cursors are
-  self-contained, at most 16,384 characters, and offsets stop at 1,000,000.
-- **Times.** Results carry the UTC timestamps REST returns. Date filters follow requirements §7.
-- **Writes are explicit.** Only the write tools change Confluence, and only the pages they name. No tool
-  purges the trash; `delete_draft` is the only permanent delete.
-- **Partial results.** Multi-step tools report each step: done, `unknown` (uncertain: inspect before
-  repeating) or `not_attempted`. Nothing completed is undone automatically.
-- **Sign-in.** If a tool reports that sign-in is required, run `confluence-connector auth` in a terminal.
-  An access-denied error concerns one page or operation, not the sign-in.
-
-### 8.2 Status
-
-#### `auth_status`
-
-Offline: the configured instance, whether a token is stored, and its account name. It does not prove
-that Confluence still accepts the token; `confluence-connector status --check` does.
-
-### 8.3 Spaces, search and people
-
-#### `list_spaces`
-
-Every current and archived space visible to the account, with ID, key, name, type, status and link.
-Read 500 at a time; `truncated` reports a cut.
-
-#### `search_content`
-
-Searches pages, blog posts, comments and attachments. `query` is literal text, up to 1,000 characters.
-`match` is `all` (default), `any` or `phrase`; `fields` is `all` (default) or `title`. `limit` is 1–100
-(default 25).
-
-- `scope`: `space_keys`, `space_type`, `content_types`, `labels`, `creator_usernames`,
-  `contributor_usernames`, `created_after`/`created_before`, `modified_after`/`modified_before`,
-  `parent`, `ancestor` and `include_archived` (default true). Each list holds at most 50 values of at
-  most 255 characters.
-- Each hit has its ID, type, title, space, link, excerpt, modification time, parent and `sources`
-  (`cql`, `quicknav` or both). `queries_sent` shows the CQL sent, and `approximate_total` is the
-  server's estimate.
-- Title search on an unscoped first page adds quick-navigation matches; scoped title searches skip
-  them, because that route takes no filters.
-- A comment hit is the comment, not its page.
-
-#### `find_users`
-
-Current users by display-name `query` (up to 255 characters), or one exact `username`, the only way to
-find former users. Use one or the other. `limit` is 1–100 (default 25).
-
-### 8.4 Trees and metadata
-
-#### `get_page_tree`
-
-Ordered children of exactly one `page` or `space_key`, to `max_depth` 1–5 (default 3), counting the
-selected page as level 1 (for a space, its top-level pages). A page root also returns its ancestors.
-At most 1,000 pages; `complete: false` and a note report a cut.
-
-#### `get_page_metadata`
-
-For 1–20 `pages`: title, status, space, link, current version, created and modified times and authors,
-contributors, labels, ancestors, and the version list (at most 5,000 per page; `versions_truncated` marks
-a cut).
-Failures are listed per reference beside the successful pages. Versioned references are refused.
-
-### 8.5 Reading pages
-
-#### `get_pages`
-
-Reads 1–20 `pages` as `text` (default) or `rich` (unchanged storage). `max_chars` is 1–400,000 (default
-40,000). `parse_scope` turns on or off `header`, `macros_from_storage`, `attachments` and `comments`
-(all on by default).
-
-- Each page record has `text`, `references` (typed: kind, IDs, filename, media type, size, owner page),
-  the attachment list and structured comments for the selected blocks, `version`, `total_versions`
-  and `notes`.
-- Whole pages are packed; pages that did not fit are in `remaining`. An oversized page returns a
-  `next_cursor`; pass it alone to continue at the same version.
-- Attachments are listed, never downloaded.
-
-### 8.6 Local files
-
-#### `download_attachments`
-
-Saves 1–500 `attachment_ids` of one `page` to `downloads/<account>/`. The page's own attachment list is
-read first, so an ID from another page is refused. Returns a path per saved file and a failure per
-attachment that could not be saved; a partial file is removed.
-
-#### `export_pages`
-
-Writes 1–500 `pages` in full as `text` (default) or `rich`, and returns the path, size and counts.
-`include_attachments` (default false) adds each page's attachment bytes. Pages are read two at a time.
-
-- One page with nothing else is a single `.txt` or `.html`; otherwise one flat `.zip`: page files at
-  the root, each page's attachments in a folder named after its file.
-- File names: `<Title> (<page id>) v<version>`, within 180 characters and 240 bytes, with ` (2)`
-  suffixes for duplicates. Every file starts with the provenance header and breadcrumb.
-- Failures go to `_export-report.txt`; account and sign-in errors abort the export. Large exports take
-  minutes.
-
-### 8.7 Pages, drafts and labels
-
-#### `create_page`
-
-Creates a current page (default) or, with `status="draft"`, a new-page draft, under exactly one of
-`parent_id` or `space_key`. `title` up to 255 characters; `body` up to 2,000,000 in `format` `rich`
-(default) or `text` (requirements §10.1). `position` is `first`, `last` (default), `before` or `after`;
-the last two need `sibling` under the same parent.
-
-- A current page with the same title in the target space is refused, with its link, before anything is
-  written.
-- Position is a second write. If it fails, the page stays created, and the result's `warnings` says the
-  position was not applied.
-
-#### `update_page`
-
-Replaces the whole body of a published page, and the title if given. `expected_version` is required:
-a stale version is refused before writing, and a concurrent edit gets Confluence's 409. Neither is
-retried. Inline-comment anchors that would be lost are refused unless `allow_comment_loss: true`;
-removed macros and attachment references come back as `warnings`.
-
-#### `list_drafts`
-
-The account's new-page drafts, optionally for one `space_key`; `limit` 1–100 (default 50). Each draft has
-an ID-based link that page tools accept.
-
-#### `publish_draft`
-
-Publishes a new-page draft with its full body, space and parent; the page keeps its ID.
-
-#### `delete_draft`
-
-Deletes a new-page draft **permanently**: it bypasses the trash and cannot be restored.
-
-#### `set_labels`
-
-Adds and removes global labels on one published page, one request per change, in order, stopping at the
-first failure. Returns `added`, `removed`, `unchanged`, `failures` and `not_attempted`. Successful changes
-are never reversed; inspect an uncertain outcome before retrying.
-
-### 8.8 Moves, trash and restore
-
-#### `move_page`
-
-Moves one current page under exactly one of `parent_id` or `space_key` (the root), with the same
-`position` and `sibling` as `create_page`.
-
-- Within a space: one `movepage.action` request applies both the parent and position, so the move does
-  not create a page version. A definite refusal reports the previous placement; an uncertain response
-  reports an unknown placement and tells the caller to inspect the page before retrying. Root `last`
-  placement uses `below` the last root page because `topLevel` places a page first.
-- Across spaces: one move action, waited on through the long-task route for at most 10 seconds. If
-  Confluence refuses the move, recreating the page in the target space and trashing the original is a
-  separate plan that loses the page ID, history and comments.
-
-D7 requires one move action without creating a page version. The same action also handles `move_up`
-and restore placement; see the [implementation item](roadmap.md#one-route-for-same-space-moves).
-
-#### `delete_page`
-
-Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash` (requirements §10.5).
-
-- The whole affected hierarchy is read first (at most 5,000 pages) and `delete` permission is checked
-  on every page before any write. `trash` refuses more than 100 pages, with the count.
-- Each trashed page's parent and position are saved first, best effort, for `restore_page`.
-- `move_up` rechecks each child’s parent and space immediately before its move, skipping changes.
-  Children moved under a parent append there in their original order; root moves append below the last
-  root page. An empty ancestor list is never used to move to the root.
-- The result lists every affected page with its former parent and position and its status
-  (`trashed`, `moved_up`, `skipped`, `failed`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
-  likely need a space administrator.
-
-#### `list_trash`
-
-Trashed pages of one `space_key` or every visible space: ID, title, space and last edit. `limit` 1–100
-(default 50). Confluence exposes no deletion time or author.
-
-#### `restore_page`
-
-Restores a trashed page, then places it: under the caller's `parent_id` or `space_key` (with
-`position` and `sibling`) when given, otherwise where the saved property says, otherwise at the space
-root. `placement_source` (`caller`, `saved_property` or `space_root`) and `placement_status` say which
-applied and whether it worked; a refused placement leaves the page at the root with a warning.
-
-## 9. Cross-cutting concerns
-
-| Concern | Rule |
-|---|---|
-| Logging | Tool name, outcome, duration and counts. Never page content, queries, request URLs or tokens. |
-| Retries | Reads: 3 attempts on connection errors, timeouts, 429 and 5xx, honoring `Retry-After`. Writes: only when never sent or answered 429/503. |
-| Concurrency | Six requests in flight per process; page reads in parallel parts; exports two pages at a time. |
-| Bounds | Every list and read is bounded with a cursor or a cap reported in the result. Attachment bytes go to files, never into tool results. |
-| Errors | Domain errors with Confluence's status and message. 401 → `AuthenticationRequired`; 403 → `PermissionDenied`; changed account → `AccountMismatch`; uncertain write → `UncertainWrite`. |
-| Security | Configured host only; no arbitrary URL fetching; short links followed only on the configured origin; no browser cookies; tokens never in tool inputs or results. |
-
-The transport snapshots already-decoded response bytes without compression headers, and applies the
-same conservative write policy to JSON and multipart fixture uploads. Encrypted PAT records bind the
-account to the canonical configured instance URL, including its installation context; an instance
-mismatch fails before a credential is sent. Exact-title resolution uses the content collection rather
-than the CQL index. Async moves require a terminal task state before reporting success.
-
-Public page services share reference and placement validation. The placement resolver trusts those
-inputs and checks remote scope and cycles. Space reads rely on the transport's account guard. MCP
-returns typed models directly; FastMCP owns serialization and result schemas. Downloads prepare their
-output directory once per operation, and export collision names are built from source metadata.
+The 19 tool declarations and parameter descriptions live in
+[`surfaces/mcp_main.py`](../src/confluence_connector/surfaces/mcp_main.py). FastMCP publishes their
+input and output schemas from typed models. The [README](../README.md#mcp-tools) gives the capability
+index; requirements own behavior and bounds. Read tools are read-only; local file tools can remove
+expired local outputs; destructive remote writes carry destructive annotations.
