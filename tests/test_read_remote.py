@@ -25,6 +25,25 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.aclose)
         return ConfluenceApi(settings(), transport)
 
+    async def test_attachment_and_comment_collections_follow_short_pages(self) -> None:
+        starts = {"attachment": [], "comment": []}
+        def handler(request):
+            kind = request.url.path.rsplit("/", 1)[-1]
+            start = int(request.url.params["start"])
+            starts[kind].append(start)
+            row = {"id": str(start + 1), "title": "Synthetic", "type": kind, "body": {"view": {"value": "<p>Comment</p>"}}}
+            return httpx.Response(200, json={"results": [row], "start": start, "size": 1,
+                "_links": {"next": "/wrong?start=500"} if start == 0 else {}})
+        api = self.make_api(handler)
+        self.assertEqual(len(await api.list_page_attachments("55", expected_username="sample-user")), 2)
+        self.assertEqual(len(await api.list_page_comments("55", expected_username="sample-user")), 2)
+        self.assertEqual(starts, {"attachment": [0, 1], "comment": [0, 1]})
+
+    async def test_empty_collection_with_continuation_fails_instead_of_claiming_completion(self) -> None:
+        api = self.make_api(lambda request: httpx.Response(200, json={"results": [], "_links": {"next": "?start=500"}}))
+        with self.assertRaisesRegex(Upstream, "empty page with a continuation"):
+            await api.list_page_comments("55", expected_username="sample-user")
+
     async def test_search_sends_archived_filter_and_maps_source_fields(self) -> None:
         observed: list[httpx.Request] = []
 
@@ -437,7 +456,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 json={"results": [{"title": "One", "content": {"id": "1"}}], "start": 0, "size": 2},
             )
 
-        with self.assertRaisesRegex(Upstream, "inconsistent content-search size"):
+        with self.assertRaisesRegex(Upstream, "inconsistent collection page offset or size"):
             await self.make_api(handler).list_child_pages("1", start=0, expected_username="sample-user")
 
 

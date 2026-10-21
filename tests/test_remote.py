@@ -481,7 +481,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(
             lambda _: httpx.Response(200, json={"results": [{"key": "SPACE", "name": "Synthetic"}], "size": 2})
         )
-        with self.assertRaisesRegex(Upstream, "inconsistent spaces page size"):
+        with self.assertRaisesRegex(Upstream, "inconsistent collection page offset or size"):
             await ConfluenceApi(settings(), transport).list_spaces(expected_username="sample-user")
 
     async def test_display_url_resolves_page_id_by_space_and_title(self) -> None:

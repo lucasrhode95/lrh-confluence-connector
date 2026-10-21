@@ -216,14 +216,9 @@ class PageStructure:
             limit=page_limit,
             expected_username=self._username,
         )
-        next_start = page.start + page.size
-        if page.has_more is not None:
-            server_has_more = page.has_more
-        elif page.total_size is not None:
-            server_has_more = next_start < page.total_size
-        else:
-            server_has_more = page.size == page_limit
-        more = page.size > 0 and server_has_more and next_start <= MAX_TRASH_OFFSET
+        next_start = page.next_start(page_limit)
+        server_has_more = next_start is not None
+        more = server_has_more and next_start <= MAX_TRASH_OFFSET
         return TrashListResult(
             pages=page.pages,
             start=page.start,
@@ -729,23 +724,14 @@ class PageStructure:
                 page = await self._api.list_child_pages(
                     parent_id, start=start, expected_username=self._username
                 )
-            if page.start != start or page.size != len(page.hits):
-                raise Upstream("Confluence returned an inconsistent page-hierarchy offset or size.")
             rows.extend(page.hits)
             if len(rows) > MAX_HIERARCHY_READ_PAGES:
                 raise InvalidRequest(
                     f"A page's child list exceeds the {MAX_HIERARCHY_READ_PAGES}-page read safety cap."
                 )
-            next_start = page.start + page.size
-            more = page.has_more if page.has_more is not None else (
-                next_start < page.total_size if page.total_size is not None else page.size == CHILD_PAGE_SIZE
-            )
-            if more and page.size == 0:
-                raise Upstream("Confluence returned an empty hierarchy page with a continuation.")
-            if not more:
+            next_start = page.next_start(CHILD_PAGE_SIZE)
+            if next_start is None:
                 return rows
-            if next_start <= start:
-                raise Upstream("Confluence did not advance the page-hierarchy offset.")
             start = next_start
 
     async def _resolve_page(self, reference: str, *, status: str | None = None) -> ResolvedPageReference:

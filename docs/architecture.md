@@ -107,9 +107,10 @@ Only rules that the code layout does not make obvious are listed here. The per-t
   the private settings, relative to `base_url` and its context path.
 - **Paging** advances on the returned `start + size`, never on the echoed `limit` or `content/search`'s
   `next` link, which skip results (research §5.2). Space listing reads 500 per request; children 500;
-  versions 200, at most 5,000; drafts and trash 100.
+  versions 200, at most 5,000; drafts and trash 100. The adapter validates each collection envelope;
+  mapped envelopes share continuation handling and reject empty pages claiming more results.
 - **Page reads** are three parallel requests: bodies (`view`, optional `storage`, version, history),
-  `child/attachment?limit=500` and `child/comment?depth=all`. A requested body that is missing or
+  attachments and comments (500 per request, at most 5,000 each; an incomplete collection raises). A requested body that is missing or
   malformed raises `Upstream`.
 - **The private move action** is isolated in `position_page` and `move_page_action`: `POST
   /pages/movepage.action` with `pageId`, `spaceKey`, `position`, `targetId` and `mode`. Application

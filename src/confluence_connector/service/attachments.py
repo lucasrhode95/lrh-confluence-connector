@@ -54,7 +54,7 @@ class AttachmentDownloads:
             AttachmentDownloadFailure(
                 attachment_id=attachment_id,
                 error=(
-                    "The attachment was not among the first 500 readable attachments for this page."
+                    "The attachment was not in the readable attachments for this page."
                 ),
             )
             for attachment_id in selected_ids

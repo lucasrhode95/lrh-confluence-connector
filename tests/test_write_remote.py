@@ -388,7 +388,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value, {"parent_id": "100"})
         self.assertEqual(restored.status, "current")
         self.assertEqual((trash.pages[0].page_id, trash.pages[0].modified_at), ("301", "2026-10-01T00:00:00Z"))
-        self.assertTrue(trash.has_more)
+        self.assertEqual(trash.next_start(100), 11)
         self.assertEqual((observed[2].method, observed[3].method), ("GET", "PUT"))
         property_body = json.loads(observed[3].content)
         self.assertEqual(property_body["version"], {"number": 4})
