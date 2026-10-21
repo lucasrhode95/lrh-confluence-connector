@@ -338,12 +338,8 @@ class PageTextService:
                 raise result
             if name == "attachments":
                 attachments = result
-                if len(attachments) == 500:
-                    notes.append("The attachment list reached its 500-item request limit and may be incomplete.")
             else:
                 remote_comments = result
-                if len(remote_comments) == 500:
-                    notes.append("The comment list reached its 500-item request limit and may be incomplete.")
 
         parsed_storage = None
         if page_format == "rich" or parse_scope.macros_from_storage:

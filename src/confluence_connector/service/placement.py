@@ -157,16 +157,9 @@ class PagePlacementResolver:
                     return page_id
                 selected = page_id
 
-            next_start = page.start + page.size
-            more = page.has_more if page.has_more is not None else (
-                next_start < page.total_size
-                if page.total_size is not None
-                else page.size == CHILD_PAGE_SIZE
-            )
-            if not more:
+            next_start = page.next_start(CHILD_PAGE_SIZE)
+            if next_start is None:
                 return selected
-            if page.size == 0 or next_start <= start:
-                raise Upstream("Confluence did not advance the sibling-list offset.")
             start = next_start
 
     async def _list_siblings(

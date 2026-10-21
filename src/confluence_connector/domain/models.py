@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from confluence_connector.domain.errors import Upstream
+
 ContentType = Literal["page", "blogpost", "comment", "attachment", "space", "user"]
 SearchMatch = Literal["all", "any", "phrase"]
 SearchFields = Literal["all", "title"]
@@ -129,16 +131,33 @@ class ContentSearchHit(BaseModel):
     sources: list[SearchSource] = Field(default_factory=list)
 
 
-class RemoteContentSearchPage(BaseModel):
+class PageEnvelope(BaseModel):
+    """Adapter-validated paging facts; continuation offsets never come from returned URLs."""
+
+    start: int
+    size: int
+    total_size: int | None = None
+    has_more: bool | None = None
+
+    def next_start(self, fallback_limit: int) -> int | None:
+        """Advance a collection page, failing on an empty page that claims more results."""
+        offset = self.start + self.size
+        more = self.has_more if self.has_more is not None else (
+            offset < self.total_size if self.total_size is not None else self.size == fallback_limit
+        )
+        if not more:
+            return None
+        if self.size == 0:
+            raise Upstream("Confluence returned an empty page with a continuation; the collection is incomplete.")
+        return offset
+
+
+class RemoteContentSearchPage(PageEnvelope):
     """One mapped Confluence search page before service-level cursor construction."""
 
     model_config = ConfigDict(extra="ignore")
 
     hits: list[ContentSearchHit]
-    start: int
-    size: int
-    total_size: int | None = None
-    has_more: bool | None = None
 
 
 class ContentSearchResult(BaseModel):
@@ -167,13 +186,10 @@ class PersonSummary(BaseModel):
     user_type: str | None = None
 
 
-class RemoteUserSearchPage(BaseModel):
+class RemoteUserSearchPage(PageEnvelope):
     model_config = ConfigDict(extra="ignore")
 
     users: list[PersonSummary]
-    start: int
-    size: int
-    total_size: int | None = None
 
 
 class UserSearchResult(BaseModel):
@@ -474,24 +490,16 @@ class DraftDeletionResult(BaseModel):
     permanent: bool = True
 
 
-class RemoteDraftPage(BaseModel):
+class RemoteDraftPage(PageEnvelope):
     model_config = ConfigDict(extra="ignore")
 
     drafts: list[DraftSummary]
-    start: int
-    size: int
-    total_size: int | None = None
-    has_more: bool | None = None
 
 
-class RemoteTrashPage(BaseModel):
+class RemoteTrashPage(PageEnvelope):
     model_config = ConfigDict(extra="ignore")
 
     pages: list[TrashPageSummary]
-    start: int
-    size: int
-    total_size: int | None = None
-    has_more: bool | None = None
 
 
 class LabelChangeFailure(BaseModel):
