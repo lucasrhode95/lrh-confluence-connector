@@ -16,7 +16,6 @@ from urllib.parse import urljoin
 
 import httpx
 
-from confluence_connector import config
 from confluence_connector.domain.errors import (
     AccountMismatch,
     AuthenticationRequired,
