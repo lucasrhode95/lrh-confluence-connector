@@ -10,14 +10,12 @@ from confluence_connector.domain.errors import (
     Conflict,
     ConnectorError,
     InvalidRequest,
-    Upstream,
 )
 from confluence_connector.domain.models import (
     DraftDeletionResult,
     DraftListResult,
     LabelChangeFailure,
     LabelChangeResult,
-    PageMetadata,
     PageWriteStatus,
     PageWriteResult,
     RemoteDraftPage,

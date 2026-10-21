@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from confluence_connector.domain.errors import InvalidRequest
-from confluence_connector.domain.models import PersonSummary, UserSearchResult
+from confluence_connector.domain.models import UserSearchResult
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.service import cursors
 

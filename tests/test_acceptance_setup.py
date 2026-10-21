@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 import run_acceptance
 import setup_acceptance
-from acceptance_fixtures import attachment_text, new_fixture, root_storage
+from acceptance_fixtures import attachment_text, new_fixture
 from confluence_connector.auth.store import StoredCredential
 from fakes.settings import settings
 
