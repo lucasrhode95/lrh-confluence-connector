@@ -35,7 +35,7 @@ MAX_TITLE_CHARS = 255
 MAX_WRITE_BODY_CHARS = 2_000_000
 MAX_DRAFT_OFFSET = 1_000_000
 MAX_DRAFT_LIMIT = DRAFT_PAGE_SIZE
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_-]{1,254})$")
+_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 _LABEL = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
 _DRAFT_CURSOR_KIND = "list_drafts"
 
@@ -497,7 +497,7 @@ def _space_key(value: Any) -> str:
     if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
         raise InvalidRequest(
             "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "optionally prefixed by ~ for a personal space."
+            "or a ~ personal-space key whose username may also contain dots and @."
         )
     return value
 

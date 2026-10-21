@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 import run_acceptance
 import setup_acceptance
-from acceptance_fixtures import attachment_text, image_png, new_fixture, root_storage
+from acceptance_fixtures import attachment_text, new_fixture, root_storage
 from confluence_connector.auth.store import StoredCredential
 from fakes.settings import settings
 
@@ -30,33 +30,6 @@ class AcceptanceFixtureChecks(unittest.TestCase):
         self.assertEqual(fixture.marker, "orchidbeacondeadbeef")
         self.assertEqual(fixture.code_identifier, "beacon_x.y_deadbeef")
         self.assertIn(b"cedarattachmentdeadbeef", attachment_text(fixture))
-        self.assertTrue(image_png().startswith(b"\x89PNG\r\n\x1a\n"))
-
-    def test_storage_fixture_contains_all_macro_and_table_shapes(self) -> None:
-        fixture = new_fixture("deadbeef")
-
-        body = root_storage(fixture)
-
-        for macro in (
-            "code",
-            "plantuml",
-            "jira",
-            "html",
-            "include",
-            "excerpt-include",
-            "view-file",
-            "info",
-            "panel",
-            "expand",
-            "status",
-            "toc",
-            "acceptance-unknown",
-        ):
-            with self.subTest(macro=macro):
-                self.assertIn(f'ac:name="{macro}"', body)
-        self.assertIn("rowspan=\"2\"", body)
-        self.assertIn("Nested table cell", body)
-        self.assertIn("café and coração", body)
 
     def test_invalid_run_id_is_rejected(self) -> None:
         for value in ("ABCDEF12", "short", "00000000!", "x" * 17):

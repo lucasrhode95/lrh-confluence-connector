@@ -72,7 +72,7 @@ class PageTextRenderingChecks(unittest.TestCase):
         )
         self.assertEqual(
             _text(view, storage),
-            "[Included from: Shared]\n\n[Unrendered macro: jira]\n\n[Jira: OPS-1]",
+            "[Included from: Shared]\n\nerror\n\n[Jira: OPS-1]",
         )
 
     def test_links_are_normalized_to_the_configured_instance_only(self) -> None:

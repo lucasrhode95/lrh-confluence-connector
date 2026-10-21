@@ -20,7 +20,7 @@ from confluence_connector.remote.links import PageLinkResolver
 DEFAULT_DEPTH = 3
 MAX_DEPTH = 5
 MAX_TREE_PAGES = 1_000
-_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_-]{1,254})$")
+_SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
 class PageTree:
@@ -129,6 +129,8 @@ class PageTree:
         start = 0
         while state.complete:
             result = await fetch_page(start)
+            if result.start != start or result.size != len(result.hits):
+                raise Upstream("Confluence returned an inconsistent page-tree offset or size.")
             for index, hit in enumerate(result.hits):
                 if state.total_pages >= MAX_TREE_PAGES:
                     state.complete = False
@@ -149,9 +151,11 @@ class PageTree:
             if result.size == 0:
                 break
             more = (
-                next_start < result.total_size
-                if result.total_size is not None
-                else result.size == CHILD_PAGE_SIZE
+                result.has_more if result.has_more is not None else (
+                    next_start < result.total_size
+                    if result.total_size is not None
+                    else result.size == CHILD_PAGE_SIZE
+                )
             )
             if not more:
                 break
@@ -195,7 +199,7 @@ def _space_key(value: Any) -> str:
     if not isinstance(value, str) or not _SPACE_KEY.fullmatch(value):
         raise InvalidRequest(
             "space_key must contain 1 to 255 letters, digits, underscores or hyphens, "
-            "optionally prefixed by ~ for a personal space."
+            "or a ~ personal-space key whose username may also contain dots and @."
         )
     return value
 

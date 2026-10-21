@@ -53,6 +53,11 @@ The acceptance suite checks the connector, not Confluence, against pages with kn
 | 5 | `run_acceptance.py … --run-live` | No: reads, downloads and exports only |
 | 6 | `run_acceptance.py … --run-live --allow-writes` | **Yes**: page, draft, label, move, trash and restore checks on scratch pages |
 
+The automatic fixture omits the HTML macro because public rich writes reject it. HTML-macro rendering
+has offline coverage; checking it live requires separately authorized manual fixture content. Move checks
+reread metadata and complete sibling lists; delete/restore checks return their scratch pages to trash
+and reread their status. Fixture body refresh rereads the version after moving a page.
+
 Steps 2, 5 and 6 need the user's authorization for that run. Missing settings or manual steps make only
 the dependent checks `skipped`. After an interrupted run, inspect the fixture before retrying. The runner
 reports check names, statuses, timings and exception types, never response text or page content.

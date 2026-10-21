@@ -120,8 +120,13 @@ class ConfluenceApi:
                 reported_total = reported_totals[status]
                 if reported_total is not None and next_start >= reported_total:
                     break
-                if page_size < SPACE_PAGE_SIZE and reported_total is None:
-                    break
+                if reported_total is None:
+                    if "_links" in payload:
+                        more = _has_next_link(payload)
+                    else:
+                        more = page_size == SPACE_PAGE_SIZE
+                    if not more:
+                        break
                 if next_start <= start:
                     raise Upstream("Confluence did not advance the spaces page offset.")
                 start = next_start
@@ -133,10 +138,21 @@ class ConfluenceApi:
         return SpaceList(spaces=results, total_count=total_count, truncated=len(results) < total_count)
 
     async def find_page_by_title(
-        self, space_key: str, title: str, *, expected_username: str
+        self, space_key: str, title: str, *, expected_username: str, status: str | None = None
     ) -> str:
         """Resolve a legacy display URL by its validated space key and decoded title."""
-        page_id = await self.find_page_id_by_title(space_key, title, expected_username=expected_username)
+        if status == "trashed":
+            payload = await self._transport.get_json(
+                self._content_collection_route(),
+                params={"type": "page", "spaceKey": space_key, "title": title, "status": "trashed", "limit": "2"},
+                expected_username=expected_username,
+            )
+            rows = _result_rows(payload)
+            if len(rows) > 1:
+                raise Upstream("The display URL matched more than one trashed page.")
+            page_id = str(rows[0]["id"]) if rows and isinstance(rows[0], dict) and _page_id(rows[0].get("id")) else None
+        else:
+            page_id = await self.find_page_id_by_title(space_key, title, expected_username=expected_username)
         if page_id is None:
             raise NotFound("The page in this display URL no longer matches a page; it may have been renamed.")
         return page_id
@@ -266,7 +282,31 @@ class ConfluenceApi:
             params=params,
             expected_username=expected_username,
         )
-        return _page_metadata(payload, base_url=str(self._settings["base_url"]))
+        metadata = _page_metadata(payload, base_url=str(self._settings["base_url"]))
+        raw_metadata = payload.get("metadata")
+        raw_labels = raw_metadata.get("labels") if isinstance(raw_metadata, dict) else None
+        if isinstance(raw_labels, dict) and _has_next_link(raw_labels):
+            labels: list[str] = []
+            start = 0
+            while True:
+                label_page = await self._transport.get_json(
+                    self._content_route(page_id) + "/label",
+                    params={"start": str(start), "limit": "200"},
+                    expected_username=expected_username,
+                )
+                rows = _result_rows(label_page)
+                page_start = _nonnegative_int(label_page.get("start"), default=start)
+                size = _nonnegative_int(label_page.get("size"), default=len(rows))
+                if page_start != start or size != len(rows):
+                    raise Upstream("Confluence returned inconsistent label paging.")
+                labels.extend(_labels(rows))
+                if not _has_next_link(label_page):
+                    break
+                if not size or start + size > 100_000:
+                    raise Upstream("Confluence did not complete label paging within the safety bound.")
+                start += size
+            metadata.labels = list(dict.fromkeys(labels))
+        return metadata
 
     async def page_supports_delete(self, page_id: str, *, expected_username: str) -> bool:
         """Read the current user's page operations; the caller validates ``page_id``."""
@@ -304,13 +344,15 @@ class ConfluenceApi:
         parent_id: str | None,
         expected_username: str,
     ) -> PageMetadata:
-        """Change a same-space page's ancestors through the documented content update."""
+        """Change a same-space page's parent; root moves require the UI topLevel action."""
+        if parent_id is None:
+            raise InvalidRequest("Root moves require the topLevel move action.")
         body: dict[str, Any] = {
             "id": page_id,
             "type": "page",
             "title": title,
             "version": {"number": next_version},
-            "ancestors": [{"id": parent_id}] if parent_id is not None else [],
+            "ancestors": [{"id": parent_id}],
         }
         payload = await self._transport.send_json(
             "PUT", self._content_route(page_id), body=body, expected_username=expected_username
@@ -936,6 +978,7 @@ def _content_search_page(
         start=start,
         size=size,
         total_size=total_size,
+        has_more=_has_next_link(payload) if "_links" in payload else None,
     )
 
 
@@ -974,7 +1017,7 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
     links = links if isinstance(links, dict) else {}
     extensions = content.get("extensions")
     extensions = extensions if isinstance(extensions, dict) else {}
-    position = _optional_nonnegative_int(content.get("position", extensions.get("position")))
+    position = _optional_position(content.get("position", extensions.get("position")))
     raw_url = _optional_string(value.get("url")) or _optional_string(links.get("webui"))
     return ContentSearchHit(
         content_id=content_id,
@@ -1158,7 +1201,7 @@ def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:
                 title=title,
                 space_key=_optional_string(space.get("key")),
                 url=_same_instance_link(base_url, links.get("webui")),
-                position=_optional_nonnegative_int(item.get("position")),
+                position=_optional_position(item.get("position")),
             )
         )
     return summaries
@@ -1348,6 +1391,13 @@ def _identifier(value: Any) -> str | None:
 
 def _optional_string(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _optional_position(value: Any) -> int | None:
+    """Map the server's unordered-position sentinels without weakening numeric count validation."""
+    if value in (-1, "-1", "none"):
+        return None
+    return _optional_nonnegative_int(value)
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:

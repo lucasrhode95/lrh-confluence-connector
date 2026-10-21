@@ -147,7 +147,7 @@ async def _run_live(
     if services.username.casefold() != status.username.casefold():
         report.fail("authentication", "AccountChanged", _elapsed_ms(started))
         return report
-    await report.run("authentication", _pass())
+    await report.run("authentication", _pass)
     started = time.perf_counter()
     try:
         page_ids = await _locate_fixture(services, fixture, personal_space)
@@ -194,7 +194,7 @@ async def _run_live(
             report.skip(name, "fixture lookup failed")
         return report
 
-    await report.run("fixture", _pass())
+    await report.run("fixture", _pass)
     cross_space_key = (settings.get("acceptance") or {}).get("cross_space_key")
     await report.run(
         "spaces",
@@ -550,10 +550,13 @@ async def _check_downloads_and_exports(
     download = await services.attachments.download_attachments(pages.root, selected)
     if len(download.files) != 2 or download.failures:
         raise AssertionError("selected attachment download did not complete")
-    downloaded = {item.filename: Path(item.path).read_bytes() for item in download.files}
-    if fixture.text_filename not in downloaded or fixture.attachment_marker.encode() not in downloaded[fixture.text_filename]:
+    source_ids = {item.filename: item.attachment_id for item in attachments}
+    downloaded = {item.attachment_id: Path(item.path).read_bytes() for item in download.files}
+    text_bytes = downloaded.get(source_ids[fixture.text_filename], b"")
+    image_bytes = downloaded.get(source_ids[fixture.image_filename], b"")
+    if fixture.attachment_marker.encode() not in text_bytes:
         raise AssertionError("downloaded text attachment omitted its synthetic marker")
-    if fixture.image_filename not in downloaded or not downloaded[fixture.image_filename].startswith(b"\x89PNG\r\n\x1a\n"):
+    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         raise AssertionError("downloaded image attachment was not the synthetic PNG")
     single = await services.exports.export_pages(pages.root, format="text")
     if Path(single.path).suffix != ".txt" or not Path(single.path).is_file():
@@ -689,13 +692,15 @@ async def _check_move_and_order(
     moved = await services.structure.move_page(
         created.page_id, parent_id=pages.child_one, position="last"
     )
-    if not moved.moved or moved.parent_id != pages.child_one:
+    if not moved.moved or moved.parent_id != pages.child_one or moved.position_applied is not True:
         raise AssertionError("same-space parent move did not complete")
+    await _assert_placement(services, created.page_id, pages.personal_space, pages.child_one, "last")
     returned = await services.structure.move_page(
         created.page_id, parent_id=pages.root, position="first"
     )
-    if not returned.moved or returned.parent_id != pages.root:
+    if not returned.moved or returned.parent_id != pages.root or returned.position_applied is not True:
         raise AssertionError("same-space return move did not complete")
+    await _assert_placement(services, created.page_id, pages.personal_space, pages.root, "first")
     await services.structure.delete_page(created.page_id)
 
 
@@ -717,12 +722,46 @@ async def _check_cross_space_move(
     cross = await services.structure.move_page(
         created.page_id, space_key=cross_space_key, position="last"
     )
-    if not cross.moved or cross.space_key != cross_space_key:
+    if not cross.moved or cross.space_key != cross_space_key or cross.position_applied is not True:
         raise AssertionError("cross-space long task did not confirm its target")
+    await _assert_placement(services, created.page_id, cross_space_key, None, "last")
     back = await services.structure.move_page(created.page_id, space_key=pages.personal_space)
-    if not back.moved or back.space_key != pages.personal_space:
+    if not back.moved or back.space_key != pages.personal_space or back.position_applied is not True:
         raise AssertionError("cross-space return move did not confirm its target")
+    await _assert_placement(services, created.page_id, pages.personal_space, None, "last")
     await services.structure.delete_page(created.page_id)
+
+
+async def _assert_placement(
+    services: Services, page_id: str, space_key: str, parent_id: str | None, position: str
+) -> None:
+    """Independently verify a move's parent, space and order using the read API."""
+    metadata = await services.api.get_page_metadata(page_id, expected_username=services.username)
+    actual_parent = metadata.ancestors[-1].page_id if metadata.ancestors else None
+    if metadata.space_key != space_key or actual_parent != parent_id:
+        raise AssertionError("move metadata does not match its requested destination")
+    ids: list[str] = []
+    start = 0
+    for _ in range(MAX_CONTINUATION_PAGES):
+        if parent_id is None:
+            page = await services.api.list_space_root_pages(space_key, start=start, expected_username=services.username)
+        else:
+            page = await services.api.list_child_pages(parent_id, start=start, expected_username=services.username)
+        if page.start != start or page.size != len(page.hits):
+            raise AssertionError("ordered children returned inconsistent paging")
+        ids.extend(hit.content_id for hit in page.hits)
+        start += page.size
+        more = page.has_more if page.has_more is not None else (
+            start < page.total_size if page.total_size is not None else page.size == 500
+        )
+        if not more:
+            break
+        if page.size == 0:
+            raise AssertionError("ordered children did not advance")
+    else:
+        raise AssertionError("ordered children exceeded the acceptance paging bound")
+    if not ids or (ids[0] if position == "first" else ids[-1]) != page_id:
+        raise AssertionError("move did not apply the requested sibling order")
 
 
 async def _check_delete_and_restore(
@@ -750,10 +789,12 @@ async def _check_delete_and_restore(
     move_result = await services.structure.delete_page(move_parent.page_id, children="move_up")
     if not move_result.complete or not any(item.page_id == move_child.page_id and item.status == "moved_up" for item in move_result.pages):
         raise AssertionError("move_up delete did not preserve its child")
+    await _assert_placement(services, move_child.page_id, pages.personal_space, pages.root, "last")
     restored = await services.structure.restore_page(move_parent.page_id)
     if restored.placement_source != "saved_property" or restored.placement_status != "applied":
         raise AssertionError("saved placement was not applied during restore")
     await services.structure.delete_page(move_child.page_id)
+    await services.structure.delete_page(move_parent.page_id)
 
     trash_parent = await services.writes.create_page(
         f"Connector Lab Subtree Delete [{fixture.run_id}]",
@@ -782,7 +823,14 @@ async def _check_delete_and_restore(
     }:
         raise AssertionError("fixture subtree was missing from the trash listing")
     for page_id in (trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id):
-        await services.structure.restore_page(page_id)
+        restored_page = await services.structure.restore_page(page_id)
+        if restored_page.placement_status != "applied":
+            raise AssertionError("subtree restoration did not apply saved placement")
+    retrash = await services.structure.delete_page(trash_parent.page_id, children="trash")
+    if not retrash.complete or {item.page_id for item in retrash.pages if item.status == "trashed"} != {
+        trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id
+    }:
+        raise AssertionError("restored subtree cleanup did not trash every scratch page")
 
     caller_page = await services.writes.create_page(
         f"Connector Lab Caller Restore [{fixture.run_id}]",
@@ -809,6 +857,16 @@ async def _check_delete_and_restore(
     if fallback.placement_source != "space_root" or fallback.placement_status != "root":
         raise AssertionError("missing placement property did not fall back to space root")
     await services.structure.delete_page(root_fallback.page_id)
+
+    for page_id in (
+        move_parent.page_id, move_child.page_id, trash_parent.page_id,
+        trash_child.page_id, trash_grandchild.page_id, caller_page.page_id, root_fallback.page_id,
+    ):
+        metadata = await services.api.get_page_metadata(
+            page_id, status="trashed", expected_username=services.username
+        )
+        if metadata.status != "trashed":
+            raise AssertionError("scratch page cleanup left a current page")
 
 
 def _local_day(value: str | None, timezone_name: str) -> str:

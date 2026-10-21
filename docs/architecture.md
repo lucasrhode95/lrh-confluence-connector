@@ -79,6 +79,7 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 - `TokenStore` keeps one record, the PAT and its username, in `msal-extensions` encrypted persistence
   under `CrossPlatLock`. No plaintext fallback: if encryption is unavailable, every command fails with
   `SecureStorageUnavailable`.
+- Explicit sign-out clears even malformed JSON without decoding it, under the same encrypted-store lock.
 - `save` refuses a different username until `sign_out`. Every request loads the record again, so a
   sign-out or account switch takes effect on the next request in every process.
 
@@ -142,8 +143,11 @@ matches after the CQL hits, within `limit`. [`cql_dates.py`](../src/confluence_c
 converts UTC bounds to CQL minutes in `cql_timezone` (requirements §7).
 
 **[`timezone_calibration.py`](../src/confluence_connector/service/timezone_calibration.py)** takes the
-newest readable page and binary-searches `lastmodified >=` minute cutoffs within ±15 hours to find
-CQL's effective offset. The CLI calls it; `config.py` writes the result atomically under a lock.
+newest readable page, reads its reference instant from REST metadata, and binary-searches
+`lastmodified >=` minute cutoffs within ±15 hours to find
+CQL's effective offset. The REST sample timestamp is rechecked as a UTC instant after measurement; a changed sample retries
+once, then fails without a result to persist. The CLI calls it; `config.py` writes the result atomically
+under a lock.
 
 **[`tree.py`](../src/confluence_connector/service/tree.py)** reads space roots with `depth=root` and
 each page's children in server order, stopping at depth 5 or 1,000 pages with `complete: false`.
@@ -156,9 +160,12 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 2. A BeautifulSoup pass over `view` replaces each `data-macro-name` wrapper with its marker, pairing
    wrappers with storage macros by name and document order (wrappers inside a resolved include take no
    local source); turns images and attachment links into markers with typed references; renders
-   mentions and tasks; makes same-instance links absolute; and drops scripts and styles.
-3. markdownify converts the result, with one table override (merged cells repeated; nested tables or
-   code fall back to minimal HTML). The text is split into blocks at blank lines outside fenced code.
+   mentions and tasks; makes same-instance links absolute; and drops scripts and styles. Attachment
+   identity is matched only after checking origin and source ownership; included content cannot inherit
+   local attachment IDs by filename. Jira without a known storage key keeps its rendered text.
+3. markdownify converts the result, with table handling (merged cells repeated; nested tables or
+   code fall back to minimal HTML) and code fences longer than any backtick run in the source code.
+   The text is split at blank lines outside matching fenced blocks, preserving fence-like code lines.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body
@@ -398,6 +405,9 @@ Moves one current page under exactly one of `parent_id` or `space_key` (the root
   Confluence refuses the move, recreating the page in the target space and trashing the original is a
   separate plan that loses the page ID, history and comments.
 
+D7 now requires one move action without creating a page version. The two-step implementation described
+above has not yet been replaced; see the [implementation item](roadmap.md#one-route-for-same-space-moves).
+
 #### `delete_page`
 
 Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash` (requirements §10.5).
@@ -405,8 +415,10 @@ Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash
 - The whole affected hierarchy is read first (at most 5,000 pages) and `delete` permission is checked
   on every page before any write. `trash` refuses more than 100 pages, with the count.
 - Each trashed page's parent and position are saved first, best effort, for `restore_page`.
+- `move_up` rechecks each child’s parent and space immediately before its move, skipping changes.
+  Root moves use the `topLevel` action; an empty ancestor list is never used to move to the root.
 - The result lists every affected page with its former parent and position and its status
-  (`trashed`, `moved_up`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
+  (`trashed`, `moved_up`, `skipped`, `failed`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
   likely need a space administrator.
 
 #### `list_trash`

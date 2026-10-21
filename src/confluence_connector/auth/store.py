@@ -60,7 +60,14 @@ class TokenStore:
         """Clear the token under lock; an empty encrypted value also clears keychain backends."""
         with self._lock():
             persistence = self._persistence()
-            existed = self._read(persistence) is not None
+            try:
+                existed = bool(persistence.load())
+            except PersistenceNotFound:
+                existed = False
+            except Exception as exc:
+                raise SecureStorageUnavailable(
+                    f"Encrypted token storage could not read the credential ({type(exc).__name__})."
+                ) from None
             try:
                 persistence.save("")
             except Exception as exc:
