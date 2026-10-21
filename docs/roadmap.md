@@ -360,8 +360,15 @@ compilation passes.
 
 #### Rich-body checks on BeautifulSoup
 
-[`service/write_markup.py`](../src/confluence_connector/service/write_markup.py) is a 362-line
-hand-written `HTMLParser`. Rebuild it on BeautifulSoup, already a dependency, as was done for page text.
+**Implemented, awaiting review (2026-10-21).** Replaced the hand-built `HTMLParser` span tree with
+BeautifulSoup for rich-body safety checks, nesting limits, code/expand conversion and content-loss
+identity. Existing focused tests and the full offline suite pass (282 tests, one platform skip); source
+and test compilation passes.
+
+**Validation:** BeautifulSoup repairs some malformed markup during serialization (`<p>unclosed` becomes
+`<p>unclosed</p>`). D5 describes Confluence returning a 400 with row and column for unparseable markup.
+Confirm whether this recovery behavior is acceptable or whether malformed input must reach Confluence
+unchanged to retain its error response.
 
 #### Parse storage once per read
 
