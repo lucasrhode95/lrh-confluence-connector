@@ -381,9 +381,11 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[5].method, "DELETE")
         self.assertEqual(observed[6].method, "DELETE")
         self.assertEqual(dict(observed[6].url.params), {})
-        self.assertEqual(observed[7].url.params["status"], "trashed")
         self.assertEqual(json.loads(observed[7].content)["status"], "current")
-        self.assertEqual(observed[8].url.params["status"], "trashed")
+        self.assertEqual(
+            [observed[index].url.params["status"] for index in (7, 8)],
+            ["trashed", "trashed"],
+        )
         self.assertEqual(observed[8].url.params["spaceKey"], "SYNTH")
 
     async def test_async_move_action_polls_documented_long_task(self) -> None:
