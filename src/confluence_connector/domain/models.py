@@ -138,6 +138,7 @@ class RemoteContentSearchPage(BaseModel):
     start: int
     size: int
     total_size: int | None = None
+    has_more: bool | None = None
 
 
 class ContentSearchResult(BaseModel):
@@ -390,7 +391,7 @@ class PageStructureOutcome(BaseModel):
     former_space_key: str
     former_parent_id: str | None = None
     former_position: int | None = None
-    status: Literal["trashed", "moved_up", "not_attempted", "unknown"]
+    status: Literal["trashed", "moved_up", "skipped", "failed", "not_attempted", "unknown"]
     detail: str | None = None
 
 

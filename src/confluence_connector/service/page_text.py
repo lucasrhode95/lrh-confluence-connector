@@ -24,7 +24,7 @@ _INCLUDE_MACROS = frozenset({"include", "excerpt-include"})
 _TEXT_MACROS = frozenset({"code", "expand", "status", "toc", "view-file", *_PANELS})
 _PAGE_PATH = re.compile(r"/spaces/[^/]+/pages/(\d+)(?:/|$)")
 _BRUSH = re.compile(r"brush:\s*([\w+#-]+)")
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^\s*(?:>\s*)*(`{3,}|~{3,})(.*)$")
 
 
 @dataclass(frozen=True)
@@ -120,13 +120,16 @@ def _prepare_view(
     for tag in soup.find_all(["script", "style"]):
         tag.decompose()
     references: list[PageReference] = []
+    for node in soup.find_all(["img", "a"]):
+        if node.find_parent(attrs={"data-macro-name": lambda value: value in _INCLUDE_MACROS}):
+            node["data-connector-included"] = "true"
     _replace_macros(soup, macros)
     by_id = {item.attachment_id: item for item in attachments}
     by_name = {item.filename.casefold(): item for item in attachments}
     for mention in soup.select(".user-mention, a.confluence-userlink"):
         mention.replace_with(f"@{_text(mention)}")
     for image in soup.find_all("img"):
-        _replace_image(image, page_id, by_id, by_name, storage_files, references)
+        _replace_image(image, page_id, by_id, by_name, storage_files, base_url, references)
     for link in soup.find_all("a"):
         _replace_link(link, page_id, by_id, by_name, base_url, references)
     for item in soup.select("ul.inline-task-list > li"):
@@ -187,7 +190,12 @@ def _replace_macro(soup: BeautifulSoup, node: Tag, name: str, source: _Macro | N
         node.replace_with(f"[Status: {value}]" if value else "[Status]")
     elif name == "jira":
         key = parameters.get("key")
-        node.replace_with(f"[Jira: {key}]" if key else "[Unrendered macro: jira]")
+        if key:
+            node.replace_with(f"[Jira: {key}]")
+        elif _text(node):
+            node.unwrap()
+        else:
+            node.replace_with("[Unrendered macro: jira]")
     elif name == "plantuml":
         _replace_with_code(soup, node, "[Diagram: plantuml]", source.body if source else "", "plantuml")
     elif name in _INCLUDE_MACROS:
@@ -241,11 +249,19 @@ def _replace_image(
     by_id: dict[str, PageAttachment],
     by_name: dict[str, PageAttachment],
     storage_files: dict[str, str],
+    base_url: str | None,
     references: list[PageReference],
 ) -> None:
     attachment_id = image.get("data-linked-resource-id") or image.get("data-attachment-id")
-    filename = image.get("data-linked-resource-default-alias") or storage_files.get(attachment_id or "", "")
-    attachment = by_id.get(attachment_id or "") or by_name.get(filename.casefold())
+    filename = image.get("data-linked-resource-filename") or image.get("data-linked-resource-default-alias") or storage_files.get(attachment_id or "", "")
+    source_url = image.get("src") or ""
+    absolute = _instance_url(source_url, base_url) if source_url else None
+    owner = _attachment_owner(image, page_id, absolute)
+    local = owner == page_id and (not source_url or absolute is not None)
+    attachment = (by_id.get(attachment_id) if attachment_id else by_name.get(filename.casefold())) if local else None
+    if source_url and absolute is None:
+        attachment_id = None
+        owner = None
     if attachment is not None:
         filename = attachment.filename
     if image.get("class") and "emoticon" in image["class"]:
@@ -261,8 +277,8 @@ def _replace_image(
             filename=filename or None,
             media_type=attachment.media_type if attachment else None,
             size=attachment.file_size if attachment else None,
-            owner_page_id=page_id or None,
-            url=attachment.download_url if attachment else None,
+            owner_page_id=owner,
+            url=attachment.download_url if attachment else absolute or source_url or None,
             alt_text=alt or None,
         )
     )
@@ -276,7 +292,12 @@ def _replace_link(
     base_url: str | None,
     references: list[PageReference],
 ) -> None:
+    href = link.get("href")
+    absolute = _instance_url(href, base_url) if href else None
+    if href and absolute is None:
+        return
     resource_type = (link.get("data-linked-resource-type") or "").casefold()
+    owner = _attachment_owner(link, page_id, absolute)
     is_attachment = (
         resource_type == "attachment"
         or (resource_type != "page" and bool(link.get("data-linked-resource-default-alias")))
@@ -286,7 +307,7 @@ def _replace_link(
     if is_attachment:
         attachment_id = link.get("data-linked-resource-id") or ""
         filename = link.get("data-linked-resource-default-alias") or _text(link)
-        attachment = by_id.get(attachment_id) or by_name.get(filename.casefold())
+        attachment = (by_id.get(attachment_id) if attachment_id else by_name.get(filename.casefold())) if owner == page_id else None
         link.replace_with(f"[File: {attachment.filename if attachment else filename}]")
         references.append(
             PageReference(
@@ -295,8 +316,8 @@ def _replace_link(
                 filename=attachment.filename if attachment else filename or None,
                 media_type=attachment.media_type if attachment else None,
                 size=attachment.file_size if attachment else None,
-                owner_page_id=page_id or None,
-                url=attachment.download_url if attachment else None,
+                owner_page_id=owner,
+                url=attachment.download_url if attachment else absolute,
             )
         )
         return
@@ -309,11 +330,23 @@ def _replace_link(
         return  # an external link stays as written
     link["href"] = absolute
     target = link.get("data-linked-resource-id") if resource_type == "page" else None
-    target = target or link.get("data-content-id") or _page_id_from_url(absolute)
+    target = target or link.get("data-content-id") or link.get("data-page-id") or _page_id_from_url(absolute)
     if target and target.isdecimal():
         references.append(
             PageReference(kind="page", page_id=target, title=_text(link) or None, owner_page_id=page_id or None, url=absolute)
         )
+
+
+def _attachment_owner(node: Tag, page_id: str, url: str | None) -> str | None:
+    """Read attachment ownership from source attributes/URL; includes never inherit local ownership."""
+    owner = node.get("data-linked-resource-container-id")
+    if owner and owner.isdecimal():
+        return owner
+    if url:
+        match = re.search(r"/download/attachments/(\d+)/", urlsplit(url).path)
+        if match:
+            return match.group(1)
+    return None if node.get("data-connector-included") else page_id or None
 
 
 def _instance_url(href: str, base_url: str | None) -> str | None:
@@ -322,7 +355,10 @@ def _instance_url(href: str, base_url: str | None) -> str | None:
     Root-relative links gain the configured context path (for example ``/wiki``) when they lack it.
     Without a configured base URL, only relative links count as same-instance and stay relative.
     """
-    parts = urlsplit(href)
+    try:
+        parts = urlsplit(href)
+    except ValueError:
+        return None
     if base_url is None:
         return href if not parts.scheme and not parts.netloc else None
     base = urlsplit(base_url)
@@ -351,6 +387,18 @@ def _page_id_from_url(url: str) -> str | None:
 
 class _ConfluenceMarkdown(MarkdownConverter):
     """markdownify with the D3 table rule: repeated merged cells, minimal HTML for complex tables."""
+
+    def convert_pre(self, el, text, parent_tags):
+        rendered = super().convert_pre(el, text, parent_tags)
+        # Use a fence longer than any backtick run in the original code.
+        runs = [len(match.group()) for match in re.finditer(r"`+", el.get_text())]
+        length = max(3, max(runs, default=0) + 1)
+        if length > 3:
+            stripped = rendered.strip("\n")
+            opening, body = stripped.split("\n", 1)
+            body, _ = body.rsplit("\n", 1)
+            return "\n\n" + "`" * length + opening[3:] + "\n" + body + "\n" + "`" * length + "\n\n"
+        return rendered
 
     def convert_table(self, el, text, parent_tags):
         if any(cell.find(["table", "pre"]) for cell in el.find_all(["td", "th"])):
@@ -442,12 +490,17 @@ def _span(value: str | None) -> int:
 def _split_blocks(markdown: str) -> list[str]:
     blocks: list[str] = []
     current: list[str] = []
-    fenced = False
+    fence: str | None = None
     for line in markdown.splitlines():
         line = line.rstrip()
-        if _FENCE.match(line):
-            fenced = not fenced
-        if not line and not fenced:
+        match = _FENCE.match(line)
+        if match:
+            delimiter, suffix = match.groups()
+            if fence is None:
+                fence = delimiter
+            elif delimiter[0] == fence[0] and len(delimiter) >= len(fence) and not suffix.strip():
+                fence = None
+        if not line and fence is None:
             if current:
                 blocks.append("\n".join(current))
                 current = []
@@ -502,12 +555,14 @@ def _storage_references(storage_html: str, page_id: str, macros: list[_Macro]) -
                 )
             )
         elif node.name == "ri:attachment" and (node.get("ri:filename") or node.get("ri:content-id")):
+            owner_page = node.find("ri:page")
+            owner = (owner_page.get("ri:content-id") or owner_page.get("ri:page-id")) if owner_page else page_id
             references.append(
                 PageReference(
                     kind="attachment",
                     attachment_id=node.get("ri:content-id"),
                     filename=node.get("ri:filename"),
-                    owner_page_id=page_id,
+                    owner_page_id=owner,
                 )
             )
         elif node.name == "ac:inline-comment-marker":

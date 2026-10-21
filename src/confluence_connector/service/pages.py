@@ -14,6 +14,7 @@ from confluence_connector.domain.errors import (
     AuthenticationRequired,
     ConnectorError,
     InvalidRequest,
+    Upstream,
 )
 from confluence_connector.domain.models import (
     PageAttachment,

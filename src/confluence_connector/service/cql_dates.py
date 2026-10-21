@@ -86,7 +86,7 @@ def cql_date_literal(
             raise InvalidRequest(f"scope.{name} must be an ISO date.") from None
     if cql_timezone is None:
         raise InvalidRequest(
-            "Timestamp filters require cql_timezone; run `confluence-connector status --check` to calibrate it."
+            "Timestamp filters require cql_timezone; run `confluence-connector status --check` to calibrate it, then restart the MCP client."
         )
     try:
         moment = datetime.fromisoformat(value.replace("Z", "+00:00"))

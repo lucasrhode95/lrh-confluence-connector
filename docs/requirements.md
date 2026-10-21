@@ -250,10 +250,12 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - Placement is one `parent_id` (the space follows from it) or `space_key` alone for the root, plus an
   optional `position`: `first`, `last` (default), or `before`/`after` a `sibling` under the same parent.
   A `space_key` that disagrees with the parent fails the call.
-- Same-space parent changes use the documented content update; positions use the private
-  `movepage.action`. If positioning fails after a create or move, the page stays and the result says the
-  position was not applied. Whether to use one route for both is open
-  ([roadmap](roadmap.md#one-route-for-same-space-moves)).
+- Same-space moves use the private `movepage.action` for both parent changes and sibling positioning,
+  in one request, without creating a page version. A move alone must not create a content version.
+  This deliberately makes the verified private action required for all same-space moves; failures are
+  reported without falling back to a version-creating content update. After page creation, a refused
+  positioning action leaves the created page in place and reports that positioning was not applied.
+  Implementation is tracked in the [roadmap](roadmap.md#one-route-for-same-space-moves).
 - Cross-space moves use `movepage.action` with the target space and wait on the documented long-task
   route; ID, version, children, attachments, comments and labels are kept (research §6.3). If
   Confluence refuses one, the tool description tells agents that recreating the page in the target
@@ -280,6 +282,10 @@ children become top-level pages when it is trashed (research §6.4). The connect
   Confluence exposes no deletion time or author.
 - Results list every affected page with its former parent and position, and whether its step was done,
   uncertain or not attempted. A failed step stops the operation; nothing is undone automatically.
+
+Delete outcomes distinguish confirmed `trashed`/`moved_up`, a concurrent parent/space change (`skipped`),
+a definite operation failure (`failed`), uncertain application (`unknown`), and later steps
+(`not_attempted`). A child moved elsewhere after preflight is not moved back by `move_up`.
 
 ## 11. Reliability
 
