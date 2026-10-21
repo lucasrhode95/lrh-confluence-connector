@@ -354,13 +354,6 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         api = self.make_api(handler)
         self.assertTrue(await api.page_supports_delete("301", expected_username="sample-user"))
         self.assertTrue(await api.space_permissions_readable("SYNTH", expected_username="sample-user"))
-        await api.update_page_parent(
-            "301",
-            title="Synthetic page",
-            next_version=4,
-            parent_id="100",
-            expected_username="sample-user",
-        )
         await api.set_page_property(
             "301", "placement", {"parent_id": "100"}, expected_username="sample-user"
         )
@@ -382,19 +375,16 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.status, "current")
         self.assertEqual((trash.pages[0].page_id, trash.pages[0].modified_at), ("301", "2026-10-01T00:00:00Z"))
         self.assertTrue(trash.has_more)
-        parent_body = json.loads(observed[2].content)
-        self.assertEqual(parent_body["ancestors"], [{"id": "100"}])
-        self.assertEqual(parent_body["version"], {"number": 4})
-        self.assertEqual((observed[3].method, observed[4].method), ("GET", "PUT"))
-        property_body = json.loads(observed[4].content)
+        self.assertEqual((observed[2].method, observed[3].method), ("GET", "PUT"))
+        property_body = json.loads(observed[3].content)
         self.assertEqual(property_body["version"], {"number": 4})
+        self.assertEqual(observed[5].method, "DELETE")
         self.assertEqual(observed[6].method, "DELETE")
-        self.assertEqual(observed[7].method, "DELETE")
-        self.assertEqual(dict(observed[7].url.params), {})
+        self.assertEqual(dict(observed[6].url.params), {})
+        self.assertEqual(observed[7].url.params["status"], "trashed")
+        self.assertEqual(json.loads(observed[7].content)["status"], "current")
         self.assertEqual(observed[8].url.params["status"], "trashed")
-        self.assertEqual(json.loads(observed[8].content)["status"], "current")
-        self.assertEqual(observed[9].url.params["status"], "trashed")
-        self.assertEqual(observed[9].url.params["spaceKey"], "SYNTH")
+        self.assertEqual(observed[8].url.params["spaceKey"], "SYNTH")
 
     async def test_async_move_action_polls_documented_long_task(self) -> None:
         observed: list[httpx.Request] = []
@@ -477,14 +467,6 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/301/property/placement")
         self.assertEqual(observed[1].url.path, "/wiki/rest/api/content/301/property")
         self.assertEqual(json.loads(observed[1].content), {"key": "placement", "value": {"space_key": "SYNTH"}})
-
-    async def test_parent_update_refuses_the_ineffective_empty_ancestors_route(self) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            self.fail("root PUT must never be sent")
-        with self.assertRaisesRegex(InvalidRequest, "topLevel"):
-            await self.make_api(handler).update_page_parent(
-                "301", title="Synthetic", next_version=4, parent_id=None, expected_username="sample-user"
-            )
 
     async def test_trash_page_uses_delete_without_purge_parameter(self) -> None:
         observed: list[httpx.Request] = []

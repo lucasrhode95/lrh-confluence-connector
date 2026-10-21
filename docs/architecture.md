@@ -398,15 +398,16 @@ are never reversed; inspect an uncertain outcome before retrying.
 Moves one current page under exactly one of `parent_id` or `space_key` (the root), with the same
 `position` and `sibling` as `create_page`.
 
-- Within a space: the parent change is a documented content update, then the position goes through the
-  move action. If the position fails, the confirmed parent change stays, and `position_applied: false`
-  with a warning reports it.
+- Within a space: one `movepage.action` request applies both the parent and position, so the move does
+  not create a page version. A definite refusal reports the previous placement; an uncertain response
+  reports an unknown placement and tells the caller to inspect the page before retrying. Root `last`
+  placement uses `below` the last root page because `topLevel` places a page first.
 - Across spaces: one move action, waited on through the long-task route for at most 10 seconds. If
   Confluence refuses the move, recreating the page in the target space and trashing the original is a
   separate plan that loses the page ID, history and comments.
 
-D7 now requires one move action without creating a page version. The two-step implementation described
-above has not yet been replaced; see the [implementation item](roadmap.md#one-route-for-same-space-moves).
+D7 requires one move action without creating a page version. The same action also handles `move_up`
+and restore placement; see the [implementation item](roadmap.md#one-route-for-same-space-moves).
 
 #### `delete_page`
 
@@ -416,7 +417,8 @@ Moves a page to the trash. `children` is `refuse` (default), `move_up` or `trash
   on every page before any write. `trash` refuses more than 100 pages, with the count.
 - Each trashed page's parent and position are saved first, best effort, for `restore_page`.
 - `move_up` rechecks each child’s parent and space immediately before its move, skipping changes.
-  Root moves use the `topLevel` action; an empty ancestor list is never used to move to the root.
+  Children moved under a parent append there in their original order; root moves append below the last
+  root page. An empty ancestor list is never used to move to the root.
 - The result lists every affected page with its former parent and position and its status
   (`trashed`, `moved_up`, `skipped`, `failed`, `unknown` or `not_attempted`), `complete`, and a warning when restoring will
   likely need a space administrator.
