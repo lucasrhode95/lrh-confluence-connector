@@ -36,7 +36,7 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
             await self.service.move_page("10", parent_id="20", space_key="SYNTH")
         self.assertEqual(self.api.metadata_calls, [])
 
-    async def test_same_space_move_keeps_confirmed_parent_when_position_fails(self) -> None:
+    async def test_same_space_move_uses_one_action_without_creating_a_version(self) -> None:
         self.api.pages["10"] = _page("10", "Moving", parent_id="20")
         self.api.pages["30"] = _page("30", "Target")
         self.api.pages["21"] = _page("21", "Sibling", parent_id="30")
@@ -47,12 +47,27 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
             "10", parent_id="30", position="before", sibling="21"
         )
 
-        self.assertTrue(result.moved)
+        self.assertFalse(result.moved)
         self.assertFalse(result.position_applied)
-        self.assertEqual(result.parent_id, "30")
-        self.assertEqual(self.api.parent_updates, [("10", "30", 2)])
+        self.assertEqual(result.parent_id, "20")
+        self.assertEqual(len(self.api.move_calls), 1)
         self.assertEqual(self.api.move_calls[0]["position"], "above")
         self.assertEqual(self.api.move_calls[0]["target_id"], "21")
+        self.assertEqual(self.api.pages["10"].ancestors[-1].page_id, "20")
+        self.assertEqual(self.api.pages["10"].version, 1)
+
+    async def test_same_space_move_uncertain_result_does_not_guess_the_parent(self) -> None:
+        self.api.pages["10"] = _page("10", "Moving", parent_id="20")
+        self.api.pages["30"] = _page("30", "Target")
+        self.api.move_error = UncertainWrite("Synthetic lost response")
+
+        result = await self.service.move_page("10", parent_id="30")
+
+        self.assertFalse(result.moved)
+        self.assertIsNone(result.position_applied)
+        self.assertIsNone(result.parent_id)
+        self.assertEqual(len(self.api.move_calls), 1)
+        self.assertEqual(self.api.pages["10"].version, 1)
 
     async def test_cross_space_move_uses_async_action_and_returns_confirmed_target(self) -> None:
         self.api.pages["10"] = _page("10", "Moving")
@@ -73,9 +88,9 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         result = await self.service.move_page("10", space_key="SYNTH", position="last")
 
         self.assertTrue(result.moved)
-        self.assertEqual(self.api.parent_updates, [])
-        self.assertEqual(self.api.move_calls[0]["position"], "topLevel")
-        self.assertIsNone(self.api.move_calls[0]["target_id"])
+        self.assertEqual(self.api.move_calls[0]["position"], "below")
+        self.assertEqual(self.api.move_calls[0]["target_id"], "20")
+        self.assertEqual(self.api.pages["10"].version, 1)
 
     async def test_delete_refuses_children_and_lists_them_before_permission_checks(self) -> None:
         self.api.pages["10"] = _page("10", "Parent")
@@ -98,7 +113,11 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.complete)
         self.assertEqual(self.api.permission_checks, ["10", "11", "12"])
-        self.assertEqual(self.api.parent_updates, [("11", "20", 2), ("12", "20", 2)])
+        self.assertEqual(
+            [(call["page_id"], call["position"], call["target_id"]) for call in self.api.move_calls],
+            [("11", "append", "20"), ("12", "append", "20")],
+        )
+        self.assertEqual([self.api.pages[page_id].version for page_id in ("11", "12")], [1, 1])
         self.assertEqual(self.api.trash_calls, ["10"])
         self.assertEqual([item.status for item in result.pages], ["trashed", "moved_up", "moved_up"])
         self.assertEqual([item.former_parent_id for item in result.pages], ["20", "10", "10"])
@@ -108,14 +127,14 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.api.pages["10"] = _page("10", "Parent", parent_id="20")
         self.api.add_child("10", "11", "First")
         self.api.add_child("10", "12", "Second")
-        self.api.fail_parent_for.add("12")
+        self.api.fail_move_for.add("12")
 
         result = await self.service.delete_page("10", children="move_up")
 
         self.assertFalse(result.complete)
         self.assertEqual([item.status for item in result.pages], ["not_attempted", "moved_up", "failed"])
         self.assertEqual(self.api.trash_calls, [])
-        self.assertIn("Synthetic parent-update failure", result.failure or "")
+        self.assertIn("Synthetic move-action failure", result.failure or "")
 
     async def test_trash_mode_checks_all_permissions_before_saving_or_deleting(self) -> None:
         self.api.pages["10"] = _page("10", "Parent")
@@ -208,8 +227,10 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.parent_id)
         self.assertEqual(self.api.restore_calls, ["90"])
         self.assertEqual(self.api.properties_removed, ["90"])
-        self.assertEqual(self.api.parent_updates, [("90", "30", 2)])
-        self.assertEqual(self.api.move_calls[-1]["position"], "topLevel")
+        self.assertEqual(len(self.api.move_calls), 1)
+        self.assertEqual(self.api.pages["90"].version, 1)
+        self.assertEqual(self.api.move_calls[0]["position"], "above")
+        self.assertEqual(self.api.move_calls[0]["target_id"], "21")
 
     async def test_restore_uses_saved_placement_and_falls_back_when_parent_is_gone(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")
@@ -239,7 +260,10 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         result = await self.service.restore_page("90", parent_id="30")
         self.assertEqual(result.placement_status, "applied")
         self.assertEqual(result.parent_id, "30")
-        self.assertEqual(self.api.parent_updates, [("90", "30", 2)])
+        self.assertEqual(len(self.api.move_calls), 1)
+        self.assertEqual(self.api.move_calls[0]["position"], "append")
+        self.assertEqual(self.api.move_calls[0]["target_id"], "30")
+        self.assertEqual(self.api.pages["90"].version, 1)
 
     async def test_restore_applies_saved_placement_before_removing_the_property(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")
@@ -258,8 +282,8 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.placement_source, "saved_property")
         self.assertEqual(result.placement_status, "applied")
         self.assertEqual(result.parent_id, "30")
-        self.assertEqual(self.api.parent_updates, [("90", "30", 2)])
         self.assertEqual(self.api.move_calls[0]["target_id"], "21")
+        self.assertEqual(self.api.pages["90"].version, 1)
         self.assertEqual(self.api.properties_removed, ["90"])
 
 
@@ -296,10 +320,9 @@ class _StructureApi:
         self.delete_denied: set[str] = set()
         self.trash_calls: list[str] = []
         self.fail_trash_for: dict[str, Exception] = {}
-        self.parent_updates: list[tuple[str, str | None, int]] = []
-        self.fail_parent_for: set[str] = set()
         self.move_calls: list[dict[str, object]] = []
         self.move_error: Exception | None = None
+        self.fail_move_for: set[str] = set()
         self.properties: dict[str, dict[str, object]] = {}
         self.property_writes: list[str] = []
         self.properties_removed: list[str] = []
@@ -367,19 +390,35 @@ class _StructureApi:
         self.properties_removed.append(page_id)
         self.properties.pop(page_id, None)
 
-    async def update_page_parent(self, page_id: str, *, title: str, next_version: int, parent_id: str | None, expected_username: str) -> PageMetadata:
-        if page_id in self.fail_parent_for:
-            raise Upstream("Synthetic parent-update failure")
-        self.parent_updates.append((page_id, parent_id, next_version))
-        page = self.pages[page_id]
-        page.ancestors = [PageSummary(page_id=parent_id, title=f"Synthetic {parent_id}")] if parent_id else []
-        page.version = next_version
-        return page
-
     async def move_page_action(self, page_id: str, **kwargs) -> None:
         self.move_calls.append({"page_id": page_id, **kwargs})
+        if page_id in self.fail_move_for:
+            raise Upstream("Synthetic move-action failure")
         if self.move_error is not None and kwargs["position"] != "topLevel":
             raise self.move_error
+        page = self.pages[page_id]
+        position = kwargs["position"]
+        target_id = kwargs["target_id"]
+        target_parent_id = None
+        if position == "append":
+            target_parent_id = target_id
+        elif position in {"above", "below"} and target_id in self.pages:
+            target = self.pages[target_id]
+            target_parent_id = target.ancestors[-1].page_id if target.ancestors else None
+        page.space_key = kwargs["space_key"]
+        page.ancestors = (
+            [PageSummary(page_id=target_parent_id, title=f"Synthetic {target_parent_id}")]
+            if target_parent_id
+            else []
+        )
+        for children in self.children.values():
+            while page_id in children:
+                children.remove(page_id)
+        if position == "append" and target_id is not None:
+            self.children.setdefault(target_id, []).append(page_id)
+        elif position in {"above", "below"} and target_id in self.children.get(target_parent_id, []):
+            siblings = self.children[target_parent_id]
+            siblings.insert(siblings.index(target_id) + (position == "below"), page_id)
 
     async def trash_page(self, page_id: str, *, expected_username: str) -> None:
         self.trash_calls.append(page_id)

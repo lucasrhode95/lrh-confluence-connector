@@ -153,10 +153,9 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
                 api.get_page_metadata = changed
                 result = await PageStructure(api, _Links(), "sample-user").delete_page("10", children="move_up")
                 self.assertEqual([p.status for p in result.pages], ["trashed", "skipped"])
-                self.assertEqual(api.parent_updates, [])
                 self.assertEqual(api.move_calls, [])
 
-    async def test_move_up_to_root_uses_top_level_and_definite_failure_is_failed(self):
+    async def test_move_up_to_root_appends_without_creating_a_version(self):
         api = _StructureApi()
         api.pages["10"] = _page("10", "Parent")
         api.add_child("10", "11", "Child")
@@ -164,8 +163,9 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         result = await PageStructure(api, _Links(), "sample-user").delete_page("10", children="move_up")
         self.assertFalse(result.complete)
         self.assertEqual([p.status for p in result.pages], ["failed", "moved_up"])
-        self.assertEqual(api.parent_updates, [])
-        self.assertEqual(api.move_calls[0]["position"], "topLevel")
+        self.assertEqual(api.move_calls[0]["position"], "below")
+        self.assertEqual(api.move_calls[0]["target_id"], "10")
+        self.assertEqual(api.pages["11"].version, 1)
 
     async def test_refused_root_action_keeps_the_original_parent_in_the_result(self):
         api = _StructureApi()
@@ -175,7 +175,6 @@ class CorrectnessChecks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.moved)
         self.assertFalse(result.position_applied)
         self.assertEqual(result.parent_id, "20")
-        self.assertEqual(api.parent_updates, [])
 
     async def test_calibration_retries_a_changed_sample_and_abandons_repeated_changes(self):
         for keep_changing in (False, True):

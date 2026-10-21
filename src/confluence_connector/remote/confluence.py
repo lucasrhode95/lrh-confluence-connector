@@ -335,30 +335,6 @@ class ConfluenceApi:
             raise Upstream("Confluence returned no readable space-permission list.")
         return True
 
-    async def update_page_parent(
-        self,
-        page_id: str,
-        *,
-        title: str,
-        next_version: int,
-        parent_id: str | None,
-        expected_username: str,
-    ) -> PageMetadata:
-        """Change a same-space page's parent; root moves require the UI topLevel action."""
-        if parent_id is None:
-            raise InvalidRequest("Root moves require the topLevel move action.")
-        body: dict[str, Any] = {
-            "id": page_id,
-            "type": "page",
-            "title": title,
-            "version": {"number": next_version},
-            "ancestors": [{"id": parent_id}],
-        }
-        payload = await self._transport.send_json(
-            "PUT", self._content_route(page_id), body=body, expected_username=expected_username
-        )
-        return _write_page_metadata(payload, base_url=str(self._settings["base_url"]))
-
     async def trash_page(self, page_id: str, *, expected_username: str) -> None:
         """Move one validated page to the trash with the documented DELETE route."""
         await self._transport.send_json(
