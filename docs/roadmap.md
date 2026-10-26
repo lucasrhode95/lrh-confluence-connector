@@ -35,26 +35,36 @@ Offline checks: 290 tests pass (one platform skip), compilation, pyflakes and pr
   Requirements, architecture, research and README were consolidated; the completed UI session itinerary
   and duplicated per-tool manual were removed.
 
-### Attachment upload
+### Attachment management
 
-Pending the decision below. An `upload_attachments` tool takes one page reference and local file paths.
+Pending the decision below. Reads exist (`get_pages` lists attachments; `download_attachments` fetches
+bytes). Writes are missing: on 2026-10-26 a doc refactor needed upload, new versions and removal, and
+used one-off scripts over `ConfluenceTransport` for all three.
 
-- **Create or version:** a new filename creates an attachment; an existing one adds a version through
-  `child/attachment/{id}/data`. Optional version comment.
+- **Create and version:** `upload_attachments` takes one page reference and local file paths. A new
+  filename creates an attachment; an existing one adds a version through `child/attachment/{id}/data`.
+  Optional version comment.
+- **Update metadata:** rename an attachment and change its comment or media type without new bytes.
+- **Trash and restore:** `trash_attachments` moves attachments to the trash and `restore_attachments`
+  brings them back. No permanent purge, matching the page rule.
+- **Safety:** IDs must belong to the named page. Before trashing, refuse attachments the current body
+  still references unless explicitly allowed, and report pages elsewhere that link to them when known.
+- **Permissions:** surface the attachment-delete permission separately. On 2026-10-26 trashing worked
+  on one page and was refused (403) on another where the same account had just uploaded files.
 - **Transport:** reuse the multipart path from `research/setup_acceptance.py` (`X-Atlassian-Token:
-  no-check`, account check, write retry policy). Never resend an upload whose outcome is uncertain.
+  no-check`, account check, write retry policy). Never resend a write whose outcome is uncertain.
 - **Preflight:** files exist and are readable, size within a configured bound, media type from the
   extension, no duplicate filenames in one call.
-- **Result:** per file, attachment ID, version and download URL, or the failure. No rollback of files
-  already uploaded.
-- **Docs and tests:** synthetic-byte tests for create, new version, refusal and uncertain outcome;
-  update requirements, architecture and README.
+- **Result:** per attachment, ID, version and download URL, or the failure. No rollback of
+  attachments already changed.
+- **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
+  uncertain outcomes; update requirements, architecture and README.
 
 ## Decisions
 
-- **Attachment upload:** requirements §4 lists attachment writes as a non-goal. Pages that embed
-  diagrams need it: on 2026-10-26 a PNG and its SVG source were uploaded with a one-off script reusing
-  `ConfluenceTransport`. Decide whether to allow uploads only; comment writes stay out of scope.
+- **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
+  work needs create, version, update, trash and restore (see Implementation). Decide whether to lift
+  the non-goal for attachments; comment writes stay out of scope.
 
 A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage
 for editing. Teams HTML conversion is tracked in that connector's roadmap.
@@ -85,7 +95,8 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Write bounds and parser recovery:** check real body/title/label limits, whether duplicate-title
   preflight should include hidden drafts, and whether BeautifulSoup repair of malformed rich markup
   is acceptable compared with Confluence's native parse errors.
-- **Attachment upload:** once implemented, check the instance's size limit, new-version behavior on an
-  existing filename, and SVG/PNG media types in a disposable fixture page.
+- **Attachment management:** once implemented, check in a disposable fixture page the instance's size
+  limit, new-version behavior on an existing filename, SVG/PNG media types, rename, trash and restore,
+  and what decides the attachment-delete permission refused on 2026-10-26.
 - **Client setup:** after registration and a full restart, confirm tool discovery and a small approved
   read in Claude and Codex. Local protocol discovery alone does not verify instance access.
