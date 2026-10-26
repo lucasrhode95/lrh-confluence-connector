@@ -35,10 +35,29 @@ Offline checks: 290 tests pass (one platform skip), compilation, pyflakes and pr
   Requirements, architecture, research and README were consolidated; the completed UI session itinerary
   and duplicated per-tool manual were removed.
 
+### Attachment upload
+
+Pending the decision below. An `upload_attachments` tool takes one page reference and local file paths.
+
+- **Create or version:** a new filename creates an attachment; an existing one adds a version through
+  `child/attachment/{id}/data`. Optional version comment.
+- **Transport:** reuse the multipart path from `research/setup_acceptance.py` (`X-Atlassian-Token:
+  no-check`, account check, write retry policy). Never resend an upload whose outcome is uncertain.
+- **Preflight:** files exist and are readable, size within a configured bound, media type from the
+  extension, no duplicate filenames in one call.
+- **Result:** per file, attachment ID, version and download URL, or the failure. No rollback of files
+  already uploaded.
+- **Docs and tests:** synthetic-byte tests for create, new version, refusal and uncertain outcome;
+  update requirements, architecture and README.
+
 ## Decisions
 
-None required for this pass. A whole-page cleaned-HTML read format is not implemented; `rich` remains
-verbatim Confluence storage for editing. Teams HTML conversion is tracked in that connector's roadmap.
+- **Attachment upload:** requirements §4 lists attachment writes as a non-goal. Pages that embed
+  diagrams need it: on 2026-10-26 a PNG and its SVG source were uploaded with a one-off script reusing
+  `ConfluenceTransport`. Decide whether to allow uploads only; comment writes stay out of scope.
+
+A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage
+for editing. Teams HTML conversion is tracked in that connector's roadmap.
 
 ## Live verification
 
@@ -66,5 +85,7 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Write bounds and parser recovery:** check real body/title/label limits, whether duplicate-title
   preflight should include hidden drafts, and whether BeautifulSoup repair of malformed rich markup
   is acceptable compared with Confluence's native parse errors.
+- **Attachment upload:** once implemented, check the instance's size limit, new-version behavior on an
+  existing filename, and SVG/PNG media types in a disposable fixture page.
 - **Client setup:** after registration and a full restart, confirm tool discovery and a small approved
   read in Claude and Codex. Local protocol discovery alone does not verify instance access.
