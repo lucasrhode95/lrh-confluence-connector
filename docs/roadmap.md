@@ -60,11 +60,36 @@ used one-off scripts over `ConfluenceTransport` for all three.
 - **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
   uncertain outcomes; update requirements, architecture and README.
 
+### Comment management
+
+Approved by the user on 2026-10-28. Reads exist (`get_pages` returns threaded footer and inline
+comments with IDs). Writes are missing: on 2026-10-28 editing the user's own footer comment needed a
+browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, version + 1,
+`X-Atlassian-Token: no-check`), which worked.
+
+- **Create:** `add_comment` takes one page reference, a body in `rich` or `text` and an optional parent
+  comment ID for a reply. Promote the fixture-only `create_page_comment` to this product path, with
+  the same body validation as page writes. Inline comments stay UI-only (they need a text anchor).
+- **Read one:** `get_comment` returns one comment with its version, page, parent, author and
+  resolution, for edits by ID without reading the whole page.
+- **Update:** `update_comment` takes the comment ID, the new body and `expected_version`. Stale
+  versions are refused, as for pages. Works for footer and inline comments; inline anchors stay.
+- **Resolve and reopen:** inline comments only, if the instance exposes resolution through REST.
+- **Delete:** `delete_comment`. Confluence may delete comments permanently rather than trash them;
+  confirm first (see Live verification). If permanent, require an explicit confirmation flag, and
+  refuse comments with replies unless allowed.
+- **Safety:** account check on every write; when a page reference is given, the comment must belong to
+  it. Surface 403 as a permission refusal. Never resend a write whose outcome is uncertain.
+- **Result:** comment ID, version, page and URL, or the failure.
+- **Docs and tests:** synthetic tests for create, reply, update, stale version, resolve, delete,
+  refusals and uncertain outcomes; change requirements §4 so only attachment writes stay a non-goal
+  (unless that decision lifts too); update architecture and README.
+
 ## Decisions
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
   work needs create, version, update, trash and restore (see Implementation). Decide whether to lift
-  the non-goal for attachments; comment writes stay out of scope.
+  the non-goal for attachments. Comment writes are approved (see Implementation).
 
 A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage
 for editing. Teams HTML conversion is tracked in that connector's roadmap.
@@ -98,5 +123,8 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Attachment management:** once implemented, check in a disposable fixture page the instance's size
   limit, new-version behavior on an existing filename, SVG/PNG media types, rename, trash and restore,
   and what decides the attachment-delete permission refused on 2026-10-26.
+- **Comment management:** once implemented, check in a disposable fixture page whether deleting a
+  comment trashes or purges it, whether inline comments can be updated and resolved through REST,
+  what happens to replies when a parent is deleted, and editing another user's comment (expect 403).
 - **Client setup:** after registration and a full restart, confirm tool discovery and a small approved
   read in Claude and Codex. Local protocol discovery alone does not verify instance access.
