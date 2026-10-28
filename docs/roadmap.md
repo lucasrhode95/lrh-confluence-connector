@@ -85,6 +85,34 @@ browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, ve
   refusals and uncertain outcomes; change requirements §4 so only attachment writes stay a non-goal
   (unless that decision lifts too); update architecture and README.
 
+### File-based page edits
+
+Approved by the user on 2026-10-28. The rich round trip exists (`get_pages` and `export_pages` return
+the unchanged storage body; `update_page` accepts it), but the write body travels inline. On
+2026-10-28 an agent needed to add one item to a 46,000-character page: the rich read was too large for
+its context, and `update_page` would have needed the whole body retyped in the call, so it used the
+REST API from the browser instead. Partial-edit parameters (paths, block IDs, anchors) were rejected:
+they break when the page changes around them.
+
+- **Read:** `export_pages` with `format: "rich"` and `parse_scope.comments: false` already writes the
+  unchanged storage body to a file, after a leading header comment with the page ID and version.
+- **Write:** `update_page` accepts `body_file`, a rich export file, in place of `body`. The connector
+  strips its own header comment and takes the page ID and version from it as `expected_version`; an
+  explicit `page` or `expected_version` must match. Refuse a file without the header, from a different
+  page, from a `text` export, or with the appended comments section. `create_page` accepts a plain
+  storage file as `body_file`.
+- **No-op round trip:** exporting and immediately updating with no edits must leave the stored body
+  byte-identical, including inline `<code>`, code and expand macros, status lozenges, anchors, emoji
+  and tables. Apply the `<pre>`/`<code>` conversion only where it cannot change existing storage.
+- **Safety:** the existing stale-version, inline-comment-loss and removed-macro checks still apply;
+  bound the file size like other bodies.
+- **Server instructions:** ship them with the feature, not before. Proposed text: "To edit a page,
+  export it with `export_pages` (`format: "rich"`, comments off), change the file with exact
+  find-and-replace, then pass it to `update_page` as `body_file`. Never retype a large body inline or
+  rebuild it from text output."
+- **Docs and tests:** synthetic tests for the no-op round trip, an edited file, a stale version, each
+  refusal and `create_page` from a file; update requirements §9–§10, architecture and README.
+
 ## Decisions
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
@@ -126,5 +154,8 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Comment management:** once implemented, check in a disposable fixture page whether deleting a
   comment trashes or purges it, whether inline comments can be updated and resolved through REST,
   what happens to replies when a parent is deleted, and editing another user's comment (expect 403).
+- **File-based page edits:** once implemented, export a disposable fixture page with macros,
+  lozenges, tables and inline code, update it from the unedited file, and confirm the stored body and
+  rendered page are unchanged apart from the version.
 - **Client setup:** after registration and a full restart, confirm tool discovery and a small approved
   read in Claude and Codex. Local protocol discovery alone does not verify instance access.
