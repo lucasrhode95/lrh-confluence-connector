@@ -113,6 +113,20 @@ they break when the page changes around them.
 - **Docs and tests:** synthetic tests for the no-op round trip, an edited file, a stale version, each
   refusal and `create_page` from a file; update requirements §9–§10, architecture and README.
 
+### Edited macros reported as removed
+
+On 2026-10-28 an `update_page` that changed eight status lozenges from one title and colour to
+another warned "8 status macro(s) would be removed". Nothing was removed: the stored page had the same
+31 status macros before and after. `_macro_identity` in `service/write_markup.py` keys a macro on its
+name plus every parameter, so any parameter edit counts as one removal and one addition.
+
+- **Identity:** match macros by `ac:macro-id` when both bodies carry it; fall back to name and
+  parameters only for macros without one.
+- **Warnings:** report removed macros (ID gone) separately from changed ones (same ID, different
+  parameters or body), e.g. "8 status macro(s) changed". A changed macro is not a loss.
+- **Tests:** synthetic regressions for a parameter edit (changed, not removed), a real removal, a
+  macro without an ID, and an ID moved to a different macro name.
+
 ## Decisions
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
