@@ -156,6 +156,22 @@ class PageTreeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([node.page_id for node in result.children[0].children], ["11"])
         self.assertFalse(result.complete)
 
+    async def test_wide_tree_reads_stop_at_the_remaining_page_budget(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit(str(n), f"Top {n}") for n in range(1, 1000)]})
+        child_calls: list[tuple[str, int]] = []
+
+        async def wide_children(page_id: str, *, start: int, expected_username: str):
+            child_calls.append((page_id, start))
+            hits = [_hit(f"{page_id}0{n}", "Child") for n in range(start, min(start + 500, 2_000))]
+            return RemoteContentSearchPage(hits=hits, start=start, size=len(hits), total_size=2_000)
+
+        api.list_child_pages = wide_children  # type: ignore[method-assign]
+        result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=3)  # type: ignore[arg-type]
+        self.assertEqual(result.total_pages, 1_000)
+        self.assertEqual([node.page_id for node in result.children[0].children], ["100"])
+        self.assertFalse(result.complete)
+        self.assertEqual(child_calls, [(str(n), 0) for n in range(1, 7)])
+
     async def test_one_failed_listing_fails_the_tree(self) -> None:
         api = _ReadApi(space_roots={"SYNTH": [_hit("1", "A"), _hit("2", "B")]})
 

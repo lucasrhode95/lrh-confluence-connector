@@ -97,7 +97,7 @@
   <rect x="920" y="736" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="936" y="768"><tspan class="code">PageTree</tspan><tspan class="detail" dx="10">tree.py</tspan></text>
   <g><title>One page or a space root; ancestors for a page root. → PageLinkResolver.resolve, ConfluenceApi.list_child_pages / list_space_root_pages</title><text class="detail" x="936" y="804">• <tspan class="code">get_page_tree</tspan>: page or space</text></g>
-  <g><title>Depth 1 to 5 (default 3), counting the selected page as level 1.</title><text class="detail" x="936" y="834">• depth ≤ 5, at most 1,000 pages</text></g>
+  <g><title>Depth 1 to 5 (default 3) levels below the root, for a page or a space.</title><text class="detail" x="936" y="834">• depth ≤ 5, at most 1,000 pages</text></g>
   <g><title>Children keep the server's order; a result capped by the page limit says it is incomplete.</title><text class="detail" x="936" y="864">• server child order, <tspan class="code">complete</tspan> flag</text></g>
 
   <rect x="1340" y="736" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>

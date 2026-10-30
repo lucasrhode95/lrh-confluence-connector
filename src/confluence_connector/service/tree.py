@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any
 
 from confluence_connector.domain.errors import InvalidRequest, Upstream
@@ -109,37 +109,49 @@ class PageTree:
         complete and the deepest level read is cut short.
         """
         top: list[PageTreeNode] = []
-        _admit(await self._list_children(fetch_top), top, state)
+        _admit(await self._list_children(fetch_top, state.remaining), top, state)
         level = top
         depth = 1
         while level and depth < max_depth and state.complete:
-            listings = await self._gather_bounded(
-                [
-                    lambda node=node: self._list_children(
-                        lambda start, page_id=node.page_id: self._api.list_child_pages(
-                            page_id, start=start, expected_username=self._username
-                        )
-                    )
-                    for node in level
-                ]
-            )
-            next_level: list[PageTreeNode] = []
-            for node, children in zip(level, listings, strict=True):
-                _admit(children, node.children, state)
-                next_level.extend(node.children)
-                if not state.complete:
-                    break
-            level = next_level
+            level = await self._read_level(level, state)
             depth += 1
         return top
 
+    async def _read_level(self, level: list[PageTreeNode], state: _TreeState) -> list[PageTreeNode]:
+        """Attach children to one level's parents in order and return the next level.
+
+        Parents are listed in windows of six. Each window reads at most one result past the budget
+        left before it, and no window starts after the cap is reached, so remote work stays bounded.
+        """
+        next_level: list[PageTreeNode] = []
+        for offset in range(0, len(level), TREE_LISTING_CONCURRENCY):
+            window = level[offset : offset + TREE_LISTING_CONCURRENCY]
+            budget = state.remaining
+            listings = await self._gather(
+                [
+                    self._list_children(
+                        lambda start, page_id=node.page_id: self._api.list_child_pages(
+                            page_id, start=start, expected_username=self._username
+                        ),
+                        budget,
+                    )
+                    for node in window
+                ]
+            )
+            for node, children in zip(window, listings, strict=True):
+                _admit(children, node.children, state)
+                next_level.extend(node.children)
+                if not state.complete:
+                    return next_level
+        return next_level
+
     async def _list_children(
-        self, fetch_page: Callable[[int], Awaitable[RemoteContentSearchPage]]
+        self, fetch_page: Callable[[int], Awaitable[RemoteContentSearchPage]], budget: int
     ) -> list[PageTreeNode]:
-        """List one parent's children in server order, stopping once more than the cap is read."""
+        """List one parent's children in server order, stopping once more than ``budget`` are read."""
         nodes: list[PageTreeNode] = []
         start = 0
-        while len(nodes) <= MAX_TREE_PAGES:
+        while len(nodes) <= budget:
             result = await fetch_page(start)
             nodes.extend(_tree_node(hit) for hit in result.hits)
             next_start = result.next_start(CHILD_PAGE_SIZE)
@@ -148,17 +160,11 @@ class PageTree:
             start = next_start
         return nodes
 
-    async def _gather_bounded(
-        self, operations: list[Callable[[], Awaitable[list[PageTreeNode]]]]
+    async def _gather(
+        self, listings: list[Coroutine[Any, Any, list[PageTreeNode]]]
     ) -> list[list[PageTreeNode]]:
-        """Run child listings with bounded concurrency; one failure cancels the rest and propagates."""
-        limit = asyncio.Semaphore(TREE_LISTING_CONCURRENCY)
-
-        async def run(operation: Callable[[], Awaitable[list[PageTreeNode]]]) -> list[PageTreeNode]:
-            async with limit:
-                return await operation()
-
-        tasks = [asyncio.create_task(run(operation)) for operation in operations]
+        """Run one window's child listings at once; one failure cancels the rest and propagates."""
+        tasks = [asyncio.create_task(listing) for listing in listings]
         try:
             return await asyncio.gather(*tasks)
         except BaseException:
@@ -175,6 +181,10 @@ class _TreeState:
         self.total_pages = 0
         self.complete = True
         self.cap_reached_with_more = False
+
+    @property
+    def remaining(self) -> int:
+        return MAX_TREE_PAGES - self.total_pages
 
 
 def _admit(candidates: list[PageTreeNode], target: list[PageTreeNode], state: _TreeState) -> None:
