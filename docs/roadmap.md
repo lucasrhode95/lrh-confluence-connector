@@ -57,8 +57,13 @@ used one-off scripts over `ConfluenceTransport` for all three.
   extension, no duplicate filenames in one call.
 - **SVG images:** requested by the user on 2026-10-30. Upload with `image/svg+xml`, then embed with
   `<ac:image><ri:attachment ri:filename="…"/></ac:image>`, which renders inline; the `view-file` macro
-  that drag-and-drop inserts shows a file icon, and inline `<svg>` is stripped (research §6.5). Write
-  tool descriptions should steer images to `ac:image`.
+  that drag-and-drop inserts shows a file icon, and inline `<svg>` is stripped (research §6.5).
+- **Server instructions:** ship them with upload. Remind agents that they can show images inline,
+  SVG included, and how. Proposed text: "To show an image inline (PNG, JPEG, GIF or SVG), upload it
+  with `upload_attachments`, then reference it in the page body as
+  `<ac:image><ri:attachment ri:filename="name.svg"/></ac:image>`. Do not use the `view-file` macro or
+  a raw `<svg>` element: the first shows a file icon for SVG, and Confluence strips the second." The
+  write tool descriptions carry the same `ac:image` example.
 - **Result:** per attachment, ID, version and download URL, or the failure. No rollback of
   attachments already changed.
 - **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
