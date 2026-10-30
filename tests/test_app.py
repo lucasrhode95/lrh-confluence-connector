@@ -289,6 +289,20 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tools_by_name["list_trash"].annotations.readOnlyHint)
         await context.aclose()
 
+    async def test_page_writes_accept_a_body_file_and_instructions_describe_file_edits(self) -> None:
+        context = AppContext(settings(), store=FakeCredentialSource())  # type: ignore[arg-type]
+        server = build_server(context)
+        schemas = {
+            tool.name: tool.model_dump(mode="json")["inputSchema"] for tool in await server.list_tools()
+        }
+        update = schemas["update_page"]
+        self.assertIn("body_file", update["properties"])
+        self.assertEqual(update.get("required", []), [])
+        self.assertIn("body_file", schemas["create_page"]["properties"])
+        self.assertEqual(schemas["create_page"]["required"], ["title"])
+        self.assertIn("as `body_file`", server.instructions)
+        await context.aclose()
+
     async def test_read_mcp_tools_round_trip_synthetic_responses(self) -> None:
         cases = (
             (
