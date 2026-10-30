@@ -310,6 +310,31 @@ class PageAttachment(BaseModel):
     media_type: str | None = None
     file_size: int | None = None
     download_url: str | None = None
+    version: int | None = None
+    version_comment: str | None = None
+    status: str | None = None
+    container_page_id: str | None = None
+
+
+class AttachmentChange(BaseModel):
+    attachment_id: str
+    filename: str
+    version: int | None = None
+    download_url: str | None = None
+    media_type: str | None = None
+
+
+class AttachmentChangeFailure(BaseModel):
+    attachment_id: str | None = None
+    filename: str | None = None
+    error: str
+
+
+class AttachmentMutationResult(BaseModel):
+    page_id: str
+    attachments: list[AttachmentChange] = Field(default_factory=list)
+    failures: list[AttachmentChangeFailure] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class SavedAttachment(BaseModel):

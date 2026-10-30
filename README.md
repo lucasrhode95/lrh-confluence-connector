@@ -5,6 +5,7 @@ A local MCP server for one user's Confluence Data Center account.
 - Search pages by text, title, space, label, author and date, and find people.
 - Read pages as agent-friendly text with typed references, page trees and full metadata.
 - Download selected attachments and export pages, with their attachments, to local files.
+- Upload and version attachments, change their metadata, and move them to and from the trash.
 - Create and update pages and drafts, manage labels, move pages, and trash or restore them.
 
 ## Requirements
@@ -146,6 +147,7 @@ The result lists each output with its role and location.
 | `get_page_metadata` | [`service/metadata.py`](src/confluence_connector/service/metadata.py) | Read versions, labels, contributors and ancestors |
 | `get_pages` | [`service/pages.py`](src/confluence_connector/service/pages.py) | Read pages as text or unchanged storage, with typed references, attachments and comments |
 | `download_attachments` | [`service/attachments.py`](src/confluence_connector/service/attachments.py) | Save selected attachments of one page locally |
+| `upload_attachments`, `update_attachment`, `trash_attachments`, `restore_attachments` | [`service/attachment_management.py`](src/confluence_connector/service/attachment_management.py) | Create attachment versions, update metadata, trash and restore page attachments |
 | `export_pages` | [`service/exports.py`](src/confluence_connector/service/exports.py) | Export up to 500 full pages with body, comments, attachment, report or archive file roles |
 | `create_page`, `update_page`, `set_labels` | [`service/writes.py`](src/confluence_connector/service/writes.py) | Create pages or drafts, replace a page body at an expected version or from an edited export file, change labels |
 | `list_drafts`, `publish_draft`, `delete_draft` | [`service/writes.py`](src/confluence_connector/service/writes.py) | List, publish or permanently delete new-page drafts |

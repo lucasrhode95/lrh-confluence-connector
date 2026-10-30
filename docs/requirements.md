@@ -62,7 +62,7 @@ storage technique is shared (§5).
 - Unpublished edits of published pages: the editor-draft route cannot be read back and belongs to the
   non-collaborative editor (research §6.2). Agents propose changes as new-page drafts or edit with
   `expected_version`.
-- Comment and attachment writes.
+- Comment writes.
 - Interpreting attachment files (parsing, OCR, transcription). Agents receive the raw file.
 - Version comparisons, activity feeds and automated documentation-quality analysis (follow-ups).
 
@@ -331,6 +331,23 @@ children become top-level pages when it is trashed (research §6.4). The connect
 Delete outcomes distinguish confirmed `trashed`/`moved_up`, a concurrent parent/space change (`skipped`),
 a definite operation failure (`failed`), uncertain application (`unknown`), and later steps
 (`not_attempted`). A child moved elsewhere after preflight is not moved back by `move_up`.
+
+### 10.6 Attachment management
+
+- `upload_attachments` takes one current page and one to 100 absolute local file paths. New filenames
+  create attachments; an existing filename uploads bytes through
+  `/content/{page}/child/attachment/{attachment}/data` as a new version. The instance enforces its
+  size limit. The connector preflights readable files and duplicate names, infers MIME type from the
+  extension, and returns IDs, versions, media types and download URLs per file.
+- `update_attachment` changes the name, version comment or MIME type without replacing bytes. IDs
+  must belong to the named page; renames cannot collide with another current filename.
+- `trash_attachments` never purges. It refuses current body references unless `allow_referenced` is
+  explicit and checks the attachment's delete operation separately from page update access.
+  `restore_attachments` verifies the original page. Results contain per-item successes and failures;
+  writes already completed remain in place and uncertain outcomes stop later writes. References from
+  other pages are not searched and are called out in the result.
+- Inline images, including SVG, use an `ac:image` / `ri:attachment` reference. The `view-file` macro
+  shows SVG as a file icon, and raw inline SVG is stripped by Confluence.
 
 ## 11. Reliability
 

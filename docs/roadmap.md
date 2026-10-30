@@ -2,52 +2,13 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 343 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 361 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
 Items 2–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found that day and
 have no rank yet.
-
-### 2. Attachment management
-
-Approved by the user on 2026-10-30: full control over attachments. Reads exist (`get_pages` lists
-attachments; `download_attachments` fetches bytes). Writes are missing: on 2026-10-26 a doc refactor
-needed upload, new versions and removal, and used one-off scripts over `ConfluenceTransport` for all
-three.
-
-- **Create and version:** `upload_attachments` takes one page reference and local file paths. A new
-  filename creates an attachment; an existing one adds a version through `child/attachment/{id}/data`.
-  Optional version comment.
-- **Update metadata:** rename an attachment and change its comment or media type without new bytes.
-- **Trash and restore:** `trash_attachments` moves attachments to the trash and `restore_attachments`
-  brings them back. No permanent purge, matching the page rule.
-- **Safety:** IDs must belong to the named page. Before trashing, refuse attachments the current body
-  still references unless explicitly allowed, and report pages elsewhere that link to them when known.
-- **Permissions:** surface the attachment-delete permission separately. On 2026-10-26 trashing worked
-  on one page and was refused (403) on another where the same account had just uploaded files.
-- **Transport:** reuse the multipart path from `research/setup_acceptance.py` (`X-Atlassian-Token:
-  no-check`, account check, write retry policy). Never resend a write whose outcome is uncertain.
-- **Preflight:** files exist and are readable, media type from the extension, no duplicate filenames in
-  one call. No connector size cap; report the instance's own size refusal.
-- **SVG images:** upload with `image/svg+xml`, then embed with
-  `<ac:image><ri:attachment ri:filename="…"/></ac:image>`, which renders inline; the `view-file` macro
-  that drag-and-drop inserts shows a file icon, and inline `<svg>` is stripped (research §6.5).
-- **Server instructions:** ship them with upload. Remind agents that they can show images inline,
-  SVG included, and how. Proposed text: "To show an image inline (PNG, JPEG, GIF or SVG), upload it
-  with `upload_attachments`, then reference it in the page body as
-  `<ac:image><ri:attachment ri:filename="name.svg"/></ac:image>`. Do not use the `view-file` macro or
-  a raw `<svg>` element: the first shows a file icon for SVG, and Confluence strips the second." The
-  write tool descriptions carry the same `ac:image` example.
-- **Result:** per attachment, ID, version and download URL, or the failure. No rollback of
-  attachments already changed.
-- **Live check:** in a disposable fixture page, the instance's size limit, new-version behavior on an
-  existing filename, SVG/PNG media types, rename, trash and restore, and what decides the
-  attachment-delete permission refused on 2026-10-26.
-- **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
-  uncertain outcomes; remove attachment writes from the requirements §4 non-goals; update
-  requirements, architecture and README.
 
 ### 3. Notify watchers flag
 
@@ -178,3 +139,6 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
   large subtrees. A pending outcome must never trigger compensating writes.
 - **Token lifecycle:** verify an expired PAT's response and cross-process sign-out with the bound
   credential format, without signing out the user's working credential.
+- **Attachment upload size:** determine the configured instance's maximum upload size with a disposable
+  synthetic attachment; normal-size create, version, metadata, trash and restore checks passed on
+  2026-10-30 (research §6.4).
