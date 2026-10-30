@@ -109,6 +109,24 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.hits[0].ancestors[0].title, "Root")
         self.assertEqual(page.hits[0].url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/123/Synthetic")
 
+    async def test_search_hits_drop_highlight_markers_and_html_escapes(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"results": [
+                {
+                    "title": "Lab [@@@hl@@@beacon@@@endhl@@@] &amp; Notes",
+                    "excerpt": "x = &#39;@@@hl@@@beacon@@@endhl@@@&#39;",
+                    "content": {"id": "123", "type": "page", "title": "Lab [beacon] & Notes"},
+                },
+                {"title": "@@@hl@@@beacon@@@endhl@@@ &lt;user&gt;", "entityType": "user"},
+            ], "start": 0, "size": 2})
+
+        page = await self.make_api(handler).search_content_page(
+            "siteSearch ~ 'beacon'", start=0, limit=2, include_archived=True, expected_username="sample-user"
+        )
+        self.assertEqual(page.hits[0].title, "Lab [beacon] & Notes")
+        self.assertEqual(page.hits[0].excerpt, "x = 'beacon'")
+        self.assertEqual(page.hits[1].title, "beacon <user>")
+
     async def test_search_result_without_version_author_maps_to_null(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(

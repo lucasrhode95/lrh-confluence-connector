@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 from collections.abc import Mapping
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
@@ -171,7 +172,7 @@ class ConfluenceApi:
             expected_username=expected_username,
         )
         return _content_search_page(
-            payload, requested_start=start, base_url=str(self._settings["base_url"])
+            payload, requested_start=start, base_url=str(self._settings["base_url"]), highlighted=True
         )
 
     async def quicknav_title_matches(
@@ -204,7 +205,7 @@ class ConfluenceApi:
             expected_username=expected_username,
         )
         page = _content_search_page(
-            payload, requested_start=start, base_url=str(self._settings["base_url"])
+            payload, requested_start=start, base_url=str(self._settings["base_url"]), highlighted=True
         )
         users: list[PersonSummary] = []
         for row in _result_rows(payload):
@@ -860,12 +861,15 @@ class ConfluenceApi:
 
 
 def _content_search_page(
-    payload: dict[str, Any], *, requested_start: int, base_url: str
+    payload: dict[str, Any], *, requested_start: int, base_url: str, highlighted: bool = False
 ) -> RemoteContentSearchPage:
-    """Validate the server page envelope and map source rows before service-level processing."""
+    """Validate the server page envelope and map source rows before service-level processing.
+
+    ``highlighted`` marks search-API rows, whose own title and excerpt are highlighted HTML snippets.
+    """
     rows, envelope = _page_envelope(payload, requested_start=requested_start)
     return RemoteContentSearchPage(
-        hits=[_content_search_hit(row, base_url=base_url) for row in rows],
+        hits=[_content_search_hit(row, base_url=base_url, highlighted=highlighted) for row in rows],
         **envelope.model_dump(),
     )
 
@@ -895,13 +899,18 @@ def _result_rows(payload: dict[str, Any]) -> list[Any]:
     return rows
 
 
-def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
+def _content_search_hit(value: Any, *, base_url: str, highlighted: bool) -> ContentSearchHit:
     """Map a search or child-content source row without inferring fields from rendered text."""
     if not isinstance(value, dict):
         raise Upstream("Confluence returned a malformed content-search result.")
-    content = _first_dict(value, "content", "entity") or value
+    nested = _first_dict(value, "content", "entity")
+    content = nested or value
     content_id = _identifier(content.get("id", value.get("id", value.get("contentId"))))
-    title = _optional_string(value.get("title")) or _optional_string(content.get("title"))
+    if highlighted:
+        # A search row's own title is a highlighted HTML snippet; its nested record's title is plain.
+        title = (_optional_string(nested.get("title")) if nested else None) or _search_snippet(value.get("title"))
+    else:
+        title = _optional_string(value.get("title"))
     if title is None:
         raise Upstream("Confluence returned a content-search result without a title.")
     content_type = (
@@ -931,7 +940,7 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
         space_key=_optional_string(space.get("key")),
         space_name=_optional_string(space.get("name")),
         url=same_instance_link(base_url, raw_url),
-        excerpt=_optional_string(value.get("excerpt")),
+        excerpt=_search_snippet(value.get("excerpt")) if highlighted else _optional_string(value.get("excerpt")),
         modified_at=_optional_string(version.get("when")) or _optional_string(value.get("lastModified")),
         last_modified_by=_content_author(version.get("by")),
         parent_id=ancestors[-1].page_id if ancestors else None,
@@ -939,6 +948,14 @@ def _content_search_hit(value: Any, *, base_url: str) -> ContentSearchHit:
         position=position,
         sources=["cql"],
     )
+
+
+def _search_snippet(value: Any) -> str | None:
+    """Return search-row text without Confluence's highlight delimiters or HTML entity escaping."""
+    text = _optional_string(value)
+    if text is None:
+        return None
+    return _optional_string(html.unescape(text.replace("@@@hl@@@", "").replace("@@@endhl@@@", "")))
 
 
 def _quicknav_hit(value: Any, *, base_url: str) -> ContentSearchHit | None:

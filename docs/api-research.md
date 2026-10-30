@@ -120,6 +120,9 @@ Live (browser and PAT), 2026-10-19:
   comment hit is the comment, not its page. Attachment hits carry an excerpt of the indexed file
   content and `resultParentContainer`.
 - Pages edited within the hour are found; most searches take 0.3–1 s.
+- `rest/api/search` row `title` and `excerpt` are display snippets (PAT, 2026-10-29): matched terms
+  sit between `@@@hl@@@` and `@@@endhl@@@`, and characters are HTML-escaped (`&amp;`, `&#39;`). The
+  nested `content.title` is plain. Rows without nested content (users) carry only the snippet title.
 
 ### 4.2 Terms and punctuation
 
