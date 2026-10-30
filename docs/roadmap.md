@@ -35,6 +35,9 @@ they break when the page changes around them.
   export it with `export_pages` (`format: "rich"`, comments off), change the file with exact
   find-and-replace, then pass it to `update_page` as `body_file`. Never retype a large body inline or
   rebuild it from text output."
+- **Live check:** export a disposable fixture page with macros, lozenges, tables and inline code,
+  update it from the unedited file, and confirm the stored body and rendered page are unchanged apart
+  from the version.
 - **Docs and tests:** synthetic tests for the no-op round trip, an edited file, a stale version, each
   refusal and `create_page` from a file; update requirements §9–§10, architecture and README.
 
@@ -70,6 +73,9 @@ three.
   write tool descriptions carry the same `ac:image` example.
 - **Result:** per attachment, ID, version and download URL, or the failure. No rollback of
   attachments already changed.
+- **Live check:** in a disposable fixture page, the instance's size limit, new-version behavior on an
+  existing filename, SVG/PNG media types, rename, trash and restore, and what decides the
+  attachment-delete permission refused on 2026-10-26.
 - **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
   uncertain outcomes; remove attachment writes from the requirements §4 non-goals; update
   requirements, architecture and README.
@@ -87,6 +93,9 @@ connector edit notifies watchers today: `update_page` never sends `version.minor
   way to suppress their notifications; where it does not, say so in the tool description and result.
 - **Result:** echo the flag sent. Confluence reads back `minorEdit: false` either way, so the result
   cannot confirm it.
+- **Live check:** on disposable fixture pages, confirm that `false` sends no edit email and `true`
+  does, and which version-less writes can suppress notifications. Use "Notify on my actions" with the
+  user's approval, and restore it.
 - **Docs and tests:** synthetic tests that the field is sent only for `false`; update requirements
   §10, architecture and the tool descriptions.
 
@@ -111,6 +120,9 @@ browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, ve
 - **Safety:** account check on every write; when a page reference is given, the comment must belong to
   it. Surface 403 as a permission refusal. Never resend a write whose outcome is uncertain.
 - **Result:** comment ID, version, page and URL, or the failure.
+- **Live check:** in a disposable fixture page, whether deleting a comment trashes or purges it,
+  whether inline comments can be updated and resolved through REST, what happens to replies when a
+  parent is deleted, and editing another user's comment (expect 403).
 - **Docs and tests:** synthetic tests for create, reply, update, stale version, resolve, delete,
   refusals and uncertain outcomes; remove comment writes from the requirements §4 non-goals; update
   architecture and README.
@@ -145,6 +157,7 @@ user approved the undocumented UI form for this.
   recommended updates" checked while the stored value was off, so saving one change also turned that
   on. Read stored values from the view page, send the complete set with only the requested changes,
   then reread and report any setting that differs.
+- **Live check:** every setting round-trips without changing the others; restore the user's values.
 - **Docs and tests:** synthetic form fixtures; this changes account configuration, so the tool
   description must say so.
 
@@ -177,23 +190,17 @@ and only the included page's storage names it.
 ## Decisions
 
 No decisions are open. Not planned, decided 2026-10-30: watch management (listing, adding or
-removing page, space or tree watches).
+removing page, space or tree watches), and live paging checks beyond 500 children and for tree/delete
+preflight caps.
 
 A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage
 for editing. Teams HTML conversion is tracked in that connector's roadmap.
 
 ## Live verification
 
-Each check needs explicit authorization for reads/writes and targets; synthetic pages moved to
-another space must be returned and removed immediately. Use the
-[research toolkit](../research/README.md#synthetic-acceptance-fixture).
-
-On 2026-10-30 the acceptance suite passed with an inline comment in the fixture (16 passed; the
-cross-space check was run separately under an authorized parent page and passed). The same day
-settled: the archived space list against the UI, quick-navigation coverage, CQL's zone, revoked
-tokens, write bounds, and HTML macros inside includes (research §2.2, §4.1, §4.3, §4.4, §5.1, §6.1,
-§6.3). Client setup passed in Claude and Codex: after a restart, each discovered the tools and ran
-`auth_status` and an approved page-metadata read.
+Open checks for implemented behavior; each feature above carries its own. Each check needs explicit
+authorization for reads/writes and targets; synthetic pages moved to another space must be returned
+and removed immediately. Use the [research toolkit](../research/README.md#synthetic-acceptance-fixture).
 
 - **CQL timezone:** check repeated daylight-saving hours.
 - **Search behavior:** check `siteSearch` ordering and `content.version.by` across supported Data Center
@@ -202,19 +209,3 @@ tokens, write bounds, and HTML macros inside includes (research §2.2, §4.1, §
   large subtrees. A pending outcome must never trigger compensating writes.
 - **Token lifecycle:** verify an expired PAT's response and cross-process sign-out with the bound
   credential format, without signing out the user's working credential.
-- **File-based page edits:** once implemented, export a disposable fixture page with macros,
-  lozenges, tables and inline code, update it from the unedited file, and confirm the stored body and
-  rendered page are unchanged apart from the version.
-- **Attachment management:** once implemented, check in a disposable fixture page the instance's size
-  limit, new-version behavior on an existing filename, SVG/PNG media types, rename, trash and restore,
-  and what decides the attachment-delete permission refused on 2026-10-26.
-- **Notify watchers flag:** once implemented, confirm on disposable fixture pages that `false` sends no
-  edit email and `true` does, and which version-less writes can suppress notifications. Use "Notify on
-  my actions" with the user's approval, and restore it.
-- **Comment management:** once implemented, check in a disposable fixture page whether deleting a
-  comment trashes or purges it, whether inline comments can be updated and resolved through REST,
-  what happens to replies when a parent is deleted, and editing another user's comment (expect 403).
-- **Email settings:** once implemented, check that every setting round-trips without changing the
-  others.
-- **Parked:** paging beyond 500 children and tree/delete preflight caps; judged unnecessary for now on
-  2026-10-30.
