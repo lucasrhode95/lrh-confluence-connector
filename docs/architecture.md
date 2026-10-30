@@ -110,7 +110,9 @@ Only design rules that the code layout does not make obvious are listed here. To
 - **Paging** advances on the returned `start + size`, never on the echoed `limit` or `content/search`'s
   `next` link, which skip results (research §5.2). Space listing reads 500 per request; children 500;
   versions 200, at most 5,000; drafts and trash 100. The adapter validates each collection envelope;
-  mapped envelopes share continuation handling and reject empty pages claiming more results.
+  mapped envelopes share continuation handling and reject empty pages claiming more results. A next
+  marker, top-level or under `_links`, means more results; `_links` without one ends the collection.
+  Attachment and comment totals are exact, so links that end before the total raise.
 - **Page reads** are three parallel requests: bodies (`view`, optional `storage`, version, history),
   attachments and comments (500 per request, at most 5,000 each; an incomplete collection raises). A requested body that is missing or
   malformed raises `Upstream`.

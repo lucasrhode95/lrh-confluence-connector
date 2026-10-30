@@ -144,11 +144,18 @@ class PageEnvelope(BaseModel):
     total_size: int | None = None
     has_more: bool | None = None
 
-    def next_start(self, fallback_limit: int) -> int | None:
-        """Advance a collection page, failing on an empty page that claims more results."""
+    def next_start(self, fallback_limit: int, *, exact_total: bool = False) -> int | None:
+        """Advance a collection page, failing on an empty page that claims more results.
+
+        ``exact_total`` marks complete collections whose total is exact (not approximate CQL search
+        totals): links that end the collection while the total says more remain fail explicitly.
+        """
         offset = self.start + self.size
+        total_more = offset < self.total_size if self.total_size is not None else None
+        if exact_total and self.has_more is False and total_more:
+            raise Upstream("Confluence returned contradictory continuation and total values; the collection is incomplete.")
         more = self.has_more if self.has_more is not None else (
-            offset < self.total_size if self.total_size is not None else self.size == fallback_limit
+            total_more if total_more is not None else self.size == fallback_limit
         )
         if not more:
             return None

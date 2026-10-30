@@ -729,7 +729,7 @@ class ConfluenceApi:
             )
             items, envelope = _page_envelope(payload, requested_start=start)
             rows.extend(items)
-            next_start = envelope.next_start(500)
+            next_start = envelope.next_start(500, exact_total=True)
             if next_start is None:
                 if len(rows) > MAX_COLLECTION_ITEMS:
                     break
@@ -884,7 +884,8 @@ def _page_envelope(payload: dict[str, Any], *, requested_start: int) -> tuple[li
     envelope = PageEnvelope(
         start=start, size=size,
         total_size=_optional_nonnegative_int(payload.get("totalSize", payload.get("totalCount"))),
-        has_more=_has_next_link(payload) if "_links" in payload else None,
+        # A next marker anywhere continues; links without one end the page only when present.
+        has_more=True if _has_next_link(payload) else (False if "_links" in payload else None),
     )
     # Explicit continuations/totals cannot make progress through an empty page.
     envelope.next_start(max(1, size))
