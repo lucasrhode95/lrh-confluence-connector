@@ -450,6 +450,8 @@ class PageExports:
                     comments_name = _comments_filename(
                         outcome.metadata,
                         maximum_length=MAX_SINGLE_FILENAME_LENGTH - len(prefix),
+                        maximum_component_units=MAX_FILENAME_COMPONENT_UNITS
+                        - filename_component_units(prefix),
                     )
                     comments_target = localfiles.claim(
                         output_directory, f"{prefix}{comments_name}"
@@ -550,16 +552,17 @@ def _comments_filename(
     metadata: _PageMetadata,
     *,
     maximum_length: int = MAX_EXPORT_MEMBER_LENGTH,
+    maximum_component_units: int = MAX_FILENAME_COMPONENT_UNITS,
 ) -> str:
     suffix = f" ({metadata.page_id}) v{metadata.version}.comments.html"
-    if len(suffix) >= maximum_length or filename_component_units(suffix) >= MAX_FILENAME_COMPONENT_UNITS:
+    if len(suffix) >= maximum_length or filename_component_units(suffix) >= maximum_component_units:
         raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
     title = sanitize_filename_component(metadata.title) or "Untitled page"
     title = safe_filename_stem(
         title,
         suffix=suffix,
         maximum_length=maximum_length,
-        maximum_component_units=MAX_FILENAME_COMPONENT_UNITS,
+        maximum_component_units=maximum_component_units,
         fallback="Page",
     )
     return f"{title}{suffix}"

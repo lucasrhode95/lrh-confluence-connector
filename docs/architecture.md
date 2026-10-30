@@ -237,6 +237,8 @@ comments file.
 pages without attachment bytes as direct local files. Each body and selected comments file is listed
 with its role and path. Bulk and attachment-bearing exports are ZIPs listed with the `archive` role;
 direct export failures have a separate `report` file.
+Direct body and comments filenames reserve the timestamp prefix in both their character and encoded
+component budgets before shortening the title.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.
