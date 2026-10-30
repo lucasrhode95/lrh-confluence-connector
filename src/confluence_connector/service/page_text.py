@@ -470,7 +470,8 @@ def _split_blocks(markdown: str) -> list[str]:
     table_depth = 0
     for line in markdown.splitlines():
         line = line.rstrip()
-        if fence is None:
+        # Retained tables start their own line; table tags quoted in prose or inline code do not.
+        if fence is None and (table_depth or line.startswith("<table")):
             for tag in re.finditer(r"</?table\b[^>]*>", line, re.IGNORECASE):
                 table_depth += -1 if tag.group().startswith("</") else 1
         match = _FENCE.match(line) if table_depth == 0 else None

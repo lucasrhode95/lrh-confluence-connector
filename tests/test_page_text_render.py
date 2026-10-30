@@ -118,6 +118,13 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertNotIn('style=', text)
         self.assertIn('<a>Broken</a>', text)
 
+    def test_table_tags_quoted_in_prose_do_not_merge_budget_blocks(self) -> None:
+        rendered = _render(
+            "<p>Use the <code>&lt;table&gt;</code> tag for grids.</p><p>Close it with &lt;/table&gt;.</p>"
+            "<p>Second</p><p>Third</p>"
+        )
+        self.assertEqual(len(rendered.blocks), 4)
+
     def test_active_content_is_dropped_and_the_html_macro_is_marked(self) -> None:
         text = _text(
             "<p>Visible</p><script>steal()</script><style>p{}</style>",
