@@ -39,6 +39,27 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await api.list_page_comments("55", expected_username="sample-user")), 2)
         self.assertEqual(starts, {"attachment": [0, 1], "comment": [0, 1]})
 
+    async def test_top_level_next_marker_continues_without_links(self) -> None:
+        starts: list[int] = []
+        def handler(request):
+            start = int(request.url.params["start"])
+            starts.append(start)
+            page = {"results": [{"id": str(start + 1), "title": "Synthetic"}], "start": start, "size": 1}
+            if start == 0:
+                page["next"] = "?start=1"
+            return httpx.Response(200, json=page)
+        api = self.make_api(handler)
+        self.assertEqual(len(await api.list_page_attachments("55", expected_username="sample-user")), 2)
+        self.assertEqual(starts, [0, 1])
+
+    async def test_links_without_next_contradicting_an_exact_total_fails(self) -> None:
+        for rows in ([{"id": "1", "title": "Synthetic"}], []):
+            api = self.make_api(lambda request, rows=rows: httpx.Response(200, json={
+                "results": rows, "start": 0, "size": len(rows), "totalSize": 2, "_links": {},
+            }))
+            with self.assertRaisesRegex(Upstream, "contradictory"):
+                await api.list_page_attachments("55", expected_username="sample-user")
+
     async def test_empty_collection_with_continuation_fails_instead_of_claiming_completion(self) -> None:
         api = self.make_api(lambda request: httpx.Response(200, json={"results": [], "_links": {"next": "?start=500"}}))
         for operation in (
@@ -108,6 +129,24 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.hits[0].last_modified_by.display_name, "Sample Editor")
         self.assertEqual(page.hits[0].ancestors[0].title, "Root")
         self.assertEqual(page.hits[0].url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/123/Synthetic")
+
+    async def test_search_hits_drop_highlight_markers_and_html_escapes(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"results": [
+                {
+                    "title": "Lab [@@@hl@@@beacon@@@endhl@@@] &amp; Notes",
+                    "excerpt": "x = &#39;@@@hl@@@beacon@@@endhl@@@&#39;",
+                    "content": {"id": "123", "type": "page", "title": "Lab [beacon] & Notes"},
+                },
+                {"title": "@@@hl@@@beacon@@@endhl@@@ &lt;user&gt;", "entityType": "user"},
+            ], "start": 0, "size": 2})
+
+        page = await self.make_api(handler).search_content_page(
+            "siteSearch ~ 'beacon'", start=0, limit=2, include_archived=True, expected_username="sample-user"
+        )
+        self.assertEqual(page.hits[0].title, "Lab [beacon] & Notes")
+        self.assertEqual(page.hits[0].excerpt, "x = 'beacon'")
+        self.assertEqual(page.hits[1].title, "beacon <user>")
 
     async def test_search_result_without_version_author_maps_to_null(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
