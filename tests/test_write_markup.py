@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
 
 from confluence_connector.domain.errors import InvalidRequest
-from confluence_connector.service.write_markup import content_loss, to_storage
+from confluence_connector.service.write_markup import content_loss, file_to_storage, to_storage
 
 
 class WriteMarkupChecks(unittest.TestCase):
@@ -132,6 +134,45 @@ class WriteMarkupChecks(unittest.TestCase):
         )
 
         self.assertEqual(content_loss(before, replacement), (False, ["1 jira macro(s) would be removed."]))
+
+
+class FileStorageChecks(unittest.TestCase):
+    def test_unedited_storage_round_trips_byte_for_byte(self) -> None:
+        storage = (Path(__file__).parent / "fixtures" / "page_text" / "runbook.storage.xml").read_text(encoding="utf-8")
+        storage = re.sub(r'<ac:structured-macro ac:name="html".*?</ac:structured-macro>', "", storage, flags=re.S)
+        storage += '\n<p>a&nbsp;b &amp; c<br /></p><ac:emoticon ac:name="smile" /><pre>preformatted</pre>'
+
+        self.assertEqual(file_to_storage(storage, storage), storage)
+
+    def test_only_new_pre_and_details_blocks_are_converted(self) -> None:
+        body = (
+            "<pre>kept</pre>\n<p>x&nbsp;y</p>"
+            '<pre><code class="language-python">print(1 &lt; 2)</code></pre>'
+            "<details><summary>More</summary><p>inner</p></details>"
+        )
+
+        result = file_to_storage(body, "<p>old</p><pre>kept</pre>")
+
+        self.assertTrue(result.startswith("<pre>kept</pre>\n<p>x&nbsp;y</p>"))
+        self.assertIn(
+            '<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">python</ac:parameter>'
+            "<ac:plain-text-body><![CDATA[print(1 < 2)]]></ac:plain-text-body></ac:structured-macro>",
+            result,
+        )
+        self.assertTrue(result.endswith('<ac:rich-text-body><p>inner</p></ac:rich-text-body></ac:structured-macro>'))
+
+    def test_markup_inside_cdata_and_unparseable_markup_are_sent_unchanged(self) -> None:
+        cdata = (
+            '<ac:structured-macro ac:name="code"><ac:plain-text-body>'
+            "<![CDATA[<pre>x</pre><details>y</details>]]></ac:plain-text-body></ac:structured-macro>"
+        )
+        self.assertEqual(file_to_storage(cdata, None), cdata)
+        self.assertEqual(file_to_storage("<p>a<br>b", None), "<p>a<br>b")
+
+    def test_file_bodies_get_the_same_active_content_refusals(self) -> None:
+        for body in ("<script>x</script>", '<ac:structured-macro ac:name="html"></ac:structured-macro>'):
+            with self.subTest(body=body), self.assertRaises(InvalidRequest):
+                file_to_storage(body, body)
 
 
 if __name__ == "__main__":

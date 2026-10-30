@@ -65,6 +65,9 @@ Write tools require the user's explicit request. Never retry an uncertain write 
 its target. Recreating a page after a refused move is a separate recovery plan: it loses its ID,
 history and comments. Authenticate through `confluence-connector auth`, never through an MCP tool;
 `auth_status` is offline and does not establish token validity.
+To edit a page, export it with `export_pages` (`format: "rich"`, comments off), change the file with
+exact find-and-replace, then pass it to `update_page` as `body_file`. Never retype a large body inline
+or rebuild it from text output.
 """
 
 
@@ -351,9 +354,12 @@ def build_server(context: AppContext) -> FastMCP:
     async def create_page(
         title: Annotated[str, Field(max_length=255, description="New page title, up to 255 characters.")],
         body: Annotated[
-            str,
-            Field(max_length=2_000_000, description="Complete page body, up to 2 million characters."),
-        ],
+            str | None,
+            Field(
+                max_length=2_000_000,
+                description="Complete page body, up to 2 million characters; use exactly one of body and body_file.",
+            ),
+        ] = None,
         format: Annotated[
             PageTextFormat | None,
             Field(description="rich HTML/storage markup (default) or escaped plain text."),
@@ -378,6 +384,10 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
+        body_file: Annotated[
+            str | None,
+            Field(description="Absolute path of a UTF-8 storage file to use as the body instead of body."),
+        ] = None,
     ) -> PageWriteResult:
         """Create a page or new-page draft in exactly one parent or space root.
 
@@ -388,6 +398,8 @@ def build_server(context: AppContext) -> FastMCP:
         panels, status, table of contents, task lists, page/attachment links, images and mentions.
         Text is escaped and split into paragraphs. A duplicate title in the target space is refused.
         Position defaults to last; before/after require sibling in the same parent.
+        body_file sends a rich storage file unchanged apart from new pre/details blocks; a rich
+        export's header is dropped and its storage kept as is.
         """
         services = await context.services()
         result: PageWriteResult = await services.writes.create_page(
@@ -399,21 +411,28 @@ def build_server(context: AppContext) -> FastMCP:
             space_key=space_key,
             position=position,
             sibling=sibling,
+            body_file=body_file,
         )
         return result
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def update_page(
-        page: Annotated[str, Field(description="Published page ID or supported same-instance page URL.")],
+        page: Annotated[
+            str | None,
+            Field(description="Published page ID or same-instance URL; optional with body_file, which names it."),
+        ] = None,
         body: Annotated[
-            str,
-            Field(max_length=2_000_000, description="Replacement body, up to 2 million characters."),
-        ],
+            str | None,
+            Field(
+                max_length=2_000_000,
+                description="Replacement body, up to 2 million characters; use exactly one of body and body_file.",
+            ),
+        ] = None,
         expected_version: Annotated[
-            int,
-            Field(ge=1, description="Current page version; stale versions are refused."),
-        ],
+            int | None,
+            Field(ge=1, description="Current page version, required with body; body_file supplies it."),
+        ] = None,
         format: Annotated[
             PageTextFormat | None,
             Field(description="rich HTML/storage markup (default) or escaped plain text."),
@@ -423,10 +442,17 @@ def build_server(context: AppContext) -> FastMCP:
             bool,
             Field(description="Confirm if replacement would detach inline-comment anchors."),
         ] = False,
+        body_file: Annotated[
+            str | None,
+            Field(description="Absolute path of an edited rich export_pages file, instead of body."),
+        ] = None,
     ) -> PageWriteResult:
         """Replace a published page's complete body, with an optional title change.
 
-        expected_version is required; a stale version is never overwritten. Rich is the default:
+        body_file takes a rich export_pages file (comments off): its header names the page and
+        version, and the storage is sent unchanged apart from new pre/details blocks. Files without
+        the header, text exports and files with the comments section are refused. With body,
+        page and expected_version are required. A stale version is never overwritten. Rich is the default:
         provide HTML and Confluence storage tags, not Markdown or wiki markup. The connector converts
         pre/code to the code macro, details/summary to expand, and HTML void tags to self-closing
         tags. It refuses scripts, styles, frames, objects, embeds, event handlers, javascript URLs
@@ -443,6 +469,7 @@ def build_server(context: AppContext) -> FastMCP:
             format=format if format is not None else "rich",
             title=title,
             allow_comment_loss=allow_comment_loss,
+            body_file=body_file,
         )
         return result
 

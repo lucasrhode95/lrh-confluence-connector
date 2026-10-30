@@ -2,46 +2,15 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 305 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 324 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Sections 1–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found the same
+Sections 1–5 follow the priority the user set on 2026-10-30; 6 and 7 were decided or found the same
 day and have no rank yet.
 
-### 1. File-based page edits
-
-Approved by the user on 2026-10-28. The rich round trip exists (`get_pages` and `export_pages` return
-the unchanged storage body; `update_page` accepts it), but the write body travels inline. On
-2026-10-28 an agent needed to add one item to a 46,000-character page: the rich read was too large for
-its context, and `update_page` would have needed the whole body retyped in the call, so it used the
-REST API from the browser instead. Partial-edit parameters (paths, block IDs, anchors) were rejected:
-they break when the page changes around them.
-
-- **Read:** `export_pages` with `format: "rich"` and `parse_scope.comments: false` already writes the
-  unchanged storage body to a file, after a leading header comment with the page ID and version.
-- **Write:** `update_page` accepts `body_file`, a rich export file, in place of `body`. The connector
-  strips its own header comment and takes the page ID and version from it as `expected_version`; an
-  explicit `page` or `expected_version` must match. Refuse a file without the header, from a different
-  page, from a `text` export, or with the appended comments section. `create_page` accepts a plain
-  storage file as `body_file`.
-- **No-op round trip:** exporting and immediately updating with no edits must leave the stored body
-  byte-identical, including inline `<code>`, code and expand macros, status lozenges, anchors, emoji
-  and tables. Apply the `<pre>`/`<code>` conversion only where it cannot change existing storage.
-- **Safety:** the existing stale-version, inline-comment-loss and removed-macro checks still apply.
-  No connector size cap (see 7).
-- **Server instructions:** ship them with the feature, not before. Proposed text: "To edit a page,
-  export it with `export_pages` (`format: "rich"`, comments off), change the file with exact
-  find-and-replace, then pass it to `update_page` as `body_file`. Never retype a large body inline or
-  rebuild it from text output."
-- **Live check:** export a disposable fixture page with macros, lozenges, tables and inline code,
-  update it from the unedited file, and confirm the stored body and rendered page are unchanged apart
-  from the version.
-- **Docs and tests:** synthetic tests for the no-op round trip, an edited file, a stale version, each
-  refusal and `create_page` from a file; update requirements §9–§10, architecture and README.
-
-### 2. Attachment management
+### 1. Attachment management
 
 Approved by the user on 2026-10-30: full control over attachments. Reads exist (`get_pages` lists
 attachments; `download_attachments` fetches bytes). Writes are missing: on 2026-10-26 a doc refactor
@@ -80,7 +49,7 @@ three.
   uncertain outcomes; remove attachment writes from the requirements §4 non-goals; update
   requirements, architecture and README.
 
-### 3. Notify watchers flag
+### 2. Notify watchers flag
 
 Requested by the user on 2026-10-30, for minor fixes that should not email every watcher. Every
 connector edit notifies watchers today: `update_page` never sends `version.minorEdit`. The editor's
@@ -99,7 +68,7 @@ connector edit notifies watchers today: `update_page` never sends `version.minor
 - **Docs and tests:** synthetic tests that the field is sent only for `false`; update requirements
   §10, architecture and the tool descriptions.
 
-### 4. Comment management
+### 3. Comment management
 
 Approved by the user on 2026-10-28. Reads exist (`get_pages` returns threaded footer and inline
 comments with IDs). Writes are missing: on 2026-10-28 editing the user's own footer comment needed a
@@ -127,7 +96,7 @@ browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, ve
   refusals and uncertain outcomes; remove comment writes from the requirements §4 non-goals; update
   architecture and README.
 
-### 5. Edited macros reported as removed
+### 4. Edited macros reported as removed
 
 On 2026-10-28 an `update_page` that changed eight status lozenges from one title and colour to
 another warned "8 status macro(s) would be removed". Nothing was removed: the stored page had the same
@@ -141,7 +110,7 @@ name plus every parameter, so any parameter edit counts as one removal and one a
 - **Tests:** synthetic regressions for a parameter edit (changed, not removed), a real removal, a
   macro without an ID, and an ID moved to a different macro name.
 
-### 6. Email notification settings
+### 5. Email notification settings
 
 Requested by the user on 2026-10-30: read and change the signed-in user's email notification
 settings (profile > Settings > Email), such as autowatch and notifications for one's own actions. The
@@ -161,7 +130,7 @@ user approved the undocumented UI form for this.
 - **Docs and tests:** synthetic form fixtures; this changes account configuration, so the tool
   description must say so.
 
-### 7. Write input handling
+### 6. Write input handling
 
 Decided by the user on 2026-10-30.
 
@@ -173,7 +142,7 @@ Decided by the user on 2026-10-30.
   the input is not well formed, send it unchanged and return Confluence's 400 with its row and column.
   Update requirements §10.1 and the tool descriptions.
 
-### 8. Macros inside included pages
+### 7. Macros inside included pages
 
 Found live on 2026-10-30 (research §5.1). Text output renders an included page's content, including
 its macro markers, but typed references list only the include itself: macro identities come from the

@@ -6,6 +6,7 @@ import json
 import re
 from collections import Counter
 from html import escape
+from html.parser import HTMLParser
 
 from bs4 import CData, BeautifulSoup, Tag
 
@@ -62,6 +63,30 @@ def to_storage(body: str, page_format: str) -> str:
     _replace_code_blocks(soup)
     _replace_expands(soup)
     return str(soup)
+
+
+def file_to_storage(body: str, existing_storage: str | None) -> str:
+    """Check a `body_file` storage body and convert only its new pre/details blocks.
+
+    Every other byte is sent unchanged, so an unedited export round-trips exactly; markup Confluence
+    cannot parse is sent as is and its 400 reports the row and column. A `<pre>` block whose source
+    already appears in ``existing_storage`` is Confluence's own preformatted text and is kept.
+    """
+    soup = BeautifulSoup(body, "html.parser")
+    _check_active_content(soup)
+    _check_markup_depth(soup, MAX_RICH_MARKUP_DEPTH)
+    replacements: list[tuple[int, int, str]] = []
+    for start, end, name in _block_spans(body, frozenset({"pre", "details"})):
+        source = body[start:end]
+        if name == "pre" and existing_storage is not None and source in existing_storage:
+            continue
+        block = BeautifulSoup(source, "html.parser")
+        _replace_code_blocks(block)
+        _replace_expands(block)
+        replacements.append((start, end, str(block)))
+    for start, end, converted in reversed(replacements):
+        body = body[:start] + converted + body[end:]
+    return body
 
 
 def content_loss(previous: str, replacement: str) -> tuple[bool, list[str]]:
@@ -133,6 +158,45 @@ def _check_markup_depth(soup: BeautifulSoup, maximum_depth: int) -> None:
             visit(child, child_depth)
 
     visit(soup, 0)
+
+
+def _block_spans(text: str, names: frozenset[str]) -> list[tuple[int, int, str]]:
+    """Return source offsets of outermost elements named in ``names``; CDATA content is not markup."""
+    finder = _BlockSpanFinder(text, names)
+    finder.feed(text)
+    finder.close()
+    return finder.spans
+
+
+class _BlockSpanFinder(HTMLParser):
+    def __init__(self, text: str, names: frozenset[str]) -> None:
+        super().__init__(convert_charrefs=False)
+        self._text = text
+        self._names = names
+        self._line_starts = [0, *(match.end() for match in re.finditer(r"\n", text))]
+        self._open: tuple[str, int] | None = None
+        self._depth = 0
+        self.spans: list[tuple[int, int, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._open is None and tag in self._names:
+            self._open = (tag, self._offset())
+            self._depth = 1
+        elif self._open is not None and tag == self._open[0]:
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._open is None or tag != self._open[0]:
+            return
+        self._depth -= 1
+        if self._depth == 0:
+            end = self._text.index(">", self._offset()) + 1
+            self.spans.append((self._open[1], end, tag))
+            self._open = None
+
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        return self._line_starts[line - 1] + column
 
 
 def _replace_code_blocks(soup: BeautifulSoup) -> None:

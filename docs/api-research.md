@@ -319,6 +319,9 @@ repeated create, update, label, parent change, trash and the move action.
   and editor, 2026-10-30): unchecking the editor's "Notify watchers" sends exactly
   `version.minorEdit: true` to `PUT /rest/api/content/{id}`. On four watched synthetic pages, edits
   with it sent no email; edits without it did, about 9 minutes later (batched).
+- An update with the stored title and a byte-identical body creates no version (PAT, 2026-10-30): the
+  response and later reads keep the current version. `view` differs between any two reads of an
+  expand macro, whose element IDs are random, so compare `storage`, not `view`.
 - Write bounds (PAT, 2026-10-30): a 255-character title saves and 256 is 400. Bodies of 2,000,000 and
   5,000,000 characters both save. A 255-character label saves; 256 answers 500 and is not stored. A
   new-page draft does not block a current page with the same title; a current page does (400).

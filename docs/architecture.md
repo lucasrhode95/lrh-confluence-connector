@@ -209,8 +209,16 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 checks `rich` input with BeautifulSoup, converts code blocks and expand sections, and refuses active
 content and excessive nesting (requirements §10.1). The HTML parser repairs some malformed input
 before sending it to Confluence; the roadmap tracks whether that matches the D5 error contract.
+`file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
+positions locate the outermost `<pre>` and `<details>` elements (CDATA is not markup), and only those not
+already in the stored body are converted and spliced back, so every other byte is unchanged.
 `content_loss` compares inline-comment anchors and full macro/attachment target identities between the
 stored and new bodies.
+
+**[`storage_files.py`](../src/confluence_connector/service/storage_files.py)** owns the rich export
+file format. Exports write the provenance comment with a `Page ID:` line through it, and `body_file`
+reads it back: an absolute UTF-8 path, the header's single page ID and version lines, and a refusal for
+the exported comments section.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.

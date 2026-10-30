@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from confluence_connector.domain.errors import (
     AccountMismatch,
@@ -23,6 +25,7 @@ from confluence_connector.domain.models import (
     DraftSummary,
 )
 from confluence_connector.service.cursors import encode
+from confluence_connector.service.storage_files import rich_export_content
 from confluence_connector.service.writes import PageWrites
 
 
@@ -195,6 +198,73 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(InvalidRequest):
             await self.service.update_page("55", "<script>unsafe</script>", expected_version=7)
         self.assertEqual(self.api.content_calls, [])
+
+    async def test_update_from_unedited_export_file_sends_the_stored_body_unchanged(self) -> None:
+        storage = '<p>a&nbsp;b<br /></p><pre>kept</pre><ac:emoticon ac:name="smile" />'
+        self.api.pages["55"] = _page("55", 7, storage)
+        path = self._file(rich_export_content("# Synthetic 55\nVersion: 7 of 7", "55", storage))
+
+        result = await self.service.update_page(body_file=path)
+
+        self.assertEqual(self.api.update_calls[0]["storage_body"], storage)
+        self.assertEqual(self.api.update_calls[0]["next_version"], 8)
+        self.assertEqual(result.warnings, [])
+
+    async def test_update_from_edited_export_file_converts_only_new_blocks(self) -> None:
+        self.api.pages["55"] = _page("55", 7, "<pre>kept</pre>")
+        path = self._file(rich_export_content(
+            "# Synthetic 55\nVersion: 7", "55", "<pre>kept</pre><pre><code>added</code></pre>"
+        ))
+
+        await self.service.update_page("55", body_file=path, expected_version=7)
+
+        sent = self.api.update_calls[0]["storage_body"]
+        self.assertTrue(sent.startswith("<pre>kept</pre><ac:structured-macro ac:name=\"code\">"))
+
+    async def test_update_file_must_match_explicit_page_and_version_before_writing(self) -> None:
+        path = self._file(rich_export_content("# Synthetic 55\nVersion: 7", "55", "<p>new</p>"))
+        with self.assertRaisesRegex(InvalidRequest, "exported from page 55, not page 56"):
+            await self.service.update_page("56", body_file=path)
+        with self.assertRaisesRegex(InvalidRequest, "exported at version 7, not expected_version 6"):
+            await self.service.update_page(body_file=path, expected_version=6)
+        self.assertEqual(self.api.content_calls, [])
+        self.assertEqual(self.api.update_calls, [])
+
+    async def test_update_file_from_an_older_version_is_a_conflict(self) -> None:
+        path = self._file(rich_export_content("# Synthetic 55\nVersion: 6", "55", "<p>new</p>"))
+        with self.assertRaises(Conflict):
+            await self.service.update_page(body_file=path)
+        self.assertEqual(self.api.update_calls, [])
+
+    async def test_update_refuses_files_without_a_header_and_ambiguous_body_sources(self) -> None:
+        plain = self._file("<p>no header</p>")
+        exported = self._file(rich_export_content("# Synthetic 55\nVersion: 7", "55", "<p>new</p>"))
+        cases = [
+            ({"body_file": plain}, "header comment"),
+            ({"page": "55", "body": "<p>x</p>", "expected_version": 7, "body_file": exported}, "exactly one"),
+            ({"body_file": exported, "format": "text"}, "omit format"),
+            ({"page": "55", "body": "<p>x</p>"}, "expected_version are required"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(InvalidRequest, message):
+                await self.service.update_page(**kwargs)
+        self.assertEqual(self.api.update_calls, [])
+
+    async def test_create_from_plain_file_converts_pre_and_from_export_keeps_its_storage(self) -> None:
+        plain = self._file("<pre>new code</pre>")
+        await self.service.create_page("From plain", body_file=plain, space_key="SYNTH")
+        self.assertIn('ac:name="code"', self.api.create_calls[0]["storage_body"])
+
+        exported = self._file(rich_export_content("# Source\nVersion: 3", "88", "<pre>preformatted</pre>"))
+        await self.service.create_page("From export", body_file=exported, space_key="SYNTH")
+        self.assertEqual(self.api.create_calls[1]["storage_body"], "<pre>preformatted</pre>")
+
+    def _file(self, content: str) -> str:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name, "page.html")
+        path.write_text(content, encoding="utf-8", newline="")
+        return str(path)
 
     async def test_draft_cursor_reuses_space_and_limit_and_advances_from_actual_size(self) -> None:
         first = await self.service.list_drafts(space_key="SYNTH", limit=2)
