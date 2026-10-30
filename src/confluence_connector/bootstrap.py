@@ -17,6 +17,7 @@ from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
 from confluence_connector.service.attachments import AttachmentDownloads
 from confluence_connector.service.attachment_management import AttachmentManagement
+from confluence_connector.service.comment_management import CommentManagement
 from confluence_connector.service.exports import PageExports
 from confluence_connector.service.metadata import PageMetadataService
 from confluence_connector.service.pages import PageTextService
@@ -47,6 +48,7 @@ class Services:
     pages: PageTextService
     attachments: AttachmentDownloads
     attachment_management: AttachmentManagement
+    comment_management: CommentManagement
     exports: PageExports
     writes: PageWrites
     structure: PageStructure
@@ -153,6 +155,7 @@ class AppContext:
             pages=pages,
             attachments=attachments,
             attachment_management=AttachmentManagement(api, links, username),
+            comment_management=CommentManagement(api, links, username, str(self.settings["base_url"])),
             exports=PageExports(api, links, pages, attachments, username),
             writes=PageWrites(api, links, username, str(self.settings["base_url"])),
             structure=PageStructure(api, links, username),

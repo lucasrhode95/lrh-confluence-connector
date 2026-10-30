@@ -921,6 +921,22 @@ class ConfluenceApi:
             comments.append(comment)
         return comments
 
+    async def get_comment(self, comment_id: str, *, expected_username: str) -> RemotePageComment:
+        """Read one footer or inline comment and its owning page from the content resource."""
+        if not comment_id.isdecimal():
+            raise InvalidRequest("Comment IDs must be decimal identifiers.")
+        payload = await self._transport.get_json(
+            self._content_route(comment_id),
+            params={
+                "expand": "body.view,body.storage,version,container,ancestors,history,extensions",
+            },
+            expected_username=expected_username,
+        )
+        comment = _page_comment(payload)
+        if comment is None or comment.container_page_id is None or comment.version is None:
+            raise Upstream("Confluence returned a comment without its page or version.")
+        return comment
+
     async def _collection_rows(
         self, route: str, *, expected_username: str, params: Mapping[str, str] | None = None
     ) -> list[Any]:
@@ -942,7 +958,7 @@ class ConfluenceApi:
             start = next_start
         raise Upstream("The attachment/comment collection exceeds the 5,000-item safety cap and is incomplete.")
 
-    async def create_page_comment(
+    async def create_comment(
         self,
         page_id: str,
         storage_body: str,
@@ -950,7 +966,7 @@ class ConfluenceApi:
         expected_username: str,
         parent_comment_id: str | None = None,
     ) -> str:
-        """Create a fixture footer comment or reply from trusted synthetic storage content."""
+        """Create a footer comment or reply from validated storage content."""
         if not page_id.isdecimal() or (
             parent_comment_id is not None and not parent_comment_id.isdecimal()
         ):
@@ -971,9 +987,43 @@ class ConfluenceApi:
         comment_id = _identifier(payload.get("id")) if isinstance(payload, dict) else None
         if comment_id is None or not comment_id.isdecimal():
             raise UncertainWrite(
-                "Confluence may have accepted the fixture comment but returned no usable ID; inspect before retrying."
+                "Confluence may have accepted the comment but returned no usable ID; inspect before retrying."
             )
         return comment_id
+
+    async def update_comment(
+        self,
+        comment_id: str,
+        page_id: str,
+        storage_body: str,
+        *,
+        next_version: int,
+        expected_username: str,
+        notify_watchers: bool = True,
+    ) -> None:
+        """Replace one comment body using an optimistic version and preserve its inline metadata."""
+        if not comment_id.isdecimal() or not page_id.isdecimal():
+            raise InvalidRequest("Comment and page IDs must be decimal identifiers.")
+        await self._transport.send_json(
+            "PUT",
+            self._content_route(comment_id),
+            body={
+                "id": comment_id,
+                "type": "comment",
+                "container": {"id": page_id, "type": "page"},
+                "body": {"storage": {"value": storage_body, "representation": "storage"}},
+                "version": _version_body(next_version, notify_watchers),
+            },
+            expected_username=expected_username,
+        )
+
+    async def delete_comment(self, comment_id: str, *, expected_username: str) -> None:
+        """Permanently delete one comment through the content resource."""
+        if not comment_id.isdecimal():
+            raise InvalidRequest("Comment IDs must be decimal identifiers.")
+        await self._transport.send_json(
+            "DELETE", self._content_route(comment_id), expected_username=expected_username
+        )
 
     async def list_page_versions(
         self, page_id: str, *, expected_username: str
@@ -1485,6 +1535,10 @@ def _page_comment(value: Any) -> RemotePageComment | None:
     inline_properties = inline_properties if isinstance(inline_properties, dict) else {}
     ancestors = value.get("ancestors")
     ancestors = ancestors if isinstance(ancestors, list) else []
+    version = value.get("version")
+    version = version if isinstance(version, dict) else {}
+    container = value.get("container")
+    container = container if isinstance(container, dict) else {}
     parent_comment_id = next(
         (
             identifier
@@ -1502,6 +1556,17 @@ def _page_comment(value: Any) -> RemotePageComment | None:
         author=author,
         created_at=_optional_string(history.get("createdDate")),
         body_view=view_body,
+        body_storage=(
+            _optional_string(body.get("storage", {}).get("value"))
+            if isinstance(body.get("storage"), dict)
+            else None
+        ),
+        version=_positive_int(version.get("number")),
+        container_page_id=(
+            _identifier(container.get("id"))
+            if container.get("type") == "page"
+            else None
+        ),
         location=_optional_string(extensions.get("location")),
         resolution=_optional_string(extensions.get("resolutionStatus"))
         or _optional_string(extensions.get("resolution")),

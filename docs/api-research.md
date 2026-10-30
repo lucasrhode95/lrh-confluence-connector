@@ -306,6 +306,22 @@ Live (browser and PAT), 2026-10-19:
   lists versions (200 per page, `next` link), and `?status=historical&version=N` reads old bodies,
   including version 1 of a page at version 738.
 
+Live synthetic comment check, 2026-10-30:
+
+- `POST /rest/api/content` creates footer comments and replies; a reply names its parent in
+  `ancestors`. `GET /rest/api/content/{commentId}` with view, storage, version, container, ancestors,
+  history and extensions returned the fields needed for an ID-based read.
+- `PUT /rest/api/content/{commentId}` with `type=comment`, its page container, storage body and the
+  next version updated the synthetic footer comment. The client refused a stale expected version
+  before sending a write.
+- `DELETE /rest/api/content/{commentId}` permanently removes a comment: a follow-up GET returned
+  not found. Deleting a parent comment leaves its reply. The synthetic test page was moved to trash
+  after cleanup and was not purged.
+- This test used only the configured account's own synthetic footer comments. Inline edit/anchor
+  preservation, inline resolution writes and a 403 from editing another user's comment remain
+  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v951/api-group-content-resource/)
+  documents generic content operations; no inline-resolution write route has been verified here.
+
 ## 6. Writes
 
 Live (browser), 2026-10-19 unless dated otherwise, on synthetic personal-space pages; the PAT

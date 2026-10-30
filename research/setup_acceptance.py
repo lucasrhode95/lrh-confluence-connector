@@ -282,7 +282,7 @@ async def _ensure_footer_comment(
         None,
     )
     if top is None:
-        comment_id = await services.api.create_page_comment(
+        comment_id = await services.api.create_comment(
             page_id,
             f"<p>{fixture.marker}footernote</p>",
             expected_username=services.username,
@@ -294,7 +294,7 @@ async def _ensure_footer_comment(
         for item in comments
     ):
         return
-    await services.api.create_page_comment(
+    await services.api.create_comment(
         page_id,
         f"<p>{fixture.marker}replynote</p>",
         expected_username=services.username,

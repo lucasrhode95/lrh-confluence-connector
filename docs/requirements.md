@@ -62,7 +62,6 @@ storage technique is shared (§5).
 - Unpublished edits of published pages: the editor-draft route cannot be read back and belongs to the
   non-collaborative editor (research §6.2). Agents propose changes as new-page drafts or edit with
   `expected_version`.
-- Comment writes.
 - Interpreting attachment files (parsing, OCR, transcription). Agents receive the raw file.
 - Version comparisons, activity feeds and automated documentation-quality analysis (follow-ups).
 
@@ -356,9 +355,30 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   This applies to page edits, draft publishing, page restore and attachment versions, including
   multipart uploads. The result echoes the requested value; Confluence reads `minorEdit` back as
   `false`, so it cannot confirm which value was sent.
-- Page creation, draft deletion, label changes, moves and trash routes have no verified suppression
-  field. Their tool descriptions and results report that limitation and the server's default behavior.
+- Page creation, footer comment creation, draft deletion, label changes, moves, comment deletion and
+  trash routes have no verified suppression field. Their tool descriptions and results report that
+  limitation and the server's default behavior.
   A page restore followed by a placement move reports the same limitation when the move is applied.
+
+### 10.8 Comment management
+
+- `get_comment` reads one footer or inline comment by decimal ID and returns its body, version, page
+  and URL, parent, author, creation time, location, resolution and selected text when available.
+- `add_comment` creates a footer comment on one current page, or a reply when `parent_comment_id`
+  belongs to that same page. Bodies use the same rich-storage or escaped-text conversion and 2-million
+  character limit as page writes. Inline comments cannot be created because they require a text
+  selection anchor.
+- `update_comment` replaces the body at an exact `expected_version`; stale versions are refused.
+  An optional page reference must match the comment's owner. Inline anchors are separate source
+  metadata and are not included in the body update. Their preservation on inline edits remains a live
+  verification. `notify_watchers=false` sends `version.minorEdit=true`.
+- `delete_comment` requires `confirm_permanent_delete=true`. Deletion is permanent on the configured
+  instance and cannot be undone. An optional page reference must match the owner; server permission
+  failures remain explicit. The DELETE route has no notification-suppression control.
+- Every write is bound to the authenticated account; an uncertain outcome is never resent. Results
+  include the comment ID, page, URL and version where applicable. Inline-comment
+  resolve/reopen is not exposed because the configured instance has no verified REST write route for
+  that state.
 
 ## 11. Reliability
 
@@ -393,7 +413,8 @@ its ranking.
   with `--allow-writes`. Missing manual steps or settings make only the dependent checks `skipped`.
 - Checks cover search modes and filters (tolerating index delay), paging, link and version resolution,
   page text per D3 and D4, tree order, metadata, export layout per D8, and every write path, including
-  conflicts, refusals, the content-loss check, cross-space moves and the three `delete_page` modes.
+  comment create/reply/update/stale-version/delete, conflicts, refusals, the content-loss check,
+  cross-space moves and the three `delete_page` modes.
 - Every live check also has offline synthetic coverage, run before every commit. The live runner reports
   pass, fail or skipped with timings and no page content.
 - **Ready for daily use** means the offline suite passes and every live check passes or is skipped for

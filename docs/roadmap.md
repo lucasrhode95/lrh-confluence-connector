@@ -2,41 +2,13 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 363 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 368 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Items 3–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found that day and
-have no rank yet.
-
-### 4. Comment management
-
-Approved by the user on 2026-10-28. Reads exist (`get_pages` returns threaded footer and inline
-comments with IDs). Writes are missing: on 2026-10-28 editing the user's own footer comment needed a
-browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, version + 1,
-`X-Atlassian-Token: no-check`), which worked.
-
-- **Create:** `add_comment` takes one page reference, a body in `rich` or `text` and an optional parent
-  comment ID for a reply. Promote the fixture-only `create_page_comment` to this product path, with
-  the same body validation as page writes. Inline comments stay UI-only (they need a text anchor).
-- **Read one:** `get_comment` returns one comment with its version, page, parent, author and
-  resolution, for edits by ID without reading the whole page.
-- **Update:** `update_comment` takes the comment ID, the new body and `expected_version`. Stale
-  versions are refused, as for pages. Works for footer and inline comments; inline anchors stay.
-- **Resolve and reopen:** inline comments only, if the instance exposes resolution through REST.
-- **Delete:** `delete_comment`, allowed even if Confluence deletes permanently (decided 2026-10-30).
-  The tool description and server instructions must say that deletion is destructive and, if
-  confirmed live, cannot be undone; require an explicit confirmation flag.
-- **Safety:** account check on every write; when a page reference is given, the comment must belong to
-  it. Surface 403 as a permission refusal. Never resend a write whose outcome is uncertain.
-- **Result:** comment ID, version, page and URL, or the failure.
-- **Live check:** in a disposable fixture page, whether deleting a comment trashes or purges it,
-  whether inline comments can be updated and resolved through REST, what happens to replies when a
-  parent is deleted, and editing another user's comment (expect 403).
-- **Docs and tests:** synthetic tests for create, reply, update, stale version, resolve, delete,
-  refusals and uncertain outcomes; remove comment writes from the requirements §4 non-goals; update
-  architecture and README.
+Items 5 and 6 follow the remaining priority the user set on 2026-10-30; 7 and 8 were decided or
+found that day and have no rank yet.
 
 ### 5. Edited macros reported as removed
 
@@ -118,6 +90,9 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
   versions; the read-only check on the configured instance passed (research §4.6).
 - **Refused cross-space moves:** inspect terminal failure fields and whether the 10-second bound fits
   large subtrees. A pending outcome must never trigger compensating writes.
+- **Comments:** on disposable synthetic content, verify inline body edits preserve anchors and
+  whether inline resolution can be changed through REST. A second authorized test account is needed
+  to verify the 403 for editing another user's comment.
 - **Token lifecycle:** verify an expired PAT's response and cross-process sign-out with the bound
   credential format, without signing out the user's working credential.
 - **Attachment upload size:** determine the configured instance's maximum upload size with a disposable
