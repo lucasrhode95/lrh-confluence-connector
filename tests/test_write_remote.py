@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from confluence_connector.domain.errors import Conflict, InvalidRequest, UncertainWrite, Upstream
-from confluence_connector.remote.confluence import ConfluenceApi
+from confluence_connector.remote.confluence import LONGTASK_POLL_INTERVAL_SECONDS, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
 from tests.fakes.credential_source import FakeCredentialSource
@@ -17,14 +17,14 @@ from tests.fakes.settings import settings
 
 
 class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
-    def make_api(self, handler):
+    def make_api(self, handler, *, sleep=None):
         client = httpx.AsyncClient(
             base_url="https://confluence.example.test/wiki/",
             transport=httpx.MockTransport(handler),
         )
         transport = ConfluenceTransport(settings(), FakeCredentialSource(), client=client)
         self.addAsyncCleanup(client.aclose)
-        return ConfluenceApi(settings(), transport)
+        return ConfluenceApi(settings(), transport, sleep=sleep) if sleep else ConfluenceApi(settings(), transport)
 
     async def test_create_and_update_send_storage_representation_and_next_version(self) -> None:
         observed: list[httpx.Request] = []
@@ -426,7 +426,8 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={"finished": False, "successful": True, "percentageComplete": 18})
             return httpx.Response(200, json={"finished": True, "successful": True})
 
-        await self.make_api(handler).move_page_action(
+        sleep = AsyncMock()
+        await self.make_api(handler, sleep=sleep).move_page_action(
             "301",
             space_key="TARGET",
             position="append",
@@ -435,6 +436,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             expected_username="sample-user",
         )
 
+        sleep.assert_awaited_once_with(LONGTASK_POLL_INTERVAL_SECONDS)
         self.assertEqual(len(observed), 3)
         self.assertEqual(observed[0].url.path, "/wiki/pages/movepage.action")
         self.assertEqual(observed[0].url.params["spaceKey"], "TARGET")

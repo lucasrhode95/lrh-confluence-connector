@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
@@ -64,9 +64,16 @@ class _LongTaskFailure(Conflict):
 class ConfluenceApi:
     """Own configured REST routes and map source JSON before returning typed values."""
 
-    def __init__(self, settings: Mapping[str, Any], transport: ConfluenceTransport) -> None:
+    def __init__(
+        self,
+        settings: Mapping[str, Any],
+        transport: ConfluenceTransport,
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         self._settings = settings
         self._transport = transport
+        self._sleep = sleep
 
     async def current_user(
         self, *, token_override: str | None = None, expected_username: str | None = None
@@ -669,7 +676,7 @@ class ConfluenceApi:
                     raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
                 raise UncertainWrite("Confluence returned an unreadable terminal move status; inspect the page.")
             if attempt + 1 < LONGTASK_MAX_POLLS:
-                await asyncio.sleep(LONGTASK_POLL_INTERVAL_SECONDS)
+                await self._sleep(LONGTASK_POLL_INTERVAL_SECONDS)
         raise UncertainWrite("Confluence's page move is still pending; inspect the page before retrying.")
 
     async def list_page_attachments(
