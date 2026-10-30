@@ -231,8 +231,9 @@ before sending it to Confluence; the roadmap tracks whether that matches the D5 
 `file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
 positions locate the outermost `<pre>` and `<details>` elements (CDATA is not markup), and only those not
 already in the stored body are converted and spliced back, so every other byte is unchanged.
-`content_loss` compares inline-comment anchors and full macro/attachment target identities between the
-stored and new bodies.
+`content_loss` compares inline-comment anchors and full attachment identities between the stored and
+new bodies. Macros match by `ac:macro-id` when present in both bodies; their source shape is compared
+separately to report changes. Macros without IDs use name and parameters as the fallback identity.
 
 **[`storage_files.py`](../src/confluence_connector/service/storage_files.py)** owns the rich export
 file format. Body files contain the provenance comment with a `Page ID:` line and storage only;

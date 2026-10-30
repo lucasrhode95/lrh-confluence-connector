@@ -2,27 +2,13 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 368 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 373 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Items 5 and 6 follow the remaining priority the user set on 2026-10-30; 7 and 8 were decided or
+Item 6 follows the remaining priority the user set on 2026-10-30; items 7 and 8 were decided or
 found that day and have no rank yet.
-
-### 5. Edited macros reported as removed
-
-On 2026-10-28 an `update_page` that changed eight status lozenges from one title and colour to
-another warned "8 status macro(s) would be removed". Nothing was removed: the stored page had the same
-31 status macros before and after. `_macro_identity` in `service/write_markup.py` keys a macro on its
-name plus every parameter, so any parameter edit counts as one removal and one addition.
-
-- **Identity:** match macros by `ac:macro-id` when both bodies carry it; fall back to name and
-  parameters only for macros without one.
-- **Warnings:** report removed macros (ID gone) separately from changed ones (same ID, different
-  parameters or body), e.g. "8 status macro(s) changed". A changed macro is not a loss.
-- **Tests:** synthetic regressions for a parameter edit (changed, not removed), a real removal, a
-  macro without an ID, and an ID moved to a different macro name.
 
 ### 6. Email notification settings
 

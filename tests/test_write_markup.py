@@ -107,6 +107,72 @@ class WriteMarkupChecks(unittest.TestCase):
         )
         self.assertEqual(content_loss(before, replacement), (False, ["1 include macro(s) would be removed."]))
 
+    def test_macro_parameter_edit_with_stable_id_reports_changed_not_removed(self) -> None:
+        before = (
+            '<ac:structured-macro ac:name="status" ac:macro-id="stable-1">'
+            '<ac:parameter ac:name="title">Old</ac:parameter>'
+            '<ac:parameter ac:name="colour">Red</ac:parameter>'
+            "</ac:structured-macro>"
+        )
+        replacement = (
+            '<ac:structured-macro ac:name="status" ac:macro-id="stable-1">'
+            '<ac:parameter ac:name="title">New</ac:parameter>'
+            '<ac:parameter ac:name="colour">Green</ac:parameter>'
+            "</ac:structured-macro>"
+        )
+
+        self.assertEqual(content_loss(before, replacement), (False, ["1 status macro(s) changed."]))
+
+    def test_macro_body_edit_with_stable_id_reports_changed(self) -> None:
+        before = (
+            '<ac:structured-macro ac:name="panel" ac:macro-id="stable-2">'
+            "<ac:rich-text-body>Before</ac:rich-text-body>"
+            "</ac:structured-macro>"
+        )
+        replacement = (
+            '<ac:structured-macro ac:name="panel" ac:macro-id="stable-2">'
+            "<ac:rich-text-body>After</ac:rich-text-body>"
+            "</ac:structured-macro>"
+        )
+
+        self.assertEqual(content_loss(before, replacement), (False, ["1 panel macro(s) changed."]))
+
+    def test_macro_without_id_uses_name_and_parameters_as_fallback_identity(self) -> None:
+        before = (
+            '<ac:structured-macro ac:name="status">'
+            '<ac:parameter ac:name="title">Old</ac:parameter>'
+            "</ac:structured-macro>"
+        )
+        replacement = (
+            '<ac:structured-macro ac:name="status">'
+            '<ac:parameter ac:name="title">New</ac:parameter>'
+            "</ac:structured-macro>"
+        )
+
+        self.assertEqual(content_loss(before, replacement), (False, ["1 status macro(s) would be removed."]))
+
+    def test_macro_without_id_on_one_side_uses_the_fallback_identity(self) -> None:
+        before = (
+            '<ac:structured-macro ac:name="panel" ac:macro-id="stable-4">'
+            '<ac:parameter ac:name="title">Same</ac:parameter>'
+            "<ac:rich-text-body>Before</ac:rich-text-body>"
+            "</ac:structured-macro>"
+        )
+        replacement = (
+            '<ac:structured-macro ac:name="panel">'
+            '<ac:parameter ac:name="title">Same</ac:parameter>'
+            "<ac:rich-text-body>After</ac:rich-text-body>"
+            "</ac:structured-macro>"
+        )
+
+        self.assertEqual(content_loss(before, replacement), (False, ["1 panel macro(s) changed."]))
+
+    def test_macro_id_moved_to_another_name_reports_a_change(self) -> None:
+        before = '<ac:structured-macro ac:name="status" ac:macro-id="stable-3"></ac:structured-macro>'
+        replacement = '<ac:structured-macro ac:name="panel" ac:macro-id="stable-3"></ac:structured-macro>'
+
+        self.assertEqual(content_loss(before, replacement), (False, ["1 status macro(s) changed to panel."]))
+
     def test_target_ownership_changes_are_reported(self) -> None:
         cases = [
             ('<ri:attachment ri:filename="guide.pdf"><ri:page ri:content-title="Owner" ri:space-key="A"/></ri:attachment>', 'attachment reference'),
@@ -119,7 +185,7 @@ class WriteMarkupChecks(unittest.TestCase):
                 self.assertFalse(has_anchor_loss)
                 self.assertTrue(any(warning in value for value in warnings))
 
-    def test_nested_macro_change_does_not_report_its_unchanged_parent(self) -> None:
+    def test_nested_macro_change_reports_changed_parent_body_and_removed_child(self) -> None:
         before = (
             '<ac:structured-macro ac:name="panel">'
             '<ac:parameter ac:name="title">Heading</ac:parameter>'
@@ -133,7 +199,10 @@ class WriteMarkupChecks(unittest.TestCase):
             '</ac:structured-macro>'
         )
 
-        self.assertEqual(content_loss(before, replacement), (False, ["1 jira macro(s) would be removed."]))
+        self.assertEqual(
+            content_loss(before, replacement),
+            (False, ["1 panel macro(s) changed.", "1 jira macro(s) would be removed."]),
+        )
 
 
 class FileStorageChecks(unittest.TestCase):
