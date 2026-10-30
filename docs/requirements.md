@@ -280,8 +280,8 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - Avoid routes and fields known to be deprecated, documented or not. Experimental routes, such as the
   version list, are flagged in the research record.
 - Pages are identified by ID, which survives renames and moves; titles are unique only within a space.
-  Tools resolve every reference to an ID first: `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=`
-  carry it; `/x/…` short links are followed; `/display/KEY/Title` is looked up by title and fails
+  Tools resolve every reference to an ID first: `/spaces/KEY/pages/ID/…`, `viewpage.action?pageId=`
+  and the editor's `editpage.action?pageId=` carry it; `/x/…` short links are followed; `/display/KEY/Title` is looked up by title and fails
   clearly after a rename. `pageVersion` selects a version; anchors are ignored. Other hosts are
   refused.
 - Placement is one `parent_id` (the space follows from it) or `space_key` alone for the root, plus an

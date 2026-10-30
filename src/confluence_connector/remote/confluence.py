@@ -1361,7 +1361,7 @@ def _nonnegative_int(value: Any, *, default: int) -> int:
 
 
 def _page_id(value: Any) -> bool:
-    return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).isdigit()
+    return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).isdecimal()
 
 
 def _attachment_download_route(base_url: str, value: str) -> tuple[str, dict[str, str]]:

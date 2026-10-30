@@ -47,10 +47,10 @@ class PageLinkResolver:
         site_path = self._site_path(path)
         query_values = parse_qs(query, keep_blank_values=False)
         version = _version(query_values)
-        if site_path.endswith("/viewpage.action"):
+        if site_path.endswith(("/viewpage.action", "/editpage.action")):
             page_id = _first(query_values, "pageId")
             if not page_id or not page_id.isdecimal():
-                raise InvalidRequest("A viewpage URL must include a numeric pageId.")
+                raise InvalidRequest("A viewpage or editpage URL must include a numeric pageId.")
             return ResolvedPageReference(page_id=page_id, version=version)
         page_path = _PAGE_PATH.fullmatch(site_path)
         if page_path:

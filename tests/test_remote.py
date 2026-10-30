@@ -582,6 +582,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
                 "345",
                 3,
             ),
+            ("https://confluence.example.test/wiki/pages/editpage.action?pageId=456", "456", None),
         )
         for reference, expected_id, expected_version in values:
             with self.subTest(reference=reference):
