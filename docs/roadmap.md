@@ -55,6 +55,10 @@ used one-off scripts over `ConfluenceTransport` for all three.
   no-check`, account check, write retry policy). Never resend a write whose outcome is uncertain.
 - **Preflight:** files exist and are readable, size within a configured bound, media type from the
   extension, no duplicate filenames in one call.
+- **SVG images:** requested by the user on 2026-10-30. Upload with `image/svg+xml`, then embed with
+  `<ac:image><ri:attachment ri:filename="…"/></ac:image>`, which renders inline; the `view-file` macro
+  that drag-and-drop inserts shows a file icon, and inline `<svg>` is stripped (research §6.5). Write
+  tool descriptions should steer images to `ac:image`.
 - **Result:** per attachment, ID, version and download URL, or the failure. No rollback of
   attachments already changed.
 - **Docs and tests:** synthetic tests for create, new version, rename, trash, restore, refusals and
@@ -172,7 +176,8 @@ scope.
 ## Decisions
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
-  work needs create, version, update, trash and restore (see Implementation). Decide whether to lift
+  work needs create, version, update, trash and restore, and embedding SVG diagrams needs upload
+  (see Implementation). Decide whether to lift
   the non-goal for attachments. Comment writes are approved (see Implementation).
 
 A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage

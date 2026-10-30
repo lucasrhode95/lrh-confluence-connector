@@ -387,6 +387,13 @@ saved where safe:
 | `<details>`, `<summary>`, `<mark>`, `<kbd>` | Tags stripped, text kept |
 | `<script>`, `<style>`, `onclick`, `javascript:` links, the HTML macro | Passed through `convert` unchanged; not saved |
 
+SVG images (PAT and browser, 2026-10-30, Data Center 9.2.10, one synthetic page): an SVG attachment
+uploaded as `image/svg+xml` renders inline through `<ac:image><ri:attachment …/></ac:image>` and
+through `<ac:image><ri:url …/></ac:image>` on its download URL; `view` emits a plain `<img>`, and the
+editor keeps both as images. The `view-file` macro, which drag-and-drop inserts, shows a placeholder
+icon (`data-has-thumbnail="false"`) because no SVG thumbnail exists. An inline `<svg>` element is
+stripped on save, leaving an empty paragraph.
+
 ## 7. Private routes seen but not used
 
 Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a request was sent.
