@@ -53,6 +53,7 @@ TRASH_PAGE_SIZE = 100
 LONGTASK_MAX_POLLS = 40
 LONGTASK_POLL_INTERVAL_SECONDS = 0.25
 LONGTASK_MAX_WAIT_SECONDS = 10.0
+_QUICKNAV_CONTENT_TYPES = {"content-type-page": "page", "content-type-blogpost": "blogpost"}
 PLACEMENT_PROPERTY_KEY = "lrh-confluence-connector-placement"
 
 
@@ -178,20 +179,24 @@ class ConfluenceApi:
     async def quicknav_title_matches(
         self, query: str, *, limit: int, expected_username: str
     ) -> list[ContentSearchHit]:
-        """Read the browser-observed quick-navigation title source without trusting returned URLs."""
+        """Read the browser-observed quick-navigation title source without trusting returned URLs.
+
+        The UI's ``src`` parameter makes the route return no matches; rows arrive in groups.
+        """
         payload = await self._transport.get_json(
             "rest/quicknav/1/search",
-            params={"query": query, "limit": str(limit), "src": "next.ui.search", "type": "page"},
+            params={"query": query, "limit": str(limit), "type": "page"},
             expected_username=expected_username,
         )
-        values = payload.get("contentNameMatches")
-        if not isinstance(values, list):
+        groups = payload.get("contentNameMatches")
+        if not isinstance(groups, list) or not all(isinstance(group, list) for group in groups):
             raise Upstream("Confluence returned an unexpected quick-navigation response.")
         matches: list[ContentSearchHit] = []
-        for value in values:
-            hit = _quicknav_hit(value, base_url=str(self._settings["base_url"]))
-            if hit is not None:
-                matches.append(hit)
+        for group in groups:
+            for value in group:
+                hit = _quicknav_hit(value, base_url=str(self._settings["base_url"]))
+                if hit is not None:
+                    matches.append(hit)
         return matches
 
     async def search_users_page(
@@ -960,30 +965,21 @@ def _search_snippet(value: Any) -> str | None:
 
 
 def _quicknav_hit(value: Any, *, base_url: str) -> ContentSearchHit | None:
-    """Map only quick-navigation rows that provide a usable source id and title."""
+    """Map only quick-navigation page or blog rows that provide a usable source id and title."""
     if not isinstance(value, dict):
         return None
-    content_id = _identifier(value.get("contentId", value.get("id")))
-    if content_id is None or not content_id.isdecimal():
+    content_type = _QUICKNAV_CONTENT_TYPES.get(value.get("className"))
+    content_id = _identifier(value.get("id"))
+    title = _optional_string(value.get("name"))
+    if content_type is None or content_id is None or not content_id.isdecimal() or title is None:
         return None
-    title = _optional_string(value.get("title")) or _optional_string(value.get("name"))
-    if title is None:
-        return None
-    space = value.get("space")
-    space = space if isinstance(space, dict) else {}
-    raw_url = _optional_string(value.get("url")) or _optional_string(value.get("href"))
     return ContentSearchHit(
         content_id=content_id,
-        content_type=(
-            _optional_string(value.get("type"))
-            or _optional_string(value.get("entityType"))
-            or "page"
-        ),
+        content_type=content_type,
         title=title,
-        space_key=_optional_string(value.get("spaceKey")) or _optional_string(space.get("key")),
-        space_name=_optional_string(value.get("spaceName")) or _optional_string(space.get("name")),
-        url=same_instance_link(base_url, raw_url),
-        modified_at=_optional_string(value.get("lastModified")),
+        space_key=_optional_string(value.get("spaceKey")),
+        space_name=_optional_string(value.get("spaceName")),
+        url=same_instance_link(base_url, _optional_string(value.get("href"))),
         sources=["quicknav"],
     )
 

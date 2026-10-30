@@ -373,6 +373,8 @@ async def _check_search_modes(
     )
     if not any(query.source == "quicknav" for query in title.queries_sent):
         raise AssertionError("unscoped title search did not include quick navigation")
+    if not any(hit.content_id == root_id and "quicknav" in hit.sources for hit in title.hits):
+        raise AssertionError("quick navigation did not return the fixture root")
 
 
 async def _check_search_filters(
