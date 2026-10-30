@@ -25,6 +25,17 @@ def main() -> int:
     base_url = args.base_url or settings["base_url"]
     if args.base_url:
         _validate_base_url(base_url)
+    missing = [
+        name
+        for name, present in (
+            ("query", args.query is not None or "query" in settings),
+            ("endpoints.search_pages", "search_pages" in settings["endpoints"]),
+            ("form_auth_path", args.mode != "form" or "form_auth_path" in settings),
+        )
+        if not present
+    ]
+    if missing:
+        raise SystemExit(f"The probe needs {', '.join(missing)} in the private config.")
     query = args.query if args.query is not None else settings["query"]
     if not query.strip():
         raise SystemExit("The probe query must not be empty.")

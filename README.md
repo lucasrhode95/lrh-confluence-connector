@@ -74,8 +74,8 @@ A local MCP server for one user's Confluence Data Center account.
    clone (it is git-ignored) and set `base_url` to your Confluence address, including any context path,
    for example `https://wiki.example.com` or `https://intranet.example.com/confluence`. The endpoint
    paths are relative to it and rarely need changing. Leave `cql_timezone` at `null`: sign-in measures
-   it. `query`, `form_auth_path` and `acceptance` are used only by the
-   [research tools](research/README.md).
+   it. `query`, `form_auth_path`, `endpoints.search_pages` and `acceptance` are optional and used only by
+   the [research tools](research/README.md).
 
    To keep the file elsewhere, pass `--config PATH` before the command (`confluence-connector --config
    PATH mcp`) or set `CONFLUENCE_CONFIG`.
