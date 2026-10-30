@@ -130,6 +130,10 @@ Only design rules that the code layout does not make obvious are listed here. To
   and quote limitations. Draft and trash listings share the collection request and envelope mapping.
 - **Placement properties** (`get_page_property`, `set_page_property`, `remove_page_property`) store a
   page's former parent and position in a content property before it is trashed (research §6.4).
+- **Attachment management** creates files with the page attachment route and versions existing files
+  with `/child/attachment/{id}/data`; metadata uses the content update route, and removal is a soft
+  delete followed by status-current restoration. Multipart writes share transport account and retry
+  checks.
 
 ### 5.4 [`remote/links.py`](../src/confluence_connector/remote/links.py)
 
@@ -243,6 +247,10 @@ component budgets before shortening the title.
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.
 
+**[`attachment_management.py`](../src/confluence_connector/service/attachment_management.py)** preflights
+local files, validates attachment ownership, protects body references before trashing and stops after
+uncertain writes. It distinguishes attachment-delete access from page-update access.
+
 **[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
 folders, cleanup of files older than seven days when a folder is next used (tolerating files another
 process removed), exclusive name claims with ` (2)` suffixes, owner-only permissions on POSIX.
@@ -281,6 +289,7 @@ outputs.
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
+| Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |
 | Create, update, publish, draft delete | `POST`, `PUT`, `DELETE /rest/api/content…` | Yes |
 | Labels | `POST`, `DELETE …/label` | Yes |
 | Same-space parent change | `PUT /rest/api/content/{id}` with `ancestors` | Yes |

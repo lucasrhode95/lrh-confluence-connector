@@ -694,6 +694,189 @@ class ConfluenceApi:
             attachments.append(attachment)
         return attachments
 
+    async def upload_page_attachment(
+        self,
+        page_id: str,
+        *,
+        filename: str,
+        content: bytes,
+        media_type: str,
+        comment: str | None,
+        expected_username: str,
+    ) -> PageAttachment:
+        """Create a new attachment on a page; existing files use ``upload_attachment_version``."""
+        if not page_id.isdecimal():
+            raise InvalidRequest("The attachment target must be a numeric page ID.")
+        form_fields = {"minorEdit": "false"}
+        if comment is not None:
+            form_fields["comment"] = comment
+        payload = await self._transport.send_json(
+            "POST",
+            f"{self._content_route(page_id)}/child/attachment",
+            files={"file": (filename, content, media_type)},
+            form_fields=form_fields,
+            skip_atlassian_token_check=True,
+            expected_username=expected_username,
+        )
+        rows = payload.get("results") if isinstance(payload, dict) else None
+        row = rows[0] if isinstance(rows, list) and rows else payload
+        attachment = _page_attachment(row, base_url=str(self._settings["base_url"]))
+        if attachment is None:
+            raise UncertainWrite("Confluence may have accepted the attachment; inspect the page before retrying.")
+        return attachment
+
+    async def upload_attachment_version(
+        self,
+        page_id: str,
+        attachment_id: str,
+        *,
+        filename: str,
+        content: bytes,
+        media_type: str,
+        comment: str | None,
+        expected_username: str,
+    ) -> PageAttachment:
+        """Upload bytes as a new version of the supplied page attachment."""
+        if not page_id.isdecimal() or not attachment_id.isdecimal():
+            raise InvalidRequest("Page and attachment IDs must be numeric.")
+        form_fields = {"minorEdit": "false"}
+        if comment is not None:
+            form_fields["comment"] = comment
+        payload = await self._transport.send_json(
+            "POST",
+            f"{self._content_route(page_id)}/child/attachment/{quote(attachment_id, safe='')}/data",
+            files={"file": (filename, content, media_type)},
+            form_fields=form_fields,
+            skip_atlassian_token_check=True,
+            expected_username=expected_username,
+        )
+        rows = payload.get("results") if isinstance(payload, dict) else None
+        row = rows[0] if isinstance(rows, list) and rows else payload
+        attachment = _page_attachment(row, base_url=str(self._settings["base_url"]))
+        if attachment is None:
+            raise UncertainWrite("Confluence may have accepted the attachment version; inspect before retrying.")
+        return attachment
+
+    async def update_page_attachment(
+        self,
+        page_id: str,
+        attachment: PageAttachment,
+        *,
+        filename: str,
+        media_type: str,
+        comment: str | None,
+        expected_username: str,
+    ) -> PageAttachment:
+        """Update attachment properties at the version recorded on the page child list."""
+        if not page_id.isdecimal() or not attachment.attachment_id.isdecimal():
+            raise InvalidRequest("Page and attachment IDs must be numeric.")
+        if attachment.version is None:
+            raise Upstream("Confluence returned no attachment version for the metadata update.")
+        body: dict[str, Any] = {
+            "id": attachment.attachment_id,
+            "type": "attachment",
+            "status": "current",
+            "title": filename,
+            "container": {"id": page_id, "type": "page"},
+            "metadata": {"mediaType": media_type},
+            "version": {"number": attachment.version + 1},
+        }
+        if comment is not None:
+            body["version"]["message"] = comment
+        payload = await self._transport.send_json(
+            "PUT",
+            f"{self._content_route(page_id)}/child/attachment/{quote(attachment.attachment_id, safe='')}",
+            body=body,
+            expected_username=expected_username,
+        )
+        updated = _page_attachment(payload, base_url=str(self._settings["base_url"]))
+        if updated is None:
+            raise UncertainWrite("Confluence may have updated attachment metadata; inspect it before retrying.")
+        return updated
+
+    async def get_page_attachment(
+        self,
+        attachment_id: str,
+        *,
+        status: str,
+        expected_username: str,
+    ) -> PageAttachment:
+        """Read one attachment by ID and requested status, including its parent and version."""
+        if not attachment_id.isdecimal() or status not in {"current", "trashed"}:
+            raise InvalidRequest("Attachment ID or status is invalid.")
+        payload = await self._transport.get_json(
+            f"{self._content_route(attachment_id)}",
+            params={"status": status, "expand": "version,container,operations"},
+            expected_username=expected_username,
+        )
+        attachment = _page_attachment(payload, base_url=str(self._settings["base_url"]))
+        if attachment is None:
+            raise Upstream("Confluence returned incomplete attachment metadata.")
+        return attachment
+
+    async def attachment_supports_delete(self, attachment_id: str, *, expected_username: str) -> bool:
+        """Read the attachment's delete operation to distinguish removal permission from upload access."""
+        payload = await self._transport.get_json(
+            self._content_route(attachment_id),
+            params={"expand": "operations"},
+            expected_username=expected_username,
+        )
+        operations = payload.get("operations")
+        if not isinstance(operations, list):
+            raise Upstream("Confluence did not return attachment delete permissions.")
+        return any(
+            isinstance(operation, dict) and operation.get("operation") == "delete"
+            for operation in operations
+        )
+
+    async def page_supports_update(self, page_id: str, *, expected_username: str) -> bool:
+        """Read the current user's page update operation before attachment writes."""
+        payload = await self._transport.get_json(
+            self._content_route(page_id),
+            params={"expand": "operations"},
+            expected_username=expected_username,
+        )
+        operations = payload.get("operations")
+        if not isinstance(operations, list):
+            raise Upstream("Confluence did not return page update permissions.")
+        return any(
+            isinstance(operation, dict) and operation.get("operation") == "update"
+            for operation in operations
+        )
+
+    async def trash_page_attachment(self, attachment_id: str, *, expected_username: str) -> None:
+        """Move one attachment to the space trash without purging it."""
+        if not attachment_id.isdecimal():
+            raise InvalidRequest("The attachment ID must be numeric.")
+        await self._transport.send_json(
+            "DELETE",
+            self._content_route(attachment_id),
+            params={"status": "current"},
+            expected_username=expected_username,
+        )
+
+    async def restore_page_attachment(
+        self, attachment: PageAttachment, *, expected_username: str
+    ) -> PageAttachment:
+        """Restore a trashed attachment by updating its content status to current."""
+        if attachment.version is None:
+            raise Upstream("Confluence returned no attachment version for restoration.")
+        payload = await self._transport.send_json(
+            "PUT",
+            self._content_route(attachment.attachment_id),
+            body={
+                "id": attachment.attachment_id,
+                "type": "attachment",
+                "status": "current",
+                "version": {"number": attachment.version + 1},
+            },
+            expected_username=expected_username,
+        )
+        restored = _page_attachment(payload, base_url=str(self._settings["base_url"]))
+        if restored is None:
+            raise UncertainWrite("Confluence may have restored the attachment; inspect it before retrying.")
+        return restored
+
     async def download_attachment(
         self,
         attachment: PageAttachment,
@@ -1259,12 +1442,18 @@ def _page_attachment(value: Any, *, base_url: str) -> PageAttachment | None:
     extensions = extensions if isinstance(extensions, dict) else {}
     links = value.get("_links")
     links = links if isinstance(links, dict) else {}
+    version = value.get("version") if isinstance(value.get("version"), dict) else {}
+    container = value.get("container") if isinstance(value.get("container"), dict) else {}
     return PageAttachment(
         attachment_id=attachment_id,
         filename=filename,
         media_type=_optional_string(value.get("mediaType")) or _optional_string(extensions.get("mediaType")),
         file_size=_optional_nonnegative_int(value.get("fileSize", extensions.get("fileSize"))),
         download_url=same_instance_link(base_url, links.get("download")),
+        version=_positive_int(version.get("number")),
+        version_comment=_optional_string(version.get("message")),
+        status=_optional_string(value.get("status")),
+        container_page_id=_identifier(container.get("id")),
     )
 
 

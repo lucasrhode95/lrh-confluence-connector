@@ -25,6 +25,7 @@ from confluence_connector.domain.models import (
     UserSearchResult,
     ContentSearchResult,
     AttachmentDownloadResult,
+    AttachmentMutationResult,
     DraftDeletionResult,
     DraftListResult,
     LabelChangeResult,
@@ -319,6 +320,73 @@ def build_server(context: AppContext) -> FastMCP:
             page, attachment_ids
         )
         return result
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def upload_attachments(
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        file_paths: Annotated[
+            list[str],
+            Field(min_length=1, max_length=100, description="One to 100 absolute local file paths with unique filenames."),
+        ],
+        comment: Annotated[str | None, Field(max_length=255, description="Optional attachment version comment.")] = None,
+    ) -> AttachmentMutationResult:
+        """Upload new attachments or add versions when a filename already exists on the page.
+
+        Files are read from the supplied local paths. The instance enforces its own size limit. Results
+        include each attachment ID, version, media type and download URL, plus per-file failures. To
+        show an image inline (PNG, JPEG, GIF or SVG), upload it and reference it as
+        `<ac:image><ri:attachment ri:filename="name.svg"/></ac:image>`. Do not use the `view-file`
+        macro or raw `<svg>` markup: Confluence displays the former as a file icon and strips the latter.
+        """
+        services = await context.services()
+        return await services.attachment_management.upload_attachments(page, file_paths, comment=comment)
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def update_attachment(
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        attachment_id: Annotated[str, Field(description="Attachment ID belonging to this page.")],
+        filename: Annotated[str | None, Field(max_length=255, description="New filename; omit to keep the current name.")] = None,
+        comment: Annotated[str | None, Field(max_length=255, description="New version comment; omit to keep the current comment.")] = None,
+        media_type: Annotated[str | None, Field(max_length=255, description="New MIME type, such as image/svg+xml.")] = None,
+    ) -> AttachmentMutationResult:
+        """Rename an attachment or change its comment or media type without uploading bytes."""
+        services = await context.services()
+        return await services.attachment_management.update_attachment(
+            page, attachment_id, filename=filename, comment=comment, media_type=media_type
+        )
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def trash_attachments(
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        attachment_ids: Annotated[list[str], Field(min_length=1, max_length=100)],
+        allow_referenced: Annotated[
+            bool,
+            Field(description="Confirm trashing attachments still referenced in this page's body (default false)."),
+        ] = False,
+    ) -> AttachmentMutationResult:
+        """Move selected page attachments to the space trash; this can be restored later.
+
+        IDs must belong to the named page. By default attachments referenced by that page's current
+        body are refused. The tool checks the separate attachment delete permission before each write.
+        References from other pages are not searched and are called out in the result.
+        """
+        services = await context.services()
+        return await services.attachment_management.trash_attachments(
+            page, attachment_ids, allow_referenced=allow_referenced
+        )
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def restore_attachments(
+        page: Annotated[str, Field(description="Original page ID or supported same-instance page URL.")],
+        attachment_ids: Annotated[list[str], Field(min_length=1, max_length=100)],
+    ) -> AttachmentMutationResult:
+        """Restore selected attachments from the space trash to their original page."""
+        services = await context.services()
+        return await services.attachment_management.restore_attachments(page, attachment_ids)
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged

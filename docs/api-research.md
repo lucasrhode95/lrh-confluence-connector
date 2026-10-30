@@ -426,6 +426,25 @@ editor keeps both as images. The `view-file` macro, which drag-and-drop inserts,
 icon (`data-has-thumbnail="false"`) because no SVG thumbnail exists. An inline `<svg>` element is
 stripped on save, leaving an empty paragraph.
 
+### 6.6 Attachment management
+
+Live PAT check, 2026-10-30, on one disposable synthetic page in the configured Data Center instance:
+
+- New PNG and SVG files succeeded with `POST /rest/api/content/{page}/child/attachment`, multipart
+  `file`, and `X-Atlassian-Token: no-check`. The server reported `image/png` and `image/svg+xml`.
+- Reuploading an existing filename succeeded through
+  `POST /rest/api/content/{page}/child/attachment/{attachmentId}/data` and incremented the attachment
+  version without changing the page version.
+- Metadata rename and version comment succeeded through `PUT
+  /rest/api/content/{page}/child/attachment/{attachmentId}` with the next attachment version.
+- `DELETE /rest/api/content/{attachmentId}?status=current` trashed the file; `PUT
+  /rest/api/content/{attachmentId}` with `status: current` and the next version restored it.
+- The connector refused trash while the current page body referenced the attachment. The account's
+  attachment `operations` included `delete` on this page and the authorized trash/restore round trip
+  succeeded. This single result does not generalize the separate 403 observed on another page.
+- The disposable page was trashed after the checks. Upload-size limits and cross-page link discovery
+  were not tested; the connector does not search other pages for references.
+
 ## 7. Private routes seen but not used
 
 Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a request was sent.

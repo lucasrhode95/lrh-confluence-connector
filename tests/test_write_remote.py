@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from confluence_connector.domain.errors import Conflict, InvalidRequest, UncertainWrite, Upstream
+from confluence_connector.domain.models import PageAttachment
 from confluence_connector.remote.confluence import LONGTASK_POLL_INTERVAL_SECONDS, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.remote.transport import ConfluenceTransport
@@ -80,6 +81,103 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_body["body"]["storage"], {"value": "<p>initial</p>", "representation": "storage"})
         update_body = json.loads(observed[1].content)
         self.assertEqual(update_body["version"], {"number": 2})
+
+    async def test_attachment_upload_uses_multipart_create_or_version_route(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"results": [{
+                "id": "91", "title": "diagram.svg", "status": "current",
+                "version": {"number": 2}, "mediaType": "image/svg+xml",
+                "container": {"id": "55"}, "_links": {"download": "/wiki/download/91/diagram.svg"},
+            }]})
+
+        api = self.make_api(handler)
+        result = await api.upload_page_attachment(
+            "55", filename="diagram.svg", content=b"<svg />", media_type="image/svg+xml",
+            comment="second version", expected_username="sample-user",
+        )
+        request = requests[0]
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.url.path, "/wiki/rest/api/content/55/child/attachment")
+        self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
+        self.assertIn(b"<svg />", request.content)
+        self.assertIn(b"minorEdit", request.content)
+        self.assertIn(b"second version", request.content)
+        self.assertEqual((result.attachment_id, result.version, result.media_type), ("91", 2, "image/svg+xml"))
+
+    async def test_attachment_version_uses_data_route_and_multipart_post(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"id": "91", "title": "diagram.svg", "status": "current",
+                "version": {"number": 3}, "mediaType": "image/svg+xml", "container": {"id": "55"}})
+
+        api = self.make_api(handler)
+        result = await api.upload_attachment_version(
+            "55", "91", filename="diagram.svg", content=b"<svg />", media_type="image/svg+xml",
+            comment="third version", expected_username="sample-user",
+        )
+        request = requests[0]
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.url.path, "/wiki/rest/api/content/55/child/attachment/91/data")
+        self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
+        self.assertIn(b"<svg />", request.content)
+        self.assertIn(b"third version", request.content)
+        self.assertEqual(result.version, 3)
+
+    async def test_attachment_metadata_update_and_trash_routes(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.method == "PUT":
+                return httpx.Response(200, json={
+                    "id": "91", "title": "renamed.svg", "type": "attachment", "status": "current",
+                    "version": {"number": 3, "message": "rename"}, "mediaType": "image/svg+xml",
+                    "container": {"id": "55"},
+                })
+            return httpx.Response(204)
+
+        api = self.make_api(handler)
+        current = PageAttachment(attachment_id="91", filename="diagram.svg", version=2, media_type="image/svg+xml")
+        updated = await api.update_page_attachment(
+            "55", current, filename="renamed.svg", media_type="image/svg+xml",
+            comment="rename", expected_username="sample-user",
+        )
+        await api.trash_page_attachment("91", expected_username="sample-user")
+        self.assertEqual((updated.filename, updated.version), ("renamed.svg", 3))
+        self.assertEqual(requests[0].url.path, "/wiki/rest/api/content/55/child/attachment/91")
+        payload = json.loads(requests[0].content)
+        self.assertEqual(payload["version"], {"number": 3, "message": "rename"})
+        self.assertEqual(requests[1].method, "DELETE")
+        self.assertEqual(requests[1].url.params["status"], "current")
+
+    async def test_attachment_restore_reads_trash_version_then_restores_content_status(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.method == "GET":
+                return httpx.Response(200, json={
+                    "id": "91", "title": "diagram.svg", "type": "attachment", "status": "trashed",
+                    "version": {"number": 2}, "container": {"id": "55"},
+                })
+            return httpx.Response(200, json={
+                "id": "91", "title": "diagram.svg", "type": "attachment", "status": "current",
+                "version": {"number": 3}, "container": {"id": "55"},
+            })
+
+        api = self.make_api(handler)
+        trashed = await api.get_page_attachment("91", status="trashed", expected_username="sample-user")
+        restored = await api.restore_page_attachment(trashed, expected_username="sample-user")
+        self.assertEqual(requests[0].url.params["status"], "trashed")
+        self.assertEqual(json.loads(requests[1].content), {
+            "id": "91", "type": "attachment", "status": "current", "version": {"number": 3}
+        })
+        self.assertEqual((restored.status, restored.version), ("current", 3))
 
     async def test_space_permissions_accept_the_wrapped_data_center_list_only(self) -> None:
         for permissions, readable in (({"data": [{"operation": {}}], "_links": {}}, True), ({"data": None}, False), ("x", False)):
