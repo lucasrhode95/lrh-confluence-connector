@@ -39,7 +39,7 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.api.move_error = Upstream("Synthetic position refusal")
 
         result = await self.service.move_page(
-            "10", parent_id="30", position="before", sibling="21"
+            "10", parent_id="30", position="before", sibling="21", notify_watchers=False
         )
 
         self.assertFalse(result.moved)
@@ -50,6 +50,9 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.move_calls[0]["target_id"], "21")
         self.assertEqual(self.api.pages["10"].ancestors[-1].page_id, "20")
         self.assertEqual(self.api.pages["10"].version, 1)
+        self.assertFalse(result.notify_watchers)
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
 
     async def test_same_space_move_uncertain_result_does_not_guess_the_parent(self) -> None:
         self.api.pages["10"] = _page("10", "Moving", parent_id="20")
@@ -179,13 +182,16 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.api.add_child("10", "11", "First")
         self.api.add_child("11", "12", "Grandchild")
 
-        result = await self.service.delete_page("10", children="trash")
+        result = await self.service.delete_page("10", children="trash", notify_watchers=False)
 
         self.assertTrue(result.complete)
         self.assertEqual(self.api.trash_calls, ["12", "11", "10"])
         self.assertEqual(len(self.api.properties), 3)
         self.assertEqual(self.api.properties["11"]["parent_id"], "10")
         self.assertEqual(self.api.properties["10"]["parent_id"], "20")
+        self.assertFalse(result.notify_watchers)
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
 
     async def test_uncertain_trash_reports_unknown_and_stops(self) -> None:
         self.api.pages["10"] = _page("10", "Parent")
@@ -255,13 +261,16 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
             "sibling_id": None,
         }
 
-        result = await self.service.restore_page("90")
+        result = await self.service.restore_page("90", notify_watchers=False)
 
         self.assertEqual(result.placement_source, "space_root")
         self.assertEqual(result.placement_status, "root")
         self.assertTrue(any("remains at the space root" in warning for warning in result.warnings))
         self.assertEqual(self.api.move_calls, [])
         self.assertEqual(self.api.properties_removed, ["90"])
+        self.assertFalse(result.notify_watchers)
+        self.assertTrue(result.notification_suppression_supported)
+        self.assertFalse(self.api.restore_arguments[0]["notify_watchers"])
 
     async def test_restore_rereads_current_metadata_when_success_response_omits_space_and_version(self) -> None:
         self.api.pages["90"] = _page("90", "Restored", status="trashed")

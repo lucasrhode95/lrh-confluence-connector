@@ -299,6 +299,15 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(structure_annotations)
         self.assertTrue(structure_annotations.destructiveHint)
         self.assertTrue(tools_by_name["list_trash"].annotations.readOnlyHint)
+        write_tools = (
+            "upload_attachments", "update_attachment", "trash_attachments", "restore_attachments",
+            "create_page", "update_page", "publish_draft", "delete_draft", "set_labels",
+            "move_page", "delete_page", "restore_page",
+        )
+        for name in write_tools:
+            schema = tools_by_name[name].model_dump(mode="json")["inputSchema"]
+            self.assertIn("notify_watchers", schema["properties"], name)
+            self.assertNotIn("notify_watchers", schema.get("required", []), name)
         await context.aclose()
 
     async def test_page_writes_accept_a_body_file_and_instructions_describe_file_edits(self) -> None:

@@ -29,10 +29,12 @@ from confluence_connector.domain.models import (
     TrashListResult,
 )
 from confluence_connector.domain.validation import (
+    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
     optional_space_key,
     page_reference,
     require_current_page,
     placement_inputs,
+    validate_notify_watchers,
 )
 from confluence_connector.remote.confluence import (
     CHILD_PAGE_SIZE,
@@ -71,6 +73,7 @@ class PageStructure:
         space_key: str | None = None,
         position: str | None = None,
         sibling: str | None = None,
+        notify_watchers: bool = True,
     ) -> PageMoveResult:
         """Move a current page to one parent or space root, then apply its requested sibling position.
 
@@ -78,6 +81,7 @@ class PageStructure:
         routines receive numeric current-page IDs, a current page metadata record and a resolved
         target placement.
         """
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(page)
         selected_position, parent_reference, selected_space, sibling_reference = placement_inputs(
             parent_id=parent_id,
@@ -97,10 +101,14 @@ class PageStructure:
             sibling_reference=sibling_reference,
             moving_page_id=metadata.page_id,
         )
-        return await self._move_resolved(metadata, target)
+        return await self._move_resolved(metadata, target, notify_watchers=notify)
 
     async def delete_page(
-        self, page: str, *, children: Literal["refuse", "move_up", "trash"] = "refuse"
+        self,
+        page: str,
+        *,
+        children: Literal["refuse", "move_up", "trash"] = "refuse",
+        notify_watchers: bool = True,
     ) -> PageDeleteResult:
         """Preflight permissions, then trash one page with the requested direct-child policy.
 
@@ -108,6 +116,7 @@ class PageStructure:
         After writes begin, it stops at the first error and returns confirmed, unknown and unattempted
         pages separately; it never compensates a completed move or trash operation.
         """
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(page)
         mode = _children_mode(children)
         resolved = await self._resolve_page(reference)
@@ -144,7 +153,7 @@ class PageStructure:
             warnings.append(
                 "Account state changed while saving placement records; some records may have been written, and no page was moved or trashed."
             )
-            return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc))
+            return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc), notify)
         if saved_count:
             warnings.append(
                 f"Could not save placement for {saved_count} page(s); restoring them may leave them at the space root."
@@ -176,7 +185,7 @@ class PageStructure:
                     outcomes[metadata.page_id] = _outcome(
                         nodes[0], "not_attempted", "Not trashed because a child move failed."
                     )
-                    return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc))
+                    return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc), notify)
 
         delete_order = list(reversed(nodes)) if mode == "trash" else nodes[:1]
         for index, node in enumerate(delete_order):
@@ -190,8 +199,8 @@ class PageStructure:
                     outcomes[pending.page_id] = _outcome(
                         pending, "not_attempted", "Not attempted after an earlier failure."
                     )
-                return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc))
-        return _delete_result(metadata, mode, outcomes, warnings, None)
+                return _delete_result(metadata, mode, outcomes, warnings, _error_text(exc), notify)
+        return _delete_result(metadata, mode, outcomes, warnings, None, notify)
 
     async def list_trash(
         self,
@@ -245,8 +254,10 @@ class PageStructure:
         space_key: str | None = None,
         position: str | None = None,
         sibling: str | None = None,
+        notify_watchers: bool = True,
     ) -> PageRestoreResult:
         """Restore one trashed page, then apply caller placement, saved placement or the space root."""
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(page)
         has_caller_placement = any(
             value is not None for value in (parent_id, space_key, position, sibling)
@@ -280,6 +291,7 @@ class PageStructure:
             space_key=metadata.space_key,
             next_version=metadata.version + 1,
             expected_username=self._username,
+            notify_watchers=notify,
         )
 
         warnings: list[str] = []
@@ -353,7 +365,7 @@ class PageStructure:
                     metadata.page_id, expected_username=self._username
                 )
                 require_current_page(current, allow_missing_status=True)
-                move_result = await self._move_resolved(current, chosen)
+                move_result = await self._move_resolved(current, chosen, notify_watchers=notify)
             except UncertainWrite as exc:
                 placement_status = "unknown"
                 skip_property_cleanup = True
@@ -417,9 +429,14 @@ class PageStructure:
             placement_source=placement_source,
             placement_status=placement_status,
             warnings=warnings,
+            notify_watchers=notify,
+            notification_suppression_supported=chosen is None,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE if chosen is not None else None,
         )
 
-    async def _move_resolved(self, metadata: PageMetadata, target: PagePlacement) -> PageMoveResult:
+    async def _move_resolved(
+        self, metadata: PageMetadata, target: PagePlacement, *, notify_watchers: bool
+    ) -> PageMoveResult:
         """Apply a validated target with one action for each same-space move."""
         if metadata.space_key is None:
             raise Upstream("Confluence did not return the page's current space.")
@@ -442,6 +459,9 @@ class PageStructure:
                 parent_id=target.parent_id,
                 moved=True,
                 position_applied=True,
+                notify_watchers=notify_watchers,
+                notification_suppression_supported=False,
+                notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
             )
 
         try:
@@ -469,6 +489,9 @@ class PageStructure:
                     if uncertain
                     else f"The requested same-space move was refused ({type(exc).__name__}); the page's previous placement remains in effect."
                 ],
+                notify_watchers=notify_watchers,
+                notification_suppression_supported=False,
+                notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
             )
         return PageMoveResult(
             page_id=metadata.page_id,
@@ -477,6 +500,9 @@ class PageStructure:
             parent_id=target.parent_id,
             moved=True,
             position_applied=True,
+            notify_watchers=notify_watchers,
+            notification_suppression_supported=False,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
         )
 
     def _move_action_target(self, target: PagePlacement) -> tuple[str, str | None]:
@@ -780,6 +806,7 @@ def _delete_result(
     outcomes: dict[str, PageStructureOutcome],
     warnings: list[str],
     failure: str | None,
+    notify_watchers: bool,
 ) -> PageDeleteResult:
     return PageDeleteResult(
         page_id=metadata.page_id,
@@ -789,6 +816,9 @@ def _delete_result(
         pages=list(outcomes.values()),
         warnings=warnings,
         failure=failure,
+        notify_watchers=notify_watchers,
+        notification_suppression_supported=False,
+        notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
     )
 
 

@@ -71,6 +71,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             storage_body="<p>replacement</p>",
             next_version=2,
             expected_username="sample-user",
+            notify_watchers=False,
         )
 
         self.assertEqual((created.page_id, created.version), ("700", 1))
@@ -80,7 +81,23 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_body["ancestors"], [{"id": "100"}])
         self.assertEqual(create_body["body"]["storage"], {"value": "<p>initial</p>", "representation": "storage"})
         update_body = json.loads(observed[1].content)
-        self.assertEqual(update_body["version"], {"number": 2})
+        self.assertEqual(update_body["version"], {"number": 2, "minorEdit": True})
+
+    async def test_default_page_update_leaves_minor_edit_unset(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(200, json={
+                "id": "700", "type": "page", "title": "Page", "status": "current",
+                "space": {"key": "SYNTH"}, "version": {"number": 2},
+            })
+
+        await self.make_api(handler).update_page(
+            "700", title="Page", storage_body="<p>x</p>", next_version=2,
+            expected_username="sample-user",
+        )
+        self.assertEqual(json.loads(observed[0].content)["version"], {"number": 2})
 
     async def test_attachment_upload_uses_multipart_create_or_version_route(self) -> None:
         requests: list[httpx.Request] = []
@@ -103,7 +120,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.url.path, "/wiki/rest/api/content/55/child/attachment")
         self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
         self.assertIn(b"<svg />", request.content)
-        self.assertIn(b"minorEdit", request.content)
+        self.assertNotIn(b"minorEdit", request.content)
         self.assertIn(b"second version", request.content)
         self.assertEqual((result.attachment_id, result.version, result.media_type), ("91", 2, "image/svg+xml"))
 
@@ -119,6 +136,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         result = await api.upload_attachment_version(
             "55", "91", filename="diagram.svg", content=b"<svg />", media_type="image/svg+xml",
             comment="third version", expected_username="sample-user",
+            notify_watchers=False,
         )
         request = requests[0]
         self.assertEqual(request.method, "POST")
@@ -126,6 +144,8 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
         self.assertIn(b"<svg />", request.content)
         self.assertIn(b"third version", request.content)
+        self.assertIn(b"minorEdit", request.content)
+        self.assertIn(b"true", request.content)
         self.assertEqual(result.version, 3)
 
     async def test_attachment_metadata_update_and_trash_routes(self) -> None:
@@ -146,12 +166,13 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         updated = await api.update_page_attachment(
             "55", current, filename="renamed.svg", media_type="image/svg+xml",
             comment="rename", expected_username="sample-user",
+            notify_watchers=False,
         )
         await api.trash_page_attachment("91", expected_username="sample-user")
         self.assertEqual((updated.filename, updated.version), ("renamed.svg", 3))
         self.assertEqual(requests[0].url.path, "/wiki/rest/api/content/55/child/attachment/91")
         payload = json.loads(requests[0].content)
-        self.assertEqual(payload["version"], {"number": 3, "message": "rename"})
+        self.assertEqual(payload["version"], {"number": 3, "minorEdit": True, "message": "rename"})
         self.assertEqual(requests[1].method, "DELETE")
         self.assertEqual(requests[1].url.params["status"], "current")
 
@@ -172,10 +193,13 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
 
         api = self.make_api(handler)
         trashed = await api.get_page_attachment("91", status="trashed", expected_username="sample-user")
-        restored = await api.restore_page_attachment(trashed, expected_username="sample-user")
+        restored = await api.restore_page_attachment(
+            trashed, expected_username="sample-user", notify_watchers=False
+        )
         self.assertEqual(requests[0].url.params["status"], "trashed")
         self.assertEqual(json.loads(requests[1].content), {
-            "id": "91", "type": "attachment", "status": "current", "version": {"number": 3}
+            "id": "91", "type": "attachment", "status": "current",
+            "version": {"number": 3, "minorEdit": True}
         })
         self.assertEqual((restored.status, restored.version), ("current", 3))
 
@@ -366,6 +390,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             parent_id=None,
             storage_body="<p>body</p>",
             expected_username="sample-user",
+            notify_watchers=False,
         )
         await api.delete_draft("301", expected_username="sample-user")
         await api.add_page_label("301", "reviewed", expected_username="sample-user")
@@ -374,7 +399,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(published.status, "current")
         self.assertEqual(observed[0].method, "PUT")
         publish_body = json.loads(observed[0].content)
-        self.assertEqual(publish_body["version"], {"number": 1})
+        self.assertEqual(publish_body["version"], {"number": 1, "minorEdit": True})
         self.assertEqual((observed[1].method, observed[1].url.params["status"]), ("DELETE", "draft"))
         self.assertEqual(observed[2].url.path, "/wiki/rest/api/content/301/label")
         self.assertEqual(json.loads(observed[2].content), [{"prefix": "global", "name": "reviewed"}])
@@ -488,6 +513,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             space_key="SYNTH",
             next_version=4,
             expected_username="sample-user",
+            notify_watchers=False,
         )
         trash = await api.list_trash_page(
             space_key="SYNTH", start=10, limit=100, expected_username="sample-user"
@@ -504,6 +530,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[6].method, "DELETE")
         self.assertEqual(dict(observed[6].url.params), {})
         self.assertEqual(json.loads(observed[7].content)["status"], "current")
+        self.assertEqual(json.loads(observed[7].content)["version"], {"number": 4, "minorEdit": True})
         self.assertEqual(
             [observed[index].url.params["status"] for index in (7, 8)],
             ["trashed", "trashed"],

@@ -50,6 +50,9 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.create_calls[0]["parent_id"], "100")
         self.assertEqual(self.api.create_calls[0]["storage_body"], "<p>&lt;safe&gt;</p>")
         self.assertEqual(self.api.title_checks, [("SYNTH", "New page")])
+        self.assertTrue(result.notify_watchers)
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
 
     async def test_create_page_accepts_a_personal_space_key_prefix(self) -> None:
         result = await self.service.create_page(
@@ -184,10 +187,14 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         )
 
         result = await self.service.update_page(
-            "55", "<p>replacement</p>", expected_version=7, allow_comment_loss=True
+            "55", "<p>replacement</p>", expected_version=7, allow_comment_loss=True,
+            notify_watchers=False,
         )
 
         self.assertEqual(self.api.update_calls[0]["next_version"], 8)
+        self.assertFalse(self.api.update_calls[0]["notify_watchers"])
+        self.assertFalse(result.notify_watchers)
+        self.assertTrue(result.notification_suppression_supported)
         self.assertEqual(len(result.warnings), 3)
         self.assertIn("inline-comment anchor", result.warnings[0])
         self.assertIn("panel macro", result.warnings[1])
@@ -341,11 +348,14 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
     async def test_publish_draft_checks_duplicate_and_preserves_id(self) -> None:
         self.api.pages["301"] = _page("301", 1, "<p>draft</p>", status="draft")
 
-        result = await self.service.publish_draft("301")
+        result = await self.service.publish_draft("301", notify_watchers=False)
 
         self.assertEqual((result.page_id, result.status, result.version), ("301", "current", 1))
         self.assertEqual(self.api.publish_calls[0]["page_id"], "301")
         self.assertEqual(self.api.publish_calls[0]["storage_body"], "<p>draft</p>")
+        self.assertFalse(self.api.publish_calls[0]["notify_watchers"])
+        self.assertFalse(result.notify_watchers)
+        self.assertTrue(result.notification_suppression_supported)
 
     async def test_publish_draft_refuses_title_collision(self) -> None:
         self.api.pages["301"] = _page("301", 1, "<p>draft</p>", status="draft")
@@ -364,11 +374,14 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
     async def test_delete_draft_requires_draft_status_and_reports_permanent_deletion(self) -> None:
         self.api.metadata["301"] = _metadata("301", status="draft")
 
-        result = await self.service.delete_draft("301")
+        result = await self.service.delete_draft("301", notify_watchers=False)
 
         self.assertTrue(result.deleted)
         self.assertTrue(result.permanent)
         self.assertEqual(self.api.deleted_drafts, ["301"])
+        self.assertFalse(result.notify_watchers)
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
 
     async def test_delete_draft_does_not_delete_current_page(self) -> None:
         with self.assertRaises(InvalidRequest):
@@ -443,11 +456,19 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(api.label_calls, calls)
 
     async def test_set_labels_skips_noops_and_rejects_overlap(self) -> None:
-        result = await self.service.set_labels("55", add=["old"], remove=["missing"])
+        result = await self.service.set_labels("55", add=["old"], remove=["missing"], notify_watchers=False)
         self.assertEqual(result.unchanged, ["old", "missing"])
+        self.assertFalse(result.notify_watchers)
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
         self.assertEqual(self.api.label_calls, [])
         with self.assertRaisesRegex(InvalidRequest, "both add and remove"):
             await self.service.set_labels("55", add=["same"], remove=["same"])
+
+    async def test_notify_watchers_must_be_a_boolean_before_remote_reads(self) -> None:
+        with self.assertRaisesRegex(InvalidRequest, "notify_watchers must be a boolean"):
+            await self.service.update_page("55", "body", expected_version=7, notify_watchers=1)
+        self.assertEqual(self.api.content_calls, [])
 
     async def test_versioned_page_reference_cannot_be_written(self) -> None:
         self.api.links_versions["55"] = 7
