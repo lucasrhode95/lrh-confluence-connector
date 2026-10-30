@@ -75,8 +75,10 @@ punctuation when configuring or resolving personal spaces.
 
 - **PAT, Live (script), 2026-10-07 and 2026-10-19:** a bearer PAT works for every read and write the
   connector makes, including the private `movepage.action` with `X-Atlassian-Token: no-check` and no
-  `atl_token`. A REST `POST` with a bearer needs no `X-Atlassian-Token` header. Expiry and revocation
-  responses are untested ([roadmap](roadmap.md#live-verification)).
+  `atl_token`. A REST `POST` with a bearer needs no `X-Atlassian-Token` header.
+- **Revoked PAT, Live (script), 2026-10-30:** the current-user check answers 401, which the connector
+  reports as `AuthenticationRequired` without touching the stored credential. Expiry is untested
+  ([roadmap](roadmap.md#live-verification)).
 - **Anonymous, Live, 2026-10-07:** 401 on current user, both searches and spaces.
 - **Single sign-on, Browser, 2026-10-07:** sign-in goes `/login.action` →
   `/plugins/servlet/external-login/{id}` → Microsoft SAML → `POST /plugins/servlet/samlconsumer` →
@@ -123,6 +125,8 @@ Live (browser and PAT), 2026-10-19:
 - `rest/api/search` row `title` and `excerpt` are display snippets (PAT, 2026-10-29): matched terms
   sit between `@@@hl@@@` and `@@@endhl@@@`, and characters are HTML-escaped (`&amp;`, `&#39;`). The
   nested `content.title` is plain. Rows without nested content (users) carry only the snippet title.
+- The current/archived space listing matches the UI space directory (PAT and browser, 2026-10-30):
+  the same totals for each status and type, and the same set of archived keys.
 
 ### 4.2 Terms and punctuation
 
@@ -152,9 +156,15 @@ Live (browser), 2026-10-19, 31 recent pages, one per space:
   describes the same.
 - `title = "exact"` matches unless the title contains `"`.
 - The private quick-navigation route behind the header search, `GET /rest/quicknav/1/search`
-  (`query`, `limit`, `type`; answers `contentNameMatches`, rows with `id`/`contentId`, `title`/`name`,
-  `spaceKey` or `space`, and `href`/`url`), ranked 30 of 31 titles first and returned all 31. It
-  accepts no filters, and `type=user` returns 500.
+  (`query`, `limit`, `type`), ranked 30 of 31 titles first and returned all 31. It accepts no filters,
+  and `type=user` returns 500.
+- Quick-navigation contract (PAT and browser, 2026-10-30): `contentNameMatches` is a list of groups,
+  each a list of rows with `id`, `name`, `href`, `className`, `spaceKey` and `spaceName`. Without
+  `type` the groups are pages (`content-type-page`), attachments (`content-type-attachment-*`), spaces
+  and one `search-for` row with no `id`; `type=page` leaves the page group and `search-for`. The UI's
+  `src=next.ui.search` parameter makes every query return no matches. It finds pages in personal
+  spaces (a fixture page at rank 1) but none in archived spaces (0 of 8 recent pages from 4 archived
+  spaces); archived titles come only from CQL with `includeArchivedSpaces=true`.
 
 ### 4.4 Dates and time zones
 
@@ -173,8 +183,12 @@ Live (browser), 2026-10-19:
 Live REST, 2026-10-20: search modification times and REST `version.when` differed by one millisecond
 on a stable page. Calibration must compare REST reference instants before/after the measurement;
 search only selects the sample. Corrected calibration and date-only/offset-timestamp filters passed
-with the saved effective offset zero. This does not resolve profile-versus-server zone selection or
-repeated daylight-saving hours.
+with the saved effective offset zero. Repeated daylight-saving hours remain untested.
+
+Live (PAT and browser), 2026-10-30: CQL follows the server zone, not the user's profile. With the
+profile at site default (UTC+00:00) and then at `America/Sao_Paulo` (UTC−03:00), calibration measured
+an offset of zero both times. The profile settings form lists "Site Default" with the site zone's own
+value, so saving the form stores that zone explicitly.
 
 ### 4.5 Users
 
@@ -236,6 +250,12 @@ Live (browser), 2026-10-19:
 | `plantuml` | A client-side script, no image | The PlantUML source |
 | `jira` | An "Unable to render" warning | `key`, `server`, `serverId`, `columns` |
 | `html` | Its raw output, scripts included, with **no wrapper** | That it is the HTML macro |
+
+Included pages (PAT, 2026-10-30): the host's `view` keeps the included page's macro wrappers, such as
+`status` and `expand`, inside the `include` wrapper, but an included HTML macro's output stays
+wrapperless. Only the included page's own `storage` names it. On its own page, the HTML macro was
+added through the editor's macro browser; the "Insert markup" dialog's `{html}` became an
+`unmigrated-wiki-markup` macro instead.
 
 Inline-comment anchors appear as `ac:inline-comment-marker` in storage and in the rendered output.
 Of 200 pages edited since 2025, 19 use `ac:layout` columns; of 105 with headings, 16 have headings
@@ -299,6 +319,9 @@ repeated create, update, label, parent change, trash and the move action.
   and editor, 2026-10-30): unchecking the editor's "Notify watchers" sends exactly
   `version.minorEdit: true` to `PUT /rest/api/content/{id}`. On four watched synthetic pages, edits
   with it sent no email; edits without it did, about 9 minutes later (batched).
+- Write bounds (PAT, 2026-10-30): a 255-character title saves and 256 is 400. Bodies of 2,000,000 and
+  5,000,000 characters both save. A 255-character label saves; 256 answers 500 and is not stored. A
+  new-page draft does not block a current page with the same title; a current page does (400).
 - A rename keeps the ID; the `/x/` short link follows the page, while the old `/display/{space}/{title}`
   URL is 404.
 - A second attachment with the same filename is 400; a new version goes to
@@ -344,6 +367,10 @@ repeated create, update, label, parent change, trash and the move action.
 Live REST, 2026-10-20: a separately authorized cross-space round trip preserved the page version;
 independent metadata confirmed both destinations, and child listing confirmed immediate cleanup of
 the temporary destination. No destination identifiers or private configuration were retained.
+
+Live (PAT), 2026-10-30: `move_page` moved a synthetic page with a child and a label under a parent
+page in another global space, then back to the personal space root. Each long task finished in about
+1.1 s; the ID, version 1, child and label were unchanged at both destinations.
 
 ### 6.4 Trash and restore
 
