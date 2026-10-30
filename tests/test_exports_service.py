@@ -22,6 +22,7 @@ from confluence_connector.domain.models import (
 )
 from confluence_connector.service.attachments import AttachmentDownloads
 from confluence_connector.service.exports import MAX_EXPORT_PAGES, PageExports
+from confluence_connector.service.storage_files import split_export_header
 
 
 class PageExportChecks(unittest.IsolatedAsyncioTestCase):
@@ -138,7 +139,7 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             content = Path(result.path).read_text(encoding="utf-8")
             self.assertTrue(
                 content.startswith(
-                    "<!--\n# Rich page\nBreadcrumb: Space › Rich page\nVersion: 2\n-->\n"
+                    "<!--\n# Rich page\nBreadcrumb: Space › Rich page\nVersion: 2\nPage ID: 55\n-->\n"
                 )
             )
             self.assertIn(storage_body, content)
@@ -149,6 +150,21 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             self.assertIn("&lt;script&gt;not markup&lt;/script&gt; &amp; text", content)
             self.assertIn("&lt;selection&gt;", content)
             self.assertNotIn("<script>not markup</script>", content)
+
+    async def test_rich_export_without_comments_reads_back_as_page_identity_and_exact_body(self) -> None:
+        storage_body = '<p>a&nbsp;b</p>\n<ac:structured-macro ac:name="toc" ac:macro-id="m-1" />'
+        pages = _Pages({"55": _record("55", "Rich -- page", storage_body, page_format="rich")})
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages(
+                "55", format="rich", parse_scope={"comments": False}
+            )
+            header, body = split_export_header(Path(result.path).read_text(encoding="utf-8"))
+        self.assertEqual((header.page_id, header.version), ("55", 2))
+        self.assertEqual(body, storage_body)
 
     async def test_failed_page_and_attachment_are_reported_in_archive(self) -> None:
         attachments = [PageAttachment(attachment_id="att-fail", filename="broken.bin")]

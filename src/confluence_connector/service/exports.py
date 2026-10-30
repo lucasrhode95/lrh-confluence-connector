@@ -44,6 +44,7 @@ from confluence_connector.service.pages import (
     _format,
     _parse_scope,
 )
+from confluence_connector.service.storage_files import COMMENTS_SECTION_CLASS, rich_export_content
 
 MAX_EXPORT_PAGES = 500
 PAGE_READ_CONCURRENCY = 2
@@ -402,19 +403,15 @@ def _page_content(
 ) -> str:
     if page_format == "text":
         return record.text
-    metadata = (
-        record.header
-        or f"# {record.title}\nPage ID: {record.page_id}\nVersion: {record.version}"
-    )
-    metadata = metadata.replace("--", "—")
-    body = f"<!--\n{metadata}\n-->\n{record.text}"
+    header = record.header or f"# {record.title}\nVersion: {record.version}"
+    body = rich_export_content(header, record.page_id, record.text)
     if parse_scope.comments:
         body += _html_comments(record.comments)
     return body
 
 
 def _html_comments(comments: list[PageComment]) -> str:
-    parts = ['\n<section class="confluence-comments"><h2>Comments</h2>']
+    parts = [f'\n<section class="{COMMENTS_SECTION_CLASS}"><h2>Comments</h2>']
     for comment in comments:
         details = [
             f"@{comment.author.display_name}"
