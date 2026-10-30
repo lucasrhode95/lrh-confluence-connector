@@ -39,7 +39,6 @@ from confluence_connector.service.storage_files import exports_root, read_storag
 from confluence_connector.service.write_markup import content_loss, file_to_storage, to_storage
 
 MAX_TITLE_CHARS = 255
-MAX_WRITE_BODY_CHARS = 2_000_000
 MAX_DRAFT_OFFSET = 1_000_000
 MAX_DRAFT_LIMIT = DRAFT_PAGE_SIZE
 _LABEL = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
@@ -463,8 +462,8 @@ def _one_body_source(body: Any, body_file: Any, page_format: Any) -> None:
 
 
 def _write_body(value: Any, page_format: Any) -> str:
-    if not isinstance(value, str) or len(value) > MAX_WRITE_BODY_CHARS:
-        raise InvalidRequest(f"body must be text with at most {MAX_WRITE_BODY_CHARS} characters.")
+    if not isinstance(value, str):
+        raise InvalidRequest("body must be text.")
     return to_storage(value, page_format)
 
 

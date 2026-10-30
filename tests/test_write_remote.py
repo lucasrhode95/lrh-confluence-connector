@@ -99,6 +99,30 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(json.loads(observed[0].content)["version"], {"number": 2})
 
+    async def test_page_create_preserves_confluence_markup_error_location(self) -> None:
+        observed: list[httpx.Request] = []
+        body = "<p><strong>unfinished</p>"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            payload = json.loads(request.content)
+            self.assertEqual(payload["body"]["storage"]["value"], body)
+            return httpx.Response(400, json={"message": "Error parsing xhtml at row 1, column 26"})
+
+        api = self.make_api(handler)
+
+        with self.assertRaisesRegex(InvalidRequest, "row 1, column 26"):
+            await api.create_page(
+                title="Malformed",
+                space_key="SYNTH",
+                storage_body=body,
+                parent_id=None,
+                status="current",
+                expected_username="sample-user",
+            )
+
+        self.assertEqual(len(observed), 1)
+
     async def test_attachment_upload_uses_multipart_create_or_version_route(self) -> None:
         requests: list[httpx.Request] = []
 

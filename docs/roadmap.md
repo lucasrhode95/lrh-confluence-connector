@@ -2,24 +2,12 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 378 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 382 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Items 7 and 8 were decided or found on 2026-10-30 and have no rank yet.
-
-### 7. Write input handling
-
-Decided by the user on 2026-10-30.
-
-- **No body cap:** remove `MAX_WRITE_BODY_CHARS` and the 2,000,000-character `max_length` on the
-  `create_page` and `update_page` bodies; no functionality needs them. A 5,000,000-character body saved
-  live (research §6.1). Update requirements §10.
-- **Send malformed rich markup as is:** stop letting BeautifulSoup repair unparseable input in
-  `write_markup.to_storage`. Keep the targeted conversions and the active-content refusals, but when
-  the input is not well formed, send it unchanged and return Confluence's 400 with its row and column.
-  Update requirements §10.1 and the tool descriptions.
+Item 8 was found on 2026-10-30 and has no rank yet.
 
 ### 8. Macros inside included pages
 
