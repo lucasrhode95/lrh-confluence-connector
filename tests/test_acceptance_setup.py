@@ -87,6 +87,9 @@ class AcceptanceSetupCliChecks(unittest.TestCase):
             def load(self) -> StoredCredential:
                 return StoredCredential(username="sample-user", token="synthetic-pat")
 
+            def revision(self) -> None:
+                return None
+
         def client_factory(*args: object, **kwargs: object) -> httpx.AsyncClient:
             return real_async_client(
                 *args,

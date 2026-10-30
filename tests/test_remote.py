@@ -361,7 +361,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["updated"])
         self.assertEqual(attempts, 2)
 
-    async def test_account_is_read_from_store_for_each_request(self) -> None:
+    async def test_store_is_decrypted_once_per_request_when_unchanged(self) -> None:
         credentials = FakeCredentialSource()
         observed_tokens: list[str] = []
 
@@ -372,7 +372,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(handler, credentials=credentials)
         await transport.get_json("rest/api/user/current", expected_username="sample-user")
         self.assertEqual(observed_tokens, ["Bearer synthetic-pat"])
-        self.assertGreaterEqual(credentials.loads, 2)
+        self.assertEqual(credentials.loads, 1)
 
     async def test_account_switch_is_rejected_before_a_request(self) -> None:
         credentials = FakeCredentialSource(username="sample-user-b")

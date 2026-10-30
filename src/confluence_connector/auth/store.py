@@ -35,6 +35,18 @@ class TokenStore:
         self.path = path or config.data_dir() / "token-cache.bin"
         self.lock_path = Path(f"{self.path}.acquire.lock")
 
+    def revision(self) -> object | None:
+        """Return the store file's change marker, without decrypting; None when it cannot be read.
+
+        Every save and sign-out rewrites the file (keychain backends touch it as their change signal),
+        so an unchanged marker means the stored account is unchanged.
+        """
+        try:
+            status = self.path.stat()
+        except OSError:
+            return None
+        return (status.st_mtime_ns, status.st_size)
+
     def load(self) -> StoredCredential | None:
         """Return the current credential under the cross-process lock, or ``None`` if signed out."""
         with self._lock():

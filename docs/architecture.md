@@ -99,7 +99,10 @@ Only design rules that the code layout does not make obvious are listed here. To
   was 429 or 503. A timeout after sending, an incomplete answer or a 504 raises `UncertainWrite` and is
   never resent.
 - **Account checks.** The username is read before and after every exchange; if it changed, the result
-  is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`.
+  is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`. The store's
+  revision (its file's modification time and size, read before decrypting) is compared after the
+  exchange; when it is unchanged the account cannot have changed, so the store is decrypted once per
+  request. The token is never kept in memory between requests.
 - **401** raises `AuthenticationRequired` (run `auth`); **403** raises `PermissionDenied` for that page
   or operation, never a sign-in problem. Error messages carry the status and Confluence's message, never
   URLs or bodies.

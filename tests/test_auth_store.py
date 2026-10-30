@@ -50,6 +50,15 @@ class TokenStoreChecks(unittest.TestCase):
         self.addCleanup(self.lock_patch.stop)
         self.store = TokenStore(self.path, base_url="https://confluence.example.test/wiki")
 
+    def test_revision_tracks_the_store_file_without_decrypting(self) -> None:
+        store = TokenStore(self.path, base_url="https://confluence.example.test/wiki")
+        self.assertIsNone(store.revision())
+        self.path.write_bytes(b"first encrypted record")
+        first = store.revision()
+        self.path.write_bytes(b"a different encrypted record")
+        self.assertIsNotNone(first)
+        self.assertNotEqual(store.revision(), first)
+
     def test_absent_store_is_signed_out_and_reads_are_locked(self) -> None:
         self.assertIsNone(self.store.load())
         self.assertTrue(self.locks[-1].entered)
