@@ -93,7 +93,8 @@ Only design rules that the code layout does not make obvious are listed here. To
   destination stream while the transport applies the shared retry, status and account checks. Fixture
   multipart uploads use the same write policy. Decoded response snapshots omit compression headers.
 - **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
-  `Retry-After`, otherwise with short jittered backoff.
+  `Retry-After` up to 30 s (a longer one is reported, not waited for), otherwise with short jittered
+  backoff.
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
   was 429 or 503. A timeout after sending, an incomplete answer or a 504 raises `UncertainWrite` and is
   never resent.

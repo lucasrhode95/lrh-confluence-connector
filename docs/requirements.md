@@ -335,7 +335,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   are not used: they stop at 25 and omit replies.
 - Timeouts: 10 s to connect or wait for a pooled connection, 30 s to read or write.
 - Reads retry up to three attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
-  `Retry-After`. A write is retried only when it provably never applied (not sent, or answered 429 or
+  `Retry-After` up to 30 s; a longer `Retry-After` is reported at once. A write is retried only when it
+  provably never applied (not sent, or answered 429 or
   503); a timeout or any other uncertain outcome is reported for inspection, never resent.
 - Slow operations are described in tool descriptions so agents choose them knowingly; a broad query
   needs no extra confirmation.

@@ -16,6 +16,7 @@ from confluence_connector.domain.errors import (
     Conflict,
     InvalidRequest,
     NotFound,
+    Throttled,
     UncertainWrite,
     Upstream,
 )
@@ -327,6 +328,21 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(handler, sleep=sleep)
         await transport.get_json("rest/api/user/current")
         sleep.assert_awaited_once_with(2.5)
+
+    async def test_long_retry_after_is_reported_instead_of_waited_for(self) -> None:
+        attempts = 0
+        sleep = AsyncMock()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return httpx.Response(429, headers={"Retry-After": "3600"}, json={})
+
+        _, transport = self.make_client(handler, sleep=sleep)
+        with self.assertRaises(Throttled):
+            await transport.get_json("rest/api/user/current")
+        self.assertEqual(attempts, 1)
+        sleep.assert_not_awaited()
 
     async def test_write_connect_failure_is_safe_to_retry(self) -> None:
         attempts = 0

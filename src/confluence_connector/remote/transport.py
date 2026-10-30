@@ -30,6 +30,8 @@ from confluence_connector.domain.errors import (
 from confluence_connector.remote.ports import CredentialSource
 
 MAX_ATTEMPTS = 3
+# A longer Retry-After is reported to the caller instead of holding the tool call open.
+MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_JSON_BYTES = 16 * 1024 * 1024
 READ_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WRITE_RETRY_STATUSES = frozenset({429, 503})
@@ -195,8 +197,13 @@ class ConfluenceTransport:
                 async with self._limit:
                     response = await self._client.send(request, stream=True)
                     retryable = response.status_code in (READ_RETRY_STATUSES if is_read else WRITE_RETRY_STATUSES)
-                    if retryable and attempt + 1 < MAX_ATTEMPTS:
-                        retry_delay = _retry_delay(response.headers, attempt)
+                    delay = (
+                        _retry_delay(response.headers, attempt)
+                        if retryable and attempt + 1 < MAX_ATTEMPTS
+                        else None
+                    )
+                    if delay is not None and delay <= MAX_RETRY_DELAY_SECONDS:
+                        retry_delay = delay
                     elif response.status_code in REDIRECT_STATUSES and not allow_redirect:
                         await response.aclose()
                         response = None
