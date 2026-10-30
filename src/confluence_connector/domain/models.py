@@ -332,6 +332,13 @@ class AttachmentDownloadResult(BaseModel):
     failures: list[AttachmentDownloadFailure] = Field(default_factory=list)
 
 
+class PageExportFile(BaseModel):
+    """One exported file and its stable role, independent of local or future location type."""
+
+    role: Literal["body", "comments", "attachments", "report", "archive"]
+    location: str
+
+
 class PageExportResult(BaseModel):
     path: str
     filename: str
@@ -341,6 +348,7 @@ class PageExportResult(BaseModel):
     pages_failed: int
     attachments_exported: int = 0
     attachments_failed: int = 0
+    files: list[PageExportFile] = Field(default_factory=list)
 
 
 class PageWriteResult(BaseModel):
