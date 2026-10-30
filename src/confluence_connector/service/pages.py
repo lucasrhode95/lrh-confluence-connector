@@ -33,7 +33,9 @@ from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
 from confluence_connector.service.errors import raise_account_error
 from confluence_connector.service.page_text import (
+    IncludePageTarget,
     PageTextBlock,
+    ParsedStorage,
     parse_storage,
     render_page_body,
     unique_references,
@@ -42,6 +44,8 @@ from confluence_connector.service.page_text import (
 MAX_PAGE_REFERENCES = 20
 DEFAULT_MAX_CHARS = 40_000
 MAX_MAX_CHARS = 400_000
+MAX_INCLUDED_PAGE_DEPTH = 5
+MAX_INCLUDED_PAGES = 100
 CURSOR_KIND = "get_pages"
 
 
@@ -360,6 +364,14 @@ class PageTextService:
             parsed_storage=parsed_storage,
             convert_markdown=page_format != "rich",
         )
+        included_references: list[PageReference] = []
+        if parsed_storage is not None and parse_scope.macros_from_storage:
+            included_references, include_notes = await self._included_macro_references(
+                parsed_storage,
+                host_page_id=request.page_id,
+                host_space_key=source.metadata.space_key,
+            )
+            notes.extend(include_notes)
         comments_list: list[PageComment] = []
         for comment in remote_comments:
             rendered_comment = render_page_body(
@@ -389,6 +401,7 @@ class PageTextService:
             )
         comments = tuple(comments_list)
         references = list(converted.references)
+        references.extend(included_references)
         references.extend(_attachment_reference(item, request.page_id) for item in attachments)
         references.extend(_comment_reference(item, request.page_id) for item in comments)
         references.extend(reference for comment in comments for reference in comment.references)
@@ -413,6 +426,108 @@ class PageTextService:
             references=tuple(unique_references(references)),
             header=header,
             notes=tuple(notes),
+        )
+
+    async def _included_macro_references(
+        self,
+        storage: ParsedStorage,
+        *,
+        host_page_id: str,
+        host_space_key: str | None,
+    ) -> tuple[list[PageReference], list[str]]:
+        references: list[PageReference] = []
+        notes: list[str] = []
+        attempted: set[str] = {host_page_id}
+        depth_note_added = False
+        page_cap_note_added = False
+        cycle_note_added = False
+
+        async def visit_target(
+            target: IncludePageTarget,
+            *,
+            depth: int,
+            ancestors: frozenset[str],
+            fallback_space_key: str | None,
+        ) -> None:
+            nonlocal depth_note_added, page_cap_note_added, cycle_note_added
+            try:
+                page_id = await self._resolve_include_target(
+                    target,
+                    fallback_space_key=fallback_space_key,
+                )
+            except ConnectorError as exc:
+                raise_account_error(exc)
+                notes.append(f"An include target could not be resolved ({type(exc).__name__}).")
+                return
+            if page_id in ancestors:
+                if not cycle_note_added:
+                    notes.append("An include cycle was detected; recursion stopped.")
+                    cycle_note_added = True
+                return
+            if page_id in attempted:
+                return
+            if len(attempted) >= MAX_INCLUDED_PAGES + 1:
+                if not page_cap_note_added:
+                    notes.append(f"Include expansion stopped after {MAX_INCLUDED_PAGES} included pages.")
+                    page_cap_note_added = True
+                return
+            attempted.add(page_id)
+            try:
+                included_page = await self._api.get_page_content(
+                    page_id,
+                    include_storage=True,
+                    expected_username=self._username,
+                )
+            except ConnectorError as exc:
+                raise_account_error(exc)
+                notes.append(f"An included page could not be read ({type(exc).__name__}).")
+                return
+            included_storage = parse_storage(
+                included_page.storage_body,
+                page_id=page_id,
+                include_metadata=True,
+            )
+            references.extend(included_storage.macro_references)
+            next_ancestors = ancestors | {page_id}
+            if depth >= MAX_INCLUDED_PAGE_DEPTH:
+                if included_storage.include_targets and not depth_note_added:
+                    notes.append(f"Nested include expansion stopped at depth {MAX_INCLUDED_PAGE_DEPTH}.")
+                    depth_note_added = True
+                return
+            for nested_target in included_storage.include_targets:
+                await visit_target(
+                    nested_target,
+                    depth=depth + 1,
+                    ancestors=next_ancestors,
+                    fallback_space_key=included_page.metadata.space_key,
+                )
+
+        for target in storage.include_targets:
+            await visit_target(
+                target,
+                depth=1,
+                ancestors=frozenset({host_page_id}),
+                fallback_space_key=host_space_key,
+            )
+        return references, notes
+
+    async def _resolve_include_target(
+        self,
+        target: IncludePageTarget,
+        *,
+        fallback_space_key: str | None,
+    ) -> str:
+        if target.page_id is not None:
+            if not target.page_id.isdecimal():
+                raise InvalidRequest("An include macro returned a non-numeric page ID.")
+            return target.page_id
+        space_key = target.space_key or fallback_space_key
+        if target.title is None or not target.title.strip() or space_key is None:
+            raise InvalidRequest("An include macro did not identify a page and space.")
+        return await self._api.find_page_by_title(
+            space_key,
+            target.title.strip(),
+            expected_username=self._username,
         )
 
 

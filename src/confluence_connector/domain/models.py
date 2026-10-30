@@ -311,7 +311,10 @@ class PageParseScope(BaseModel):
     )
     attachments: bool = Field(default=True, description="Include the page's attachment list and references.")
     macros_from_storage: bool = Field(
-        default=True, description="Read storage markup to identify macros and typed references."
+        default=True,
+        description=(
+            "Read storage markup to identify macros and typed references, including macros in included pages."
+        ),
     )
     header: bool = Field(default=True, description="Include page title, ID, URL, space and timestamps.")
 

@@ -22,6 +22,54 @@ from confluence_connector.service.pages import PageTextService
 
 
 class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_macros_from_included_pages_are_typed_owned_and_read_once(self) -> None:
+        host = _page(
+            "55",
+            1,
+            '<div data-macro-name="include"><span data-macro-name="status">Ready</span></div>',
+            _include("90") + _include("90"),
+        )
+        included = _page(
+            "90",
+            2,
+            "<p>Included</p>",
+            '<ac:structured-macro ac:name="status"/>'
+            '<ac:structured-macro ac:name="expand"/>'
+            '<ac:structured-macro ac:name="html"/>'
+            + _include("91"),
+        )
+        nested = _page("91", 3, "<p>Nested</p>", '<ac:structured-macro ac:name="plantuml"/>')
+        api = _ReadApi(pages={"55": host, "90": included, "91": nested})
+
+        result = await _service(api).get_pages(
+            "55", parse_scope={"comments": False, "attachments": False}
+        )
+
+        macro_references = [item for item in result.pages[0].references if item.kind == "macro"]
+        self.assertEqual(
+            {(item.macro_name, item.owner_page_id) for item in macro_references},
+            {("status", "90"), ("expand", "90"), ("html", "90"), ("plantuml", "91")},
+        )
+        self.assertEqual(api.content_calls.count(("90", None)), 1)
+        self.assertEqual(api.content_calls.count(("91", None)), 1)
+
+    async def test_include_title_uses_host_space_and_reports_cycles_and_read_failures(self) -> None:
+        host = _page("55", 1, "<p>Host</p>", _include(title="Shared page"))
+        included = _page("90", 2, "<p>Shared</p>", _include("55") + _include("92"))
+        api = _ReadApi(
+            pages={"55": host, "90": included},
+            title_matches={("SYNTH", "Shared page"): "90"},
+        )
+
+        result = await _service(api).get_pages(
+            "55", parse_scope={"comments": False, "attachments": False}
+        )
+
+        self.assertIn(("SYNTH", "Shared page"), api.title_lookups)
+        self.assertIn("An include cycle was detected; recursion stopped.", result.pages[0].notes)
+        self.assertTrue(any("included page could not be read (NotFound)" in note for note in result.pages[0].notes))
+        self.assertEqual(api.content_calls.count(("55", None)), 1)
+
     async def test_text_read_renders_sections_and_keeps_typed_references(self) -> None:
         api = _ReadApi(
             pages={
@@ -461,6 +509,22 @@ def _page(page_id: str, version: int, view: str, storage: str) -> RemotePageCont
     )
 
 
+def _include(page_id: str | None = None, *, title: str | None = None, space_key: str | None = None) -> str:
+    target_attributes = []
+    if page_id is not None:
+        target_attributes.append(f'ri:content-id="{page_id}"')
+    if title is not None:
+        target_attributes.append(f'ri:content-title="{title}"')
+    if space_key is not None:
+        target_attributes.append(f'ri:space-key="{space_key}"')
+    target = "<ri:page " + " ".join(target_attributes) + "/>" if target_attributes else ""
+    return (
+        '<ac:structured-macro ac:name="include"><ac:parameter ac:name="">'
+        + target
+        + "</ac:parameter></ac:structured-macro>"
+    )
+
+
 class _Links:
     async def resolve(self, reference: str, *, expected_username: str) -> ResolvedPageReference:
         if reference == "invalid":
@@ -477,14 +541,17 @@ class _ReadApi:
         attachments: dict[str, list[PageAttachment]] | None = None,
         comments: dict[str, list[RemotePageComment]] | None = None,
         comment_error: Exception | None = None,
+        title_matches: dict[tuple[str, str], str] | None = None,
     ) -> None:
         self.pages = pages
         self.versions = versions or {}
         self.attachments = attachments or {}
         self.comments = comments or {}
         self.comment_error = comment_error
+        self.title_matches = title_matches or {}
         self.content_calls: list[tuple[str, int | None]] = []
         self.optional_calls: list[tuple[str, str]] = []
+        self.title_lookups: list[tuple[str, str]] = []
 
     async def get_page_content(
         self,
@@ -497,7 +564,19 @@ class _ReadApi:
         self.content_calls.append((page_id, version))
         if version is not None:
             return self.versions.get((page_id, version)) or self.pages[page_id]
-        return self.pages[page_id]
+        try:
+            return self.pages[page_id]
+        except KeyError:
+            raise NotFound("Synthetic included page unavailable") from None
+
+    async def find_page_by_title(
+        self, space_key: str, title: str, *, expected_username: str
+    ) -> str:
+        self.title_lookups.append((space_key, title))
+        try:
+            return self.title_matches[(space_key, title)]
+        except KeyError:
+            raise NotFound("Synthetic include target unavailable") from None
 
     async def list_page_attachments(self, page_id: str, *, expected_username: str) -> list[PageAttachment]:
         self.optional_calls.append(("attachments", page_id))
