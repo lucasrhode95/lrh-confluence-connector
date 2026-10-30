@@ -228,9 +228,17 @@ already in the stored body are converted and spliced back, so every other byte i
 stored and new bodies.
 
 **[`storage_files.py`](../src/confluence_connector/service/storage_files.py)** owns the rich export
-file format. Exports write the provenance comment with a `Page ID:` line through it, and `body_file`
-reads it back: an absolute UTF-8 path, the header's single page ID and version lines, and a refusal for
-the exported comments section.
+file format. Body files contain the provenance comment with a `Page ID:` line and storage only;
+selected comments are a separate read-only HTML file. `body_file` reads an absolute UTF-8 path, checks
+the header's single page ID and version lines, and refuses an inline comments section or the separate
+comments file.
+
+**[`exports.py`](../src/confluence_connector/service/exports.py)** writes rich exports of up to 20
+pages without attachment bytes as direct local files. Each body and selected comments file is listed
+with its role and path. Bulk and attachment-bearing exports are ZIPs listed with the `archive` role;
+direct export failures have a separate `report` file.
+Direct body and comments filenames reserve the timestamp prefix in both their character and encoded
+component budgets before shortening the title.
 
 **[`structure.py`](../src/confluence_connector/service/structure.py)** runs moves, deletes and restores
 as ordered steps that stop at the first failure and report every page's outcome; nothing is undone.

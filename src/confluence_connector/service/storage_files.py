@@ -1,7 +1,7 @@
 """Write and read storage-body files: the rich export header and `body_file` inputs.
 
-`export_pages` writes each rich file as a header comment followed by the unchanged storage body, and
-optionally a comments section. `create_page` and `update_page` read such files back. The header is
+`export_pages` writes each rich body file as a header comment followed by the unchanged storage body;
+comments are a separate file with no header. `create_page` and `update_page` read body files back. The header is
 the connector's own provenance record, so its `Page ID:` and `Version:` lines are the source of the
 file's page identity; nothing else in the file is interpreted.
 """
@@ -108,5 +108,5 @@ def _refuse_comments_section(body: str) -> None:
     soup = BeautifulSoup(body, "html.parser")
     if soup.find("section", class_=COMMENTS_SECTION_CLASS) is not None:
         raise InvalidRequest(
-            "body_file contains the exported comments section; export with parse_scope.comments false."
+            "body_file contains a comments section; use the rich export body file for edits."
         )

@@ -69,9 +69,10 @@ Write tools require the user's explicit request. Never retry an uncertain write 
 its target. Recreating a page after a refused move is a separate recovery plan: it loses its ID,
 history and comments. Authenticate through `confluence-connector auth`, never through an MCP tool;
 `auth_status` is offline and does not establish token validity.
-To edit a page, export it with `export_pages` (`format: "rich"`, comments off), change the file with
-exact find-and-replace, then pass it to `update_page` as `body_file` with the same `page`. Never retype
-a large body inline or rebuild it from text output.
+To edit a page, export it with `export_pages` (`format: "rich"`), change its body file with exact
+find-and-replace, then pass that body file to `update_page` as `body_file` with the same `page`.
+Comments are in a separate read-only file. Never retype a large body inline or rebuild it from text
+output.
 """
 
 
@@ -339,11 +340,13 @@ def build_server(context: AppContext) -> FastMCP:
             Field(description="Download attachment bytes into the export (default false)."),
         ] = False,
     ) -> PageExportResult:
-        """Export up to 500 pages in full as a local file or ZIP archive.
+        """Export up to 500 pages in full as local files or a ZIP archive.
 
-        Text is the default; rich includes unchanged storage markup and selected comments at the end.
-        The provenance header is always included. Attachment bytes are excluded unless
-        include_attachments is true. Page and attachment failures appear in _export-report.txt.
+        Text is the default. Rich writes an editable body file with its provenance header and writes
+        selected comments to a separate read-only file. Rich exports of up to 20 pages without
+        attachment bytes are separate local files; bulk and attachment exports are ZIP archives.
+        The result lists every output file with its role and local path. Attachment bytes are excluded
+        unless include_attachments is true. Page and attachment failures appear in a report file.
         Large exports may take minutes.
         """
         services = await context.services()
@@ -458,10 +461,11 @@ def build_server(context: AppContext) -> FastMCP:
     ) -> PageWriteResult:
         """Replace a published page's complete body, with an optional title change.
 
-        body_file takes a rich export_pages file (comments off) of the same page: its header's page
+        body_file takes the body file from a rich export_pages result of the same page: its header's page
         must match page and its version is the expected version, and the storage is sent unchanged
         apart from new pre/details blocks. Files without the header, text exports and files with the
-        comments section are refused. With body, expected_version is required. A stale version is
+        comments section are refused; separate comments files have no header and are refused. With body,
+        expected_version is required. A stale version is
         never overwritten. Rich is the default:
         provide HTML and Confluence storage tags, not Markdown or wiki markup. The connector converts
         pre/code to the code macro, details/summary to expand, and HTML void tags to self-closing

@@ -20,6 +20,7 @@ from confluence_connector.domain.errors import (
 from confluence_connector.domain.models import (
     PageAttachment,
     PageComment,
+    PageExportFile,
     PageExportResult,
     PageParseScope,
     PageReadRecord,
@@ -51,6 +52,7 @@ PAGE_READ_CONCURRENCY = 2
 ATTACHMENT_DOWNLOAD_CONCURRENCY = 6
 MAX_EXPORT_MEMBER_LENGTH = 180
 MAX_SINGLE_FILENAME_LENGTH = 160
+MAX_DIRECT_RICH_PAGES = 20
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class _PageExport:
     reference: str
     metadata: _PageMetadata | None = None
     staged_file: Path | None = None
+    staged_comments_file: Path | None = None
     attachment_directory: Path | None = None
     failure: str | None = None
     downloaded_attachments: int = 0
@@ -139,13 +142,25 @@ class PageExports:
                 outcome.attachment_failures for outcome in outcomes
             )
 
+            files: list[PageExportFile]
             if (
-                len(outcomes) == 1
+                page_format == "text"
+                and len(outcomes) == 1
                 and outcomes[0].metadata is not None
                 and not include_file_bytes
                 and not report_items
             ):
                 target = self._write_single(outcomes[0], output_directory, page_format)
+                files = [PageExportFile(role="body", location=str(target))]
+            elif (
+                page_format == "rich"
+                and not include_file_bytes
+                and len(outcomes) <= MAX_DIRECT_RICH_PAGES
+            ):
+                files = self._write_direct_rich(
+                    outcomes, report_items, output_directory
+                )
+                target = Path(files[0].location)
             else:
                 target = self._write_zip(
                     outcomes,
@@ -153,16 +168,19 @@ class PageExports:
                     output_directory,
                     page_format=page_format,
                 )
+                files = [PageExportFile(role="archive", location=str(target))]
 
+        primary_content_type = _content_type(target.suffix)
         return PageExportResult(
             path=str(target),
             filename=target.name,
-            content_type=_content_type(page_format, target.suffix),
+            content_type=primary_content_type,
             size_bytes=target.stat().st_size,
             pages_exported=exported_pages,
             pages_failed=failed_pages,
             attachments_exported=exported_attachments,
             attachments_failed=failed_attachments,
+            files=files,
         )
 
     async def _read_in_batches(
@@ -273,7 +291,16 @@ class PageExports:
         outcome.staged_file = staging / f"page-{index:04d}{extension}"
         descriptor = os.open(outcome.staged_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as output:
-            output.write(_page_content(record, page_format, parse_scope).encode("utf-8"))
+            output.write(_page_content(record, page_format).encode("utf-8"))
+        if page_format == "rich" and parse_scope.comments:
+            outcome.staged_comments_file = staging / f"comments-{index:04d}.html"
+            descriptor = os.open(
+                outcome.staged_comments_file,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(_html_comments(record.comments).encode("utf-8"))
 
         if include_attachments:
             outcome.attachment_directory = staging / f"attachments-{index:04d}"
@@ -374,6 +401,11 @@ class PageExports:
                         outcome.metadata, page_format, used_names
                     )
                     archive.write(outcome.staged_file, arcname=page_name)
+                    if outcome.staged_comments_file is not None:
+                        archive.write(
+                            outcome.staged_comments_file,
+                            arcname=f"{Path(page_name).stem}.comments.html",
+                        )
                     if outcome.attachment_directory is None:
                         continue
                     folder_name = Path(page_name).stem
@@ -389,6 +421,59 @@ class PageExports:
             raise
         return target
 
+    def _write_direct_rich(
+        self,
+        outcomes: list[_PageExport],
+        report_items: list[_ReportItem],
+        output_directory: Path,
+    ) -> list[PageExportFile]:
+        files: list[PageExportFile] = []
+        published: list[Path] = []
+        try:
+            for outcome in outcomes:
+                if outcome.metadata is None or outcome.staged_file is None:
+                    continue
+                prefix = f"{_timestamp()} - "
+                body_name = _page_filename(
+                    outcome.metadata,
+                    "rich",
+                    maximum_length=MAX_SINGLE_FILENAME_LENGTH - len(prefix),
+                    maximum_component_units=MAX_FILENAME_COMPONENT_UNITS
+                    - filename_component_units(prefix),
+                )
+                body_target = localfiles.claim(output_directory, f"{prefix}{body_name}")
+                published.append(body_target)
+                outcome.staged_file.replace(body_target)
+                files.append(PageExportFile(role="body", location=str(body_target)))
+                if outcome.staged_comments_file is not None:
+                    prefix = f"{_timestamp()} - "
+                    comments_name = _comments_filename(
+                        outcome.metadata,
+                        maximum_length=MAX_SINGLE_FILENAME_LENGTH - len(prefix),
+                        maximum_component_units=MAX_FILENAME_COMPONENT_UNITS
+                        - filename_component_units(prefix),
+                    )
+                    comments_target = localfiles.claim(
+                        output_directory, f"{prefix}{comments_name}"
+                    )
+                    published.append(comments_target)
+                    outcome.staged_comments_file.replace(comments_target)
+                    files.append(PageExportFile(role="comments", location=str(comments_target)))
+            if report_items:
+                report_target = localfiles.claim(
+                    output_directory, f"confluence-export-{_timestamp()}-report.txt"
+                )
+                published.append(report_target)
+                report_target.write_text(_export_report(report_items), encoding="utf-8")
+                files.append(PageExportFile(role="report", location=str(report_target)))
+        except BaseException:
+            for path in published:
+                path.unlink(missing_ok=True)
+            raise
+        if not files:
+            raise InvalidRequest("No pages could be exported.")
+        return files
+
     def _output_directory(self) -> Path:
         fingerprint = hashlib.sha256(
             self._username.casefold().encode("utf-8")
@@ -399,19 +484,15 @@ class PageExports:
 def _page_content(
     record: PageReadRecord,
     page_format: PageTextFormat,
-    parse_scope: PageParseScope,
 ) -> str:
     if page_format == "text":
         return record.text
     header = record.header or f"# {record.title}\nVersion: {record.version}"
-    body = rich_export_content(header, record.page_id, record.text)
-    if parse_scope.comments:
-        body += _html_comments(record.comments)
-    return body
+    return rich_export_content(header, record.page_id, record.text)
 
 
 def _html_comments(comments: list[PageComment]) -> str:
-    parts = [f'\n<section class="{COMMENTS_SECTION_CLASS}"><h2>Comments</h2>']
+    parts = [f'<section class="{COMMENTS_SECTION_CLASS}"><h2>Comments</h2>']
     for comment in comments:
         details = [
             f"@{comment.author.display_name}"
@@ -467,6 +548,26 @@ def _page_filename(
     return filename
 
 
+def _comments_filename(
+    metadata: _PageMetadata,
+    *,
+    maximum_length: int = MAX_EXPORT_MEMBER_LENGTH,
+    maximum_component_units: int = MAX_FILENAME_COMPONENT_UNITS,
+) -> str:
+    suffix = f" ({metadata.page_id}) v{metadata.version}.comments.html"
+    if len(suffix) >= maximum_length or filename_component_units(suffix) >= maximum_component_units:
+        raise InvalidRequest("The resolved page ID is too long for a safe export filename.")
+    title = sanitize_filename_component(metadata.title) or "Untitled page"
+    title = safe_filename_stem(
+        title,
+        suffix=suffix,
+        maximum_length=maximum_length,
+        maximum_component_units=maximum_component_units,
+        fallback="Page",
+    )
+    return f"{title}{suffix}"
+
+
 def _unique_archive_name(metadata: _PageMetadata, page_format: PageTextFormat, used_names: set[str]) -> str:
     """Reserve an archive name from source metadata, with shared filename bounds for collisions."""
     counter = 1
@@ -509,11 +610,9 @@ def _timestamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _content_type(page_format: PageTextFormat, suffix: str) -> str:
+def _content_type(suffix: str) -> str:
     if suffix == ".zip":
         return "application/zip"
-    return (
-        "text/plain; charset=utf-8"
-        if page_format == "text"
-        else "text/html; charset=utf-8"
-    )
+    if suffix == ".txt":
+        return "text/plain; charset=utf-8"
+    return "text/html; charset=utf-8"

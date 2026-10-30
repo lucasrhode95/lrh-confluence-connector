@@ -109,7 +109,7 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(api.list_calls, 1)
             self.assertEqual(api.download_calls, ["att-1"])
 
-    async def test_rich_export_keeps_storage_body_and_appends_escaped_comments(
+    async def test_rich_export_writes_body_and_comments_as_separate_files(
         self,
     ) -> None:
         storage_body = '<ac:structured-macro ac:name="panel"><p>A &amp; B</p></ac:structured-macro>'
@@ -136,20 +136,22 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             patch("confluence_connector.config.data_dir", return_value=Path(directory)),
         ):
             result = await service.export_pages("55", format="rich")
-            content = Path(result.path).read_text(encoding="utf-8")
+            body_file = next(file for file in result.files if file.role == "body")
+            comments_file = next(file for file in result.files if file.role == "comments")
+            content = Path(body_file.location).read_text(encoding="utf-8")
+            comments = Path(comments_file.location).read_text(encoding="utf-8")
             self.assertTrue(
                 content.startswith(
                     "<!--\n# Rich page\nBreadcrumb: Space › Rich page\nVersion: 2\nPage ID: 55\n-->\n"
                 )
             )
             self.assertIn(storage_body, content)
-            self.assertGreater(
-                content.index('<section class="confluence-comments">'),
-                content.index(storage_body),
-            )
-            self.assertIn("&lt;script&gt;not markup&lt;/script&gt; &amp; text", content)
-            self.assertIn("&lt;selection&gt;", content)
-            self.assertNotIn("<script>not markup</script>", content)
+            self.assertNotIn("confluence-comments", content)
+            self.assertTrue(comments.startswith('<section class="confluence-comments">'))
+            self.assertIn("&lt;script&gt;not markup&lt;/script&gt; &amp; text", comments)
+            self.assertIn("&lt;selection&gt;", comments)
+            self.assertNotIn("<script>not markup</script>", comments)
+            self.assertTrue(comments_file.location.endswith(".comments.html"))
 
     async def test_rich_export_without_comments_reads_back_as_page_identity_and_exact_body(self) -> None:
         storage_body = '<p>a&nbsp;b</p>\n<ac:structured-macro ac:name="toc" ac:macro-id="m-1" />'
@@ -162,9 +164,67 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
             result = await service.export_pages(
                 "55", format="rich", parse_scope={"comments": False}
             )
-            header, body = split_export_header(Path(result.path).read_text(encoding="utf-8"))
+            body_file = next(file for file in result.files if file.role == "body")
+            header, body = split_export_header(Path(body_file.location).read_text(encoding="utf-8"))
         self.assertEqual((header.page_id, header.version), ("55", 2))
         self.assertEqual(body, storage_body)
+        self.assertEqual([file.role for file in result.files], ["body"])
+
+    async def test_rich_comments_file_is_rejected_as_a_body_file(self) -> None:
+        comment = PageComment(comment_id="c-1", body="Synthetic comment")
+        pages = _Pages({"55": _record("55", "Rich", "<p>Body</p>", page_format="rich", comments=[comment])})
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages("55", format="rich")
+            comments_file = next(file for file in result.files if file.role == "comments")
+            with self.assertRaisesRegex(InvalidRequest, "comments section"):
+                split_export_header(Path(comments_file.location).read_text(encoding="utf-8"))
+
+    async def test_rich_export_of_multiple_pages_stays_as_direct_files(self) -> None:
+        pages = _Pages({
+            "55": _record("55", "First", "<p>First</p>", page_format="rich"),
+            "56": _record("56", "Second", "<p>Second</p>", page_format="rich"),
+        })
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages(["55", "56"], format="rich", parse_scope={"comments": False})
+        self.assertEqual([file.role for file in result.files], ["body", "body"])
+        self.assertTrue(all(Path(file.location).suffix == ".html" for file in result.files))
+
+    async def test_bulk_rich_export_is_one_archive_with_archive_role(self) -> None:
+        pages = _Pages({"55": _record("55", "Rich", "<p>Body</p>", page_format="rich")})
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages(["55"] * 21, format="rich")
+            with zipfile.ZipFile(result.path) as archive:
+                names = archive.namelist()
+                self.assertEqual(len(names), 42)
+                self.assertEqual(len({name.casefold() for name in names}), 42)
+                self.assertEqual(sum(name.endswith(".comments.html") for name in names), 21)
+        self.assertEqual([file.role for file in result.files], ["archive"])
+
+    async def test_direct_rich_failure_has_a_separate_report_file(self) -> None:
+        pages = _Pages({"55": _record("55", "Rich", "<p>Body</p>", page_format="rich")})
+        service, _api, links = _service(pages)
+        links.failures["missing"] = NotFound("Synthetic missing page")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages(["55", "missing"], format="rich")
+            report = next(file for file in result.files if file.role == "report")
+            report_text = Path(report.location).read_text(encoding="utf-8")
+        self.assertIn("page: missing", report_text)
+        self.assertEqual([file.role for file in result.files], ["body", "comments", "report"])
 
     async def test_failed_page_and_attachment_are_reported_in_archive(self) -> None:
         attachments = [PageAttachment(attachment_id="att-fail", filename="broken.bin")]
@@ -217,6 +277,24 @@ class PageExportChecks(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertTrue(all(name.endswith(" (55) v2.txt") for name in names))
                 self.assertTrue(all(len(name.encode("utf-8")) <= 240 for name in names))
+
+    async def test_rich_multibyte_title_keeps_body_and_comments_within_filename_limits(self) -> None:
+        pages = _Pages({"55": _record(
+            "55", "😀" * 130, "<p>Synthetic page</p>", page_format="rich",
+            comments=[PageComment(comment_id="c-1", body="Synthetic comment")],
+        )})
+        service, _api, _links = _service(pages)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("confluence_connector.config.data_dir", return_value=Path(directory)),
+        ):
+            result = await service.export_pages("55", format="rich")
+            self.assertEqual([file.role for file in result.files], ["body", "comments"])
+            for file in result.files:
+                filename = Path(file.location).name
+                self.assertLessEqual(len(filename.encode("utf-8")), 240)
+                self.assertLessEqual(len(filename.encode("utf-16-le")) // 2, 240)
+                self.assertTrue(Path(file.location).is_file())
 
     async def test_multibyte_title_is_shortened_to_a_safe_filesystem_component(self) -> None:
         pages = _Pages({"55": _record("55", "😀" * 130, "Synthetic page")})

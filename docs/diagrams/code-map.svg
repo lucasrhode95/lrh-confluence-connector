@@ -121,8 +121,8 @@
   <rect x="920" y="912" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="936" y="944"><tspan class="code">PageExports</tspan><tspan class="detail" dx="10">exports.py</tspan></text>
   <g><title>Up to 500 references, validated before any request; pages are read two at a time. → PageTextService.read_full_page, AttachmentDownloads.download_to_directory</title><text class="detail" x="936" y="980">• <tspan class="code">export_pages</tspan>: ≤ 500 pages</text></g>
-  <g><title>One page with nothing else is a single file; anything else is one flat ZIP.</title><text class="detail" x="936" y="1010">• one file, or one flat ZIP</text></g>
-  <g><title>Failed pages and attachments are listed in the archive; account errors abort the export.</title><text class="detail" x="936" y="1040">• <tspan class="code">_export-report.txt</tspan> on failure</text></g>
+  <g><title>Rich exports of up to 20 pages without attachment bytes are direct files; bulk or attachment exports use a ZIP.</title><text class="detail" x="936" y="1010">• rich ≤ 20: files; bulk: ZIP</text></g>
+  <g><title>Rich comments are separate files; failures have a report; account errors abort the export.</title><text class="detail" x="936" y="1040">• comments and reports have roles</text></g>
 
   <rect x="1340" y="912" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="group-title" x="1356" y="944">Shared helpers</text>

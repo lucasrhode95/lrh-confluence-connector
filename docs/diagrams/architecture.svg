@@ -77,7 +77,7 @@
   <text class="detail" x="516" y="781" style="font-size:19px">• <tspan class="code">page_text.py</tspan>: BeautifulSoup</text>
   <text class="detail" x="532" y="809" style="font-size:19px">+ markdownify, typed references</text>
   <text class="detail" x="516" y="841" style="font-size:19px">• <tspan class="code">attachments.py</tspan>: same page</text>
-  <text class="detail" x="516" y="871" style="font-size:19px">• <tspan class="code">exports.py</tspan>: ≤ 500 pages, ZIP</text>
+  <text class="detail" x="516" y="871" style="font-size:19px">• <tspan class="code">exports.py</tspan>: rich files or ZIP</text>
 
   <rect x="900" y="680" width="380" height="220" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="916" y="716">Write</text>
