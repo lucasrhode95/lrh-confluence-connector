@@ -382,6 +382,18 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   resolve/reopen is not exposed because the configured instance has no verified REST write route for
   that state.
 
+### 10.9 Email notification settings
+
+- `get_email_settings` reads the signed-in account's autowatch, daily updates, all blog posts,
+  network, new followers, own-action notifications, changed-content display and recommended updates.
+- `update_email_settings` changes only provided fields. It reads current values, merges the requested
+  fields, submits the complete state through the isolated email settings form, then rereads all eight
+  values. Results report the confirmed values and any mismatches. An unchanged or empty update sends
+  no request.
+- This changes account configuration. The tool and server instructions state that plainly. Every
+  request is bound to the username stored with the token; the undocumented form is isolated from the
+  REST adapter.
+
 ## 11. Reliability
 
 - Report inaccessible pages, unsupported elements, failed downloads and partial coverage explicitly.

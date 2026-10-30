@@ -260,6 +260,11 @@ comment, validates page and reply ownership, checks comment versions before upda
 explicit flag before permanent deletion. The REST adapter supplies comment source metadata so inline
 anchors remain outside the body update.
 
+**[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
+undocumented HTML email settings form from the REST adapter. It reads the form through the shared,
+account-bound transport, merges partial updates with the currently read values, submits all eight
+settings with the form token, and rereads them to report mismatches.
+
 **[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
 folders, cleanup of files older than seven days when a folder is next used (tolerating files another
 process removed), exclusive name claims with ` (2)` suffixes, owner-only permissions on POSIX.
@@ -274,7 +279,8 @@ Annotations: reads are read-only and idempotent (`auth_status` also closed-world
 read-only, and all but `create_page` and `restore_page` are marked destructive. `download_attachments`
 and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
 outputs. Every write declaration exposes `notify_watchers`; the result model echoes the flag and
-indicates whether the route supports suppression.
+indicates whether the route supports suppression. The account settings update has its own explicit
+destructive annotation and does not accept that content-write option.
 
 ### 5.8 [`config.py`](../src/confluence_connector/config.py) and [`logs.py`](../src/confluence_connector/logs.py)
 
@@ -299,6 +305,7 @@ indicates whether the route supports suppression.
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
 | Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for footer comments; inline resolution has no verified write route |
+| Email notification settings | `GET /users/viewmyemailsettings.action`, `POST /users/editmyemailsettings.action` | **No**; isolated UI form with `atl_token` (research §6.7) |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
 | Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |
 | Create, update, publish, draft delete | `POST`, `PUT`, `DELETE /rest/api/content…` | Yes |
@@ -333,7 +340,7 @@ the adapter. The service and surface stay unchanged.
 
 ## 8. MCP tools
 
-The 27 tool declarations and parameter descriptions live in
+The 29 tool declarations and parameter descriptions live in
 [`surfaces/mcp_main.py`](../src/confluence_connector/surfaces/mcp_main.py). FastMCP publishes their
 input and output schemas from typed models. The [README](../README.md#mcp-tools) gives the capability
 index; requirements own behavior and bounds. Read tools are read-only; local file tools can remove

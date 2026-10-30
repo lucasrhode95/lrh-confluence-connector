@@ -31,6 +31,9 @@ from confluence_connector.domain.models import (
     AttachmentMutationResult,
     DraftDeletionResult,
     DraftListResult,
+    EmailNotificationSettings,
+    EmailNotificationSettingsUpdate,
+    EmailNotificationSettingsUpdateResult,
     LabelChangeResult,
     PageExportResult,
     PageParseScope,
@@ -80,6 +83,8 @@ comment, `add_comment` to create a footer comment or reply, and `update_comment`
 version. `delete_comment` permanently removes a comment and cannot be undone; it requires
 `confirm_permanent_delete=true`. Inline comment anchors are metadata separate from the comment body;
 the connector does not create inline comments because REST creation needs a text selection anchor.
+`update_email_settings` changes the signed-in account's email notification configuration; read the
+current values first when you need to preserve settings that are not changing.
 """
 
 
@@ -647,6 +652,25 @@ def build_server(context: AppContext) -> FastMCP:
             page=page,
             notify_watchers=notify_watchers,
         )
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_logged
+    async def get_email_settings() -> EmailNotificationSettings:
+        """Read the signed-in account's eight email notification settings."""
+        services = await context.services()
+        return await services.email_settings.get_settings()
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def update_email_settings(
+        settings: Annotated[
+            EmailNotificationSettingsUpdate,
+            Field(description="One or more email settings to change; omitted settings keep their current values."),
+        ],
+    ) -> EmailNotificationSettingsUpdateResult:
+        """Change email notification settings for the signed-in Confluence account."""
+        services = await context.services()
+        return await services.email_settings.update_settings(settings)
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged

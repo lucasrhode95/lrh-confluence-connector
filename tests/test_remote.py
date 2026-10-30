@@ -57,6 +57,33 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.aclose)
         return client, transport
 
+    async def test_html_form_reads_and_posts_use_account_bound_transport_without_following_redirect(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            if request.method == "GET":
+                return httpx.Response(200, text="<form></form>", headers={"content-type": "text/html"})
+            return httpx.Response(302, headers={"location": "/wiki/users/viewmyemailsettings.action"})
+
+        _, transport = self.make_client(handler)
+
+        html = await transport.get_text("users/viewmyemailsettings.action", expected_username="sample-user")
+        result = await transport.send_form(
+            "users/editmyemailsettings.action",
+            form_fields={"atl_token": "synthetic-token", "edit": "Edit"},
+            expected_username="sample-user",
+        )
+
+        self.assertEqual(html, "<form></form>")
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(result.location, "/wiki/users/viewmyemailsettings.action")
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[0].headers["Accept"], "text/html")
+        self.assertEqual(observed[1].headers["Accept"], "text/html")
+        self.assertIn(b"atl_token=synthetic-token", observed[1].content)
+        self.assertNotEqual(observed[1].url.path, "/wiki/users/viewmyemailsettings.action")
+
     async def test_compressed_json_is_decoded_once_for_reads_and_writes(self) -> None:
         attempts = []
         def handler(request):

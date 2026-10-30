@@ -2,33 +2,12 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 373 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 378 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Item 6 follows the remaining priority the user set on 2026-10-30; items 7 and 8 were decided or
-found that day and have no rank yet.
-
-### 6. Email notification settings
-
-Requested by the user on 2026-10-30: read and change the signed-in user's email notification
-settings (profile > Settings > Email), such as autowatch and notifications for one's own actions. The
-user approved the undocumented UI form for this.
-
-- **Isolation:** keep the undocumented form access in its own user-settings module, separate from the
-  REST adapter, so the rest of the connector never depends on it.
-- **Route:** the UI reads `users/viewmyemailsettings.action` and saves a form to
-  `users/editmyemailsettings.action` with an `atl_token`; confirm how a PAT obtains that token.
-- **Settings:** the eight on the page: autowatch, daily updates, all blog posts, network, new
-  followers, notify on my actions, show changed content and recommended updates.
-- **Safety:** the edit form does not always show stored values. On 2026-10-30 it showed "Subscribe to
-  recommended updates" checked while the stored value was off, so saving one change also turned that
-  on. Read stored values from the view page, send the complete set with only the requested changes,
-  then reread and report any setting that differs.
-- **Live check:** every setting round-trips without changing the others; restore the user's values.
-- **Docs and tests:** synthetic form fixtures; this changes account configuration, so the tool
-  description must say so.
+Items 7 and 8 were decided or found on 2026-10-30 and have no rank yet.
 
 ### 7. Write input handling
 
@@ -79,6 +58,8 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Comments:** on disposable synthetic content, verify inline body edits preserve anchors and
   whether inline resolution can be changed through REST. A second authorized test account is needed
   to verify the 403 for editing another user's comment.
+- **Email settings:** the configured PAT read the settings form, but its save request returned 403.
+  Verify independent round trips and restoration on an instance/account that permits this form write.
 - **Token lifecycle:** verify an expired PAT's response and cross-process sign-out with the bound
   credential format, without signing out the user's working credential.
 - **Attachment upload size:** determine the configured instance's maximum upload size with a disposable

@@ -467,6 +467,19 @@ Live PAT check, 2026-10-30, on one disposable synthetic page in the configured D
 - The disposable page was trashed after the checks. Upload-size limits and cross-page link discovery
   were not tested; the connector does not search other pages for references.
 
+### 6.7 Account email notification settings
+
+PAT, 2026-10-30, Data Center 9.2.10:
+
+- `GET /users/viewmyemailsettings.action` returned HTTP 200 HTML containing one edit form for
+  `users/editmyemailsettings.action`, an `atl_token`, and eight named checkboxes for the settings
+  listed in requirements §10.9. The edit form's checked states can differ from the stored values on
+  the view page, so the connector uses the view-page values for a complete-state submission.
+- A form submission with the token and full settings returned HTTP 403. No retry was sent. The
+  subsequent same-state guard found no differences to restore; the original account settings were
+  unchanged. The reason for the denial is unknown and may be instance- or account-specific. Read
+  access works, but write round trips are not verified on this account.
+
 ## 7. Private routes seen but not used
 
 Browser and Source, 2026-10-07 to 2026-10-19. Contracts are kept only where a request was sent.
