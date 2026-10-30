@@ -204,7 +204,8 @@ storage technique is shared (§5).
   folders; each file's header carries the breadcrumb (`Space › Parent › Page`), always, even when
   `parse_scope.header` is false.
 - `text` files use the unbudgeted `get_pages` text. `rich` files are the unchanged storage body as
-  `.html`, with the header facts in a leading comment and selected comments in a final section.
+  `.html`, with the header facts and a `Page ID:` line in a leading comment and selected comments in a
+  final section. A rich file exported with comments off is the input for file-based edits (§10.2).
 - Attachment bytes are excluded by default; with `include_attachments`, they go in a folder named after
   the page file. `parse_scope.attachments` separately controls the list in the text.
 - `_export-report.txt`, present only when something failed or was skipped, names each item and why.
@@ -219,12 +220,16 @@ Writes run only when a write tool is called, and are tested only on disposable s
 
 ### 10.1 Body formats (D5)
 
-- `create_page` and `update_page` take `body` and `format`. `rich` (default) is HTML plus Confluence
-  storage tags, written as storage. `text` is escaped and split into paragraphs at blank lines. No wiki
-  markup or Markdown input.
+- `create_page` and `update_page` take exactly one of `body` and `body_file`, plus `format`. `rich`
+  (default) is HTML plus Confluence storage tags, written as storage. `text` is escaped and split into
+  paragraphs at blank lines. No wiki markup or Markdown input. `body_file` is an absolute path to a
+  UTF-8 `rich` storage file; a leading byte-order mark is ignored.
 - Before sending `rich`, three conversions fix HTML that AI tools write and Confluence stores badly
   (research §6.5): `<pre><code class="language-X">` and plain `<pre>` become the code macro;
-  HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro.
+  HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
+  `body_file` is sent byte for byte except new `<pre>` and `<details>` blocks, which get the same
+  conversions; a `<pre>` already in the stored body (Confluence's preformatted style) is kept, and void
+  elements are not rewritten, so unparseable markup returns Confluence's 400.
 - Refused before sending: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `on*` attributes,
   `javascript:` URLs, the HTML macro, and more than 128 nested elements. Other unparseable markup
   returns Confluence's 400 with row and column.
@@ -237,8 +242,14 @@ Writes run only when a write tool is called, and are tested only on disposable s
 `update_page` always replaces the whole body (and optionally the title), as edits do in the Teams and
 Outlook connectors; there are no section, append or find-and-replace modes.
 
-- `expected_version` is required. A stale version is refused before writing, and a concurrent edit is
-  refused by Confluence's 409; neither is retried.
+- `expected_version` is required with `body`. A stale version is refused before writing, and a
+  concurrent edit is refused by Confluence's 409; neither is retried.
+- File-based edits (approved 2026-10-28): export the page with `export_pages` (`format: "rich"`,
+  comments off), edit the file, and pass it as `body_file`. The header's page ID and version take the
+  place of `page` and `expected_version`; explicit values must match. Files without the header, text
+  exports, files from another page and files with the comments section are refused. An unedited file
+  leaves the stored body byte-identical. `create_page` also accepts a plain storage file; a rich
+  export's header is dropped there and its storage kept as is.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
   so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
   reported as warnings.
@@ -256,7 +267,8 @@ Outlook connectors; there are no section, append or find-and-replace modes.
   could remove another client's label. Results list what was added, removed, unchanged, failed and not
   attempted.
 - Bounds: titles of 255 printable characters; labels and space keys of 255 ASCII letters, digits,
-  underscores or hyphens (space keys may start with `~`); bodies of 2,000,000 characters.
+  underscores or hyphens (space keys may start with `~`); inline bodies of 2,000,000 characters.
+  `body_file` has no connector size limit.
 
 ### 10.4 Routes, identity and placement (D7)
 

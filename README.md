@@ -130,7 +130,8 @@ on Windows, or `~/.local/share/lrh-confluence-connector` on other systems. Set
 The MCP server exposes the tools below. Agents receive input/output schemas and descriptions from
 [MCP declarations](src/confluence_connector/surfaces/mcp_main.py). Text reads use Markdown-like text;
 complex tables retain minimal HTML. `format="rich"` returns Confluence storage markup for editing,
-not a cleaned HTML page.
+not a cleaned HTML page. To edit a large page, export it as `rich` with comments off, edit the file, and
+pass it to `update_page` as `body_file`; an unedited file leaves the page body byte-identical.
 
 | MCP tool | Service module | Behavior |
 |---|---|---|
@@ -143,7 +144,7 @@ not a cleaned HTML page.
 | `get_pages` | [`service/pages.py`](src/confluence_connector/service/pages.py) | Read pages as text or unchanged storage, with typed references, attachments and comments |
 | `download_attachments` | [`service/attachments.py`](src/confluence_connector/service/attachments.py) | Save selected attachments of one page locally |
 | `export_pages` | [`service/exports.py`](src/confluence_connector/service/exports.py) | Export up to 500 full pages as a file or ZIP, optionally with attachments |
-| `create_page`, `update_page`, `set_labels` | [`service/writes.py`](src/confluence_connector/service/writes.py) | Create pages or drafts, replace a page body at an expected version, change labels |
+| `create_page`, `update_page`, `set_labels` | [`service/writes.py`](src/confluence_connector/service/writes.py) | Create pages or drafts, replace a page body at an expected version or from an edited export file, change labels |
 | `list_drafts`, `publish_draft`, `delete_draft` | [`service/writes.py`](src/confluence_connector/service/writes.py) | List, publish or permanently delete new-page drafts |
 | `move_page`, `delete_page`, `list_trash`, `restore_page` | [`service/structure.py`](src/confluence_connector/service/structure.py) | Move pages, trash them with their children, list the trash and restore with placement |
 
