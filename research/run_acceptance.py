@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable
 
-from acceptance_fixtures import AcceptanceFixture, new_fixture
+from acceptance_fixtures import AcceptanceFixture, child_text, new_fixture
 from confluence_connector import config
 from confluence_connector.bootstrap import AppContext, Services
 from confluence_connector.domain.errors import (
@@ -480,6 +480,8 @@ async def _check_page_reads(
     text_page = text_result.pages[0]
     if fixture.marker not in text_page.text or "## Attachments" not in text_page.text or "## Comments" not in text_page.text:
         raise AssertionError("text output omitted required body or section markers")
+    if child_text(fixture, "firstchild") not in text_page.text:
+        raise AssertionError("the include macro did not render the first child's body")
     kinds = {reference.kind for reference in text_page.references}
     if "image" not in kinds or "attachment" not in kinds:
         raise AssertionError("typed image or attachment references were not returned")
