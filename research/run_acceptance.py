@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable
 
-from acceptance_fixtures import AcceptanceFixture, new_fixture
+from acceptance_fixtures import AcceptanceFixture, child_text, new_fixture
 from confluence_connector import config
 from confluence_connector.bootstrap import AppContext, Services
 from confluence_connector.domain.errors import (
@@ -373,6 +373,8 @@ async def _check_search_modes(
     )
     if not any(query.source == "quicknav" for query in title.queries_sent):
         raise AssertionError("unscoped title search did not include quick navigation")
+    if not any(hit.content_id == root_id and "quicknav" in hit.sources for hit in title.hits):
+        raise AssertionError("quick navigation did not return the fixture root")
 
 
 async def _check_search_filters(
@@ -480,6 +482,8 @@ async def _check_page_reads(
     text_page = text_result.pages[0]
     if fixture.marker not in text_page.text or "## Attachments" not in text_page.text or "## Comments" not in text_page.text:
         raise AssertionError("text output omitted required body or section markers")
+    if child_text(fixture, "firstchild") not in text_page.text:
+        raise AssertionError("the include macro did not render the first child's body")
     kinds = {reference.kind for reference in text_page.references}
     if "image" not in kinds or "attachment" not in kinds:
         raise AssertionError("typed image or attachment references were not returned")
@@ -830,10 +834,13 @@ async def _check_delete_and_restore(
         subtree = await services.structure.delete_page(trash_parent.page_id, children="trash")
         if not subtree.complete or sum(item.status == "trashed" for item in subtree.pages) != 3:
             raise AssertionError("bottom-up subtree deletion did not trash all three pages")
+        # The trash lists oldest first, so new scratch pages can be past the first page.
         listed = await services.structure.list_trash(space_key=pages.personal_space, limit=100)
-        if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= {
-            item.page_id for item in listed.pages
-        }:
+        trashed_ids = {item.page_id for item in listed.pages}
+        while listed.next_cursor:
+            listed = await services.structure.list_trash(cursor=listed.next_cursor)
+            trashed_ids.update(item.page_id for item in listed.pages)
+        if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= trashed_ids:
             raise AssertionError("fixture subtree was missing from the trash listing")
         for page_id in (trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id):
             restored_page = await services.structure.restore_page(page_id)

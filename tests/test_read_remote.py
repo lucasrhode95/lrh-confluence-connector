@@ -178,31 +178,34 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(page.hits[0].last_modified_by)
 
-    async def test_quicknav_maps_known_fields_and_rejects_foreign_link(self) -> None:
+    async def test_quicknav_reads_grouped_page_rows_and_rejects_foreign_link(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/wiki/rest/quicknav/1/search")
-            return httpx.Response(
-                200,
-                json={
-                    "contentNameMatches": [
-                        {
-                            "contentId": "123",
-                            "title": "Quick title",
-                            "spaceKey": "SYNTH",
-                            "href": "https://elsewhere.example.test/pages/123",
-                        },
-                        {"contentId": "not-an-id", "title": "Ignored"},
-                    ]
-                },
-            )
+            self.assertEqual(request.url.params["type"], "page")
+            self.assertNotIn("src", request.url.params)
+            return httpx.Response(200, json={"contentNameMatches": [
+                [
+                    {"id": "123", "name": "Quick title", "className": "content-type-page", "spaceKey": "SYNTH",
+                     "spaceName": "Synthetic", "href": "https://elsewhere.example.test/pages/123"},
+                    {"id": "124", "name": "Local title", "className": "content-type-page",
+                     "href": "/spaces/SYNTH/pages/124/Local+title"},
+                ],
+                [{"id": "125", "name": "notes.pdf", "className": "content-type-attachment-pdf"}],
+                [{"name": "Search for 'Quick'", "className": "search-for"}],
+            ]})
 
         hits = await self.make_api(handler).quicknav_title_matches(
             "Quick title", limit=5, expected_username="sample-user"
         )
-        self.assertEqual(len(hits), 1)
-        self.assertEqual(hits[0].content_id, "123")
-        self.assertEqual(hits[0].space_key, "SYNTH")
+        self.assertEqual([hit.content_id for hit in hits], ["123", "124"])
+        self.assertEqual((hits[0].content_type, hits[0].space_key, hits[0].space_name), ("page", "SYNTH", "Synthetic"))
         self.assertIsNone(hits[0].url)
+        self.assertEqual(hits[1].url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/124/Local+title")
+
+    async def test_quicknav_rejects_ungrouped_rows(self) -> None:
+        api = self.make_api(lambda request: httpx.Response(200, json={"contentNameMatches": [{"id": "1", "name": "x"}]}))
+        with self.assertRaisesRegex(Upstream, "unexpected quick-navigation response"):
+            await api.quicknav_title_matches("x", limit=5, expected_username="sample-user")
 
     async def test_user_name_search_uses_user_cql_and_exact_lookup_key(self) -> None:
         seen: list[httpx.Request] = []
