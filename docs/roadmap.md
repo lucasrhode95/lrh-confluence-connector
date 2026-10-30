@@ -7,36 +7,8 @@ probe CLI help.
 
 ## Implementation
 
-Section 1 is next (set by the user on 2026-10-30); 2–6 follow the priority the user set the same day;
-7 and 8 were decided or found that day and have no rank yet.
-
-### 1. Separate rich-export files
-
-Requested by the user on 2026-10-30. A rich export is one `.html` per page: the header comment, the
-storage body and, by default, a comments section. The same file is the `body_file` input for edits,
-so an agent must remember `parse_scope.comments: false`; `update_page` refuses the comments section.
-Text exports are for reading and stay one file with body and comments.
-
-- **Files:** a rich page export writes the body file (header comment with `Page ID:` and `Version:`,
-  then storage only) and, when comments are in scope, a separate read-only comments file such as
-  `… vN.comments.html`. `update_page` never reads the comments file; it has no header, so passing it
-  as `body_file` is refused.
-- **Header stays in the body file:** the page ID and version travel with the file being edited, so it
-  cannot be paired with the wrong page. Confluence never receives it.
-- **Result contract:** list every file with a role (`body`, `comments`, `attachments`, `report`,
-  `archive`) and a location. The location is a local path today. The roles do not depend on it, so a
-  remote transport could later return MCP resource links instead of paths without changing them.
-- **Layout:** edit-oriented exports (rich, few pages, no attachment bytes) are plain files, so
-  `body_file` points straight at one. Bulk exports stay one ZIP, listed with the `archive` role;
-  decide the threshold or an explicit `archive` option.
-- **Remote transport:** not planned; the connector stays local and single-user. `body_file` is a local
-  path, so a remote `update_page` would need the body in the request or an upload step instead.
-- **Server instructions:** drop "comments off" from the file-edit text once the body file never
-  contains comments.
-- **Live check:** export a disposable page with comments as rich, confirm the body file round-trips
-  unchanged through `update_page` and the comments file holds every comment.
-- **Docs and tests:** synthetic tests for roles, both layouts, a comments file passed as `body_file`
-  and the unchanged text export; update requirements §9 and §10.2, architecture and README.
+Items 2–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found that day and
+have no rank yet.
 
 ### 2. Attachment management
 

@@ -198,19 +198,25 @@ storage technique is shared (§5).
 
 - `export_pages` writes up to 500 pages in full, with no budget, and refuses larger requests before
   starting. It warns that large exports take minutes.
-- One page with no attachment bytes and no failure is a single file; anything else is one `.zip`.
-  `include_attachments: true` always produces a ZIP.
-- Each page is one file at the root named `<Title> (<page id>) v<version>`, with characters Windows
-  forbids replaced and long titles shortened to fit 180 characters and 240 filesystem bytes. No tree
-  folders; each file's header carries the breadcrumb (`Space › Parent › Page`), always, even when
-  `parse_scope.header` is false.
-- `text` files use the unbudgeted `get_pages` text. `rich` files are the unchanged storage body as
-  `.html`, with the header facts and a `Page ID:` line in a leading comment and selected comments in a
-  final section. A rich file exported with comments off is the input for file-based edits (§10.2).
+- Text exports keep the existing layout: one successful page without attachment bytes is a single
+  file; other text exports are one `.zip`. Rich exports of up to 20 pages without attachment bytes
+  are separate local files; larger rich exports and every export with attachment bytes are one ZIP.
+  Failures in a direct rich export produce a separate report file.
+- Each page body file is at the root named `<Title> (<page id>) v<version>`, with characters Windows
+  forbids replaced and long titles shortened to fit 180 characters and 240 filesystem bytes. Its
+  separate comments file uses the `.comments.html` suffix. No tree folders; each body header carries
+  the breadcrumb (`Space › Parent › Page`), always, even when `parse_scope.header` is false.
+- `text` files use the unbudgeted `get_pages` text. Each rich page has an editable body `.html` file
+  containing the unchanged storage body and the header facts with a `Page ID:` line in a leading
+  comment. When comments are in scope, they are written to a separate `<Title> (<page id>)
+  v<version>.comments.html` file. That comments file is read-only and has no body header.
+- The result lists output files with a stable role (`body`, `comments`, `attachments`, `report` or
+  `archive`) and a local path. A ZIP result is listed as an `archive`; its members retain their page
+  names and comments use the `.comments.html` suffix.
 - Attachment bytes are excluded by default; with `include_attachments`, they go in a folder named after
   the page file. `parse_scope.attachments` separately controls the list in the text.
-- `_export-report.txt`, present only when something failed or was skipped, names each item and why.
-  Authentication and account failures abort the export.
+- A report file (or `_export-report.txt` inside a ZIP), present only when something failed or was
+  skipped, names each item and why. Authentication and account failures abort the export.
 - Output goes to the per-user exports folder. File tools are annotated as changing the local
   environment, and their files are owner-only on POSIX.
 
@@ -249,12 +255,12 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 
 - `expected_version` is required with `body`. A stale version is refused before writing, and a
   concurrent edit is refused by Confluence's 409; neither is retried.
-- File-based edits (approved 2026-10-28): export the page with `export_pages` (`format: "rich"`,
-  comments off), edit the file, and pass it as `body_file` with the same `page`. The caller always
+- File-based edits (approved 2026-10-28): export the page with `export_pages` (`format: "rich"`),
+  edit the file listed with the `body` role, and pass it as `body_file` with the same `page`. The caller always
   names the target: the header is editable text, so its page ID must match `page` but never selects
   it. The header's version is the expected version; an explicit `expected_version` must match it.
-  Files without the header, text exports, files from another page and files with the comments section
-  are refused. Line endings are kept as they are in the file. An unedited file
+  Files without the header, text exports, files from another page, files with an inline comments
+  section and the separate comments file are refused. Line endings are kept as they are in the file. An unedited file
   leaves the stored body byte-identical. `create_page` also accepts a plain storage file; a rich
   export's header is dropped there and its storage kept as is. Export files are removed seven days
   after their last change, so an edit that takes longer must export the page again.
