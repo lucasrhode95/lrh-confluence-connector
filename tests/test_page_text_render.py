@@ -118,6 +118,18 @@ class PageTextRenderingChecks(unittest.TestCase):
         self.assertNotIn('style=', text)
         self.assertIn('<a>Broken</a>', text)
 
+    def test_retained_tables_in_list_items_stay_one_budget_block(self) -> None:
+        table = '<table><tr><td colspan="2"><pre>first\n\nsecond</pre></td></tr></table>'
+        for source in (
+            f"<ul><li>{table}</li></ul>",
+            f"<ul><li>Intro{table}</li></ul>",
+            f"<ol><li>One<ul><li>{table}</li></ul></li></ol>",
+        ):
+            blocks = [block.text for block in _render(source).blocks]
+            table_blocks = [text for text in blocks if "<table>" in text]
+            self.assertEqual(len(table_blocks), 1, blocks)
+            self.assertIn("</table>", table_blocks[0])
+
     def test_table_tags_quoted_in_prose_do_not_merge_budget_blocks(self) -> None:
         rendered = _render(
             "<p>Use the <code>&lt;table&gt;</code> tag for grids.</p><p>Close it with &lt;/table&gt;.</p>"

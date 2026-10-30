@@ -26,6 +26,8 @@ _TEXT_MACROS = frozenset({"code", "expand", "status", "toc", "view-file", *_PANE
 _PAGE_PATH = re.compile(r"/spaces/[^/]+/pages/(\d+)(?:/|$)")
 _BRUSH = re.compile(r"brush:\s*([\w+#-]+)")
 _FENCE = re.compile(r"^\s*(?:>\s*)*(`{3,}|~{3,})(.*)$")
+# A retained table starts its line, after any indentation or list/quote markers markdownify adds.
+_TABLE_START = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*<table\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -471,7 +473,7 @@ def _split_blocks(markdown: str) -> list[str]:
     for line in markdown.splitlines():
         line = line.rstrip()
         # Retained tables start their own line; table tags quoted in prose or inline code do not.
-        if fence is None and (table_depth or line.startswith("<table")):
+        if fence is None and (table_depth or _TABLE_START.match(line)):
             for tag in re.finditer(r"</?table\b[^>]*>", line, re.IGNORECASE):
                 table_depth += -1 if tag.group().startswith("</") else 1
         match = _FENCE.match(line) if table_depth == 0 else None
