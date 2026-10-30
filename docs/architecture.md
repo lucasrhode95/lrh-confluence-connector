@@ -201,7 +201,9 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 3. markdownify converts the result, with table handling (merged cells, nested tables or
    code fall back to minimal HTML) and code fences longer than any backtick run in the source code.
    Ordinary tables use markdownify directly. Minimal tables retain links and remain whole budget
-   blocks; other text splits at blank lines outside matching code fences.
+   blocks: the converter emits a placeholder line with a random token and substitutes the table HTML
+   after splitting, so no table markup is recognized in text. Other text splits at blank lines outside
+   matching code fences.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body

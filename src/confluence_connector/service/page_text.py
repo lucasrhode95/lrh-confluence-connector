@@ -10,6 +10,7 @@ source. Generic HTML rendering follows the library; see requirements D3 for the 
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
 
@@ -27,7 +28,6 @@ _PAGE_PATH = re.compile(r"/spaces/[^/]+/pages/(\d+)(?:/|$)")
 _BRUSH = re.compile(r"brush:\s*([\w+#-]+)")
 _FENCE = re.compile(r"^\s*(?:>\s*)*(`{3,}|~{3,})(.*)$")
 # A retained table starts its line, after any indentation or list/quote markers markdownify adds.
-_TABLE_START = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s*)*<table\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,7 @@ def render_page_body(
     references.extend(_prepare_view(soup, macros, page_id, attachments, base_url, storage_files))
     blocks: list[PageTextBlock] = []
     if convert_markdown:
-        blocks = [PageTextBlock(text) for text in _split_blocks(_to_markdown(soup))]
+        blocks = [PageTextBlock(text) for text in _markdown_blocks(soup)]
         for macro in macros:
             if macro.name == "html":
                 blocks.append(PageTextBlock("[Unrendered macro: html]", (_macro_reference(macro, page_id),)))
@@ -405,7 +405,18 @@ def _page_id_from_url(url: str) -> str | None:
 
 
 class _ConfluenceMarkdown(MarkdownConverter):
-    """Use library tables, retaining minimal HTML when Markdown would lose table structure."""
+    """Use library tables, retaining minimal HTML when Markdown would lose table structure.
+
+    A retained table is emitted as a placeholder line and its HTML kept aside, so block splitting
+    never has to recognize table markup in text. The placeholder uses private-use characters and a
+    per-conversion random token, so page text cannot produce it.
+    """
+
+    def __init__(self, **options):
+        super().__init__(**options)
+        self.retained_tables: list[str] = []
+        self.token = "" + uuid.uuid4().hex
+        self.placeholder = re.compile(re.escape(self.token) + r"(\d+)")
 
     def convert_pre(self, el, text, parent_tags):
         rendered = super().convert_pre(el, text, parent_tags)
@@ -422,12 +433,19 @@ class _ConfluenceMarkdown(MarkdownConverter):
     def convert_table(self, el, text, parent_tags):
         cells = el.find_all(["td", "th"])
         if any(cell.find(["table", "pre"]) or cell.get("colspan") or cell.get("rowspan") for cell in cells):
-            return "\n\n" + _minimal_table_html(el) + "\n\n"
+            self.retained_tables.append(_minimal_table_html(el))
+            return f"\n\n{self.token}{len(self.retained_tables) - 1}\n\n"
         return super().convert_table(el, text, parent_tags)
 
 
-def _to_markdown(soup: BeautifulSoup) -> str:
-    return _converter().convert_soup(soup)
+def _markdown_blocks(soup: BeautifulSoup) -> list[str]:
+    """Convert to Markdown-like text, split budget blocks, then restore retained tables whole."""
+    converter = _converter()
+    markdown = converter.convert_soup(soup)
+    return [
+        converter.placeholder.sub(lambda match: converter.retained_tables[int(match.group(1))], block)
+        for block in _split_blocks(markdown)
+    ]
 
 
 def _converter() -> _ConfluenceMarkdown:
@@ -469,21 +487,16 @@ def _split_blocks(markdown: str) -> list[str]:
     blocks: list[str] = []
     current: list[str] = []
     fence: str | None = None
-    table_depth = 0
     for line in markdown.splitlines():
         line = line.rstrip()
-        # Retained tables start their own line; table tags quoted in prose or inline code do not.
-        if fence is None and (table_depth or _TABLE_START.match(line)):
-            for tag in re.finditer(r"</?table\b[^>]*>", line, re.IGNORECASE):
-                table_depth += -1 if tag.group().startswith("</") else 1
-        match = _FENCE.match(line) if table_depth == 0 else None
+        match = _FENCE.match(line)
         if match:
             delimiter, suffix = match.groups()
             if fence is None:
                 fence = delimiter
             elif delimiter[0] == fence[0] and len(delimiter) >= len(fence) and not suffix.strip():
                 fence = None
-        if not line and fence is None and table_depth == 0:
+        if not line and fence is None:
             if current:
                 blocks.append("\n".join(current))
                 current = []
