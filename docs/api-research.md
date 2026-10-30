@@ -295,7 +295,10 @@ repeated create, update, label, parent change, trash and the move action.
 
 - Update needs `version.number` = current + 1; a stale or skipped number is 409 "Version must be
   incremented". Of two parallel writers on one version, one gets 200 and the other 409.
-- `minorEdit: true` was sent but later reported as `false`.
+- `minorEdit: true` was sent but later reported as `false`. It still suppresses the edit email (PAT
+  and editor, 2026-10-30): unchecking the editor's "Notify watchers" sends exactly
+  `version.minorEdit: true` to `PUT /rest/api/content/{id}`. On four watched synthetic pages, edits
+  with it sent no email; edits without it did, about 9 minutes later (batched).
 - A rename keeps the ID; the `/x/` short link follows the page, while the old `/display/{space}/{title}`
   URL is 404.
 - A second attachment with the same filename is 400; a new version goes to

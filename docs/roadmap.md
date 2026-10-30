@@ -127,6 +127,48 @@ name plus every parameter, so any parameter edit counts as one removal and one a
 - **Tests:** synthetic regressions for a parameter edit (changed, not removed), a real removal, a
   macro without an ID, and an ID moved to a different macro name.
 
+### Notify watchers flag
+
+Requested by the user on 2026-10-30, for minor fixes that should not email every watcher. Every
+connector edit notifies watchers today: `update_page` never sends `version.minorEdit`. The editor's
+"Notify watchers" checkbox is exactly that field, and leaving it unset suppresses the edit email
+(research §6.1).
+
+- **Flag:** optional `notify_watchers` on `update_page`, default `true`. `false` sends
+  `version.minorEdit: true`. Decide whether `publish_draft`, `restore_page` and same-space moves take
+  it too.
+- **Result:** echo the flag sent. Confluence reads back `minorEdit: false` either way, so the result
+  cannot confirm it.
+- **Docs and tests:** synthetic tests that the field is sent only for `false`; update requirements
+  §10, architecture and the tool description.
+
+### Email notification settings
+
+Requested by the user on 2026-10-30: read and change the signed-in user's email notification
+settings (profile > Settings > Email), such as autowatch and notifications for one's own actions.
+
+- **Route:** no documented REST route found. The UI reads `users/viewmyemailsettings.action` and
+  saves a form to `users/editmyemailsettings.action`; inspect the form fields and token handling first.
+- **Safety:** the edit form does not always show stored values. On 2026-10-30 it showed "Subscribe to
+  recommended updates" checked while the stored value was off, so saving one change also turned that
+  on. Read stored values from the view page, send the complete set with only the requested changes,
+  then reread and report any setting that differs.
+- **Docs and tests:** synthetic form fixtures; this changes account configuration, so the tool
+  description must say so.
+
+### Watches
+
+Requested by the user on 2026-10-30: list, add and remove the signed-in user's page and space
+watches. Tree watches (profile tab `users/tree-view-management.action`, from an add-on) are out of
+scope.
+
+- **Pages and spaces:** documented `rest/api/user/watch/content/{id}` and
+  `rest/api/user/watch/space/{key}` read, add and remove one watch; the content `GET` worked on
+  2026-10-30. Listing every watch has no documented route; the profile Watches tab is
+  `users/viewnotifications.action`.
+- **Safety:** account check on every change; report the resulting watch state from a reread.
+- **Docs and tests:** synthetic tests for watch, unwatch, an already-set state and listing.
+
 ## Decisions
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
@@ -171,5 +213,9 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **File-based page edits:** once implemented, export a disposable fixture page with macros,
   lozenges, tables and inline code, update it from the unedited file, and confirm the stored body and
   rendered page are unchanged apart from the version.
+- **Notify watchers flag:** once implemented, confirm on disposable fixture pages that `false` sends no
+  edit email and `true` does. Use "Notify on my actions" with the user's approval, and restore it.
+- **Watches and settings:** once implemented, check that watches and email settings round-trip
+  without changing other values.
 - **Client setup:** after registration and a full restart, confirm tool discovery and a small approved
   read in Claude and Codex. Local protocol discovery alone does not verify instance access.
