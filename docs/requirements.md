@@ -143,8 +143,9 @@ storage technique is shared (§5).
   which the connector cannot change. The tool description states the observed rules so agents retry
   with variants, such as Portuguese plurals.
 - **References:** tools accept page IDs and every same-instance page URL form (D7, §10.4). Trees are
-  read in server order with bounded depth; users are found by display name, or by exact username for
-  former users.
+  read in server order with bounded depth, counted as levels below the root for a page or a space
+  alike (1 lists direct children or top-level pages; 1–5, default 3); users are found by display name,
+  or by exact username for former users.
 
 ## 8. Reading and parsing (D3, D4)
 

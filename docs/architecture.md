@@ -184,7 +184,9 @@ once, then fails without a result to persist. The CLI calls it; `config.py` writ
 under a lock.
 
 **[`tree.py`](../src/confluence_connector/service/tree.py)** reads space roots with `depth=root` and
-each page's children in server order, stopping at depth 5 or 1,000 pages with `complete: false`.
+page children in server order, level by level below the root, listing up to six parents' children at
+once. `max_depth` counts levels below the root for pages and spaces alike (at most 5). At 1,000 pages
+shallower levels are complete, the deepest level read is cut short, and `complete` is false.
 
 **[`pages.py`](../src/confluence_connector/service/pages.py) and
 [`page_text.py`](../src/confluence_connector/service/page_text.py)** convert a body in three steps:

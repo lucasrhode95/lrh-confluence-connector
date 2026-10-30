@@ -218,13 +218,15 @@ def build_server(context: AppContext) -> FastMCP:
         ] = None,
         max_depth: Annotated[
             int | None,
-            Field(ge=1, le=5, description="Maximum tree depth, 1 through 5 (default 3)."),
+            Field(ge=1, le=5, description="Levels below the root to include, 1 through 5 (default 3)."),
         ] = None,
     ) -> PageTreeResult:
         """Return ordered child pages from exactly one page reference or space root.
 
-        Page references may be numeric IDs or supported same-instance Confluence URLs. Depth is
-        bounded from 1 through 5, with a default of 3.
+        Page references may be numeric IDs or supported same-instance Confluence URLs. max_depth
+        counts levels below the root, for a page or a space alike: 1 lists direct children (or a
+        space's top-level pages), 1 through 5, default 3. At most 1,000 pages; when the cap is
+        reached, shallower levels are complete and complete is false.
         """
         services = await context.services()
         result = await services.tree.get_page_tree(

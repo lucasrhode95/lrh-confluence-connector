@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import patch
 
-from confluence_connector.domain.errors import InvalidRequest, NotFound
+from confluence_connector.domain.errors import InvalidRequest, NotFound, Upstream
 from confluence_connector.domain.models import (
     PageMetadata,
     PageSummary,
@@ -109,6 +110,63 @@ class PageTreeChecks(unittest.IsolatedAsyncioTestCase):
                 await service.get_page_tree(**kwargs)  # type: ignore[arg-type]
         self.assertEqual(api.child_calls, [])
         self.assertEqual(api.space_root_calls, [])
+
+    async def test_depth_counts_levels_below_the_root_for_pages_and_spaces(self) -> None:
+        children = {"1": [_hit("2", "Child")], "2": [_hit("3", "Grandchild")]}
+        api = _ReadApi(
+            children=children,
+            space_roots={"SYNTH": [_hit("2", "Child")]},
+            metadata={"1": PageMetadata(page_id="1", title="Root", content_type="page", space_key="SYNTH")},
+        )
+        service = PageTree(api, _Links("1"), "sample-user")  # type: ignore[arg-type]
+        page_tree = await service.get_page_tree(page="1", max_depth=1)
+        space_tree = await service.get_page_tree(space_key="SYNTH", max_depth=1)
+        self.assertEqual([node.page_id for node in page_tree.children], ["2"])
+        self.assertEqual(page_tree.children[0].children, [])
+        self.assertEqual([node.page_id for node in space_tree.children], ["2"])
+        deeper = await service.get_page_tree(page="1", max_depth=2)
+        self.assertEqual([node.page_id for node in deeper.children[0].children], ["3"])
+
+    async def test_child_listings_overlap_up_to_the_concurrency_bound(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit(str(n), f"Top {n}") for n in range(1, 11)]})
+        in_flight = peak = 0
+        original = api.list_child_pages
+
+        async def slow_children(page_id: str, *, start: int, expected_username: str):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return await original(page_id, start=start, expected_username=expected_username)
+
+        api.list_child_pages = slow_children  # type: ignore[method-assign]
+        result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
+        self.assertEqual(len(result.children), 10)
+        self.assertEqual(peak, 6)
+
+    async def test_cap_keeps_shallow_levels_and_cuts_the_deepest(self) -> None:
+        api = _ReadApi(
+            space_roots={"SYNTH": [_hit("1", "A"), _hit("2", "B")]},
+            children={"1": [_hit("11", "A1"), _hit("12", "A2")], "2": [_hit("21", "B1")]},
+        )
+        with patch("confluence_connector.service.tree.MAX_TREE_PAGES", 3):
+            result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
+        self.assertEqual([node.page_id for node in result.children], ["1", "2"])
+        self.assertEqual([node.page_id for node in result.children[0].children], ["11"])
+        self.assertFalse(result.complete)
+
+    async def test_one_failed_listing_fails_the_tree(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit("1", "A"), _hit("2", "B")]})
+
+        async def failing(page_id: str, *, start: int, expected_username: str):
+            if page_id == "2":
+                raise Upstream("synthetic child listing failure")
+            return RemoteContentSearchPage(hits=[], start=start, size=0, total_size=0)
+
+        api.list_child_pages = failing  # type: ignore[method-assign]
+        with self.assertRaises(Upstream):
+            await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
 
 
 class PageMetadataChecks(unittest.IsolatedAsyncioTestCase):

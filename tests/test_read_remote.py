@@ -311,7 +311,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
 
         api = self.make_api(handler)
         resolver = PageLinkResolver(settings(), api._transport, api)
-        tree = await PageTree(api, resolver, "sample-user").get_page_tree(page="1", max_depth=2)
+        tree = await PageTree(api, resolver, "sample-user").get_page_tree(page="1", max_depth=1)
         self.assertEqual(starts, [0, 1])
         self.assertEqual([node.page_id for node in tree.children], ["2", "3"])
         self.assertEqual(tree.total_pages, 3)
