@@ -49,6 +49,40 @@ class ScratchCleanupChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(services.structure.move_page.await_args.kwargs, {"parent_id": "10"})
         services.structure.delete_page.assert_awaited_once_with("42")
 
+    async def test_cross_space_parent_outside_the_cross_space_fails_before_any_write(self):
+        pages = SimpleNamespace(root="10", personal_space="HOME")
+        for update in ({"space_key": "ELSEWHERE"}, {"status": "trashed"}, {"content_type": "blogpost"}):
+            with self.subTest(update=update):
+                services = self.services()
+                parent = services.api.get_page_metadata.return_value.model_copy(
+                    update={"page_id": "77", "space_key": "FOREIGN", **update}
+                )
+                services.api.get_page_metadata.return_value = parent
+                with self.assertRaisesRegex(AssertionError, "cross_space_parent_id"):
+                    await run_acceptance._check_cross_space_move(
+                        services, new_fixture("deadbeef"), pages, "FOREIGN", "77"
+                    )
+                services.api.get_page_metadata.assert_awaited_once_with("77", expected_username="sample-user")
+                services.writes.create_page.assert_not_awaited()
+                services.structure.move_page.assert_not_awaited()
+
+    async def test_cross_space_parent_in_the_cross_space_receives_the_move(self):
+        services = self.services()
+        home = services.api.get_page_metadata.return_value
+        parent = home.model_copy(update={"page_id": "77", "space_key": "FOREIGN"})
+        services.api.get_page_metadata.return_value = parent
+        services.structure.move_page.side_effect = [
+            SimpleNamespace(moved=True, space_key="FOREIGN", position_applied=True),
+            SimpleNamespace(moved=True, space_key="HOME", position_applied=True),
+        ]
+        pages = SimpleNamespace(root="10", personal_space="HOME")
+        with patch.object(run_acceptance, "_assert_placement", AsyncMock()), patch.object(
+            run_acceptance._ScratchPages, "__aexit__", AsyncMock(return_value=False)
+        ):
+            await run_acceptance._check_cross_space_move(services, new_fixture("deadbeef"), pages, "FOREIGN", "77")
+        first_move = services.structure.move_page.await_args_list[0]
+        self.assertEqual(first_move.kwargs, {"parent_id": "77", "space_key": None, "position": "last"})
+
     async def test_failed_draft_check_deletes_confirmed_draft(self):
         services = self.services()
         services.api.get_page_metadata.side_effect = [

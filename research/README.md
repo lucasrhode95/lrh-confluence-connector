@@ -28,7 +28,8 @@ and `endpoints.search_pages` its search route; the connector does not need them,
 with their names when they are missing. `acceptance.personal_space_key` and
 `acceptance.cross_space_key` are the only spaces the acceptance scripts may write to. The optional
 `acceptance.cross_space_parent_id` is a page in the cross space that receives the cross-space move;
-without it the page moves to that space's root.
+without it the page moves to that space's root. A move follows its parent's space, so the check reads
+that page first and stops before any write unless it is a current page in the cross space.
 
 ## Authentication probe
 

@@ -731,11 +731,16 @@ async def _check_cross_space_move(
 ) -> None:
     """Move one disposable page out and back only when a distinct visible target is configured.
 
-    With ``cross_space_parent_id`` the page goes under that page in the cross space, not its root.
+    With ``cross_space_parent_id`` the page goes under that page in the cross space, not its root. A
+    move follows its parent's space, so the parent is verified before the first write.
     """
+    if cross_space_key == pages.personal_space:
+        raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
+    if cross_space_parent_id is not None:
+        parent = await services.api.get_page_metadata(cross_space_parent_id, expected_username=services.username)
+        if parent.content_type != "page" or parent.status != "current" or parent.space_key != cross_space_key:
+            raise AssertionError("acceptance.cross_space_parent_id must be a current page in cross_space_key")
     async with _ScratchPages(services, pages.personal_space, pages.root) as scratch:
-        if cross_space_key == pages.personal_space:
-            raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
         created = await scratch.create(
             f"Connector Lab Cross-Space Check [{fixture.run_id}]",
             f"crossspacecheck{fixture.run_id}",
