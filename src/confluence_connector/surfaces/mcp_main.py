@@ -19,6 +19,9 @@ from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.models import (
     AuthStatus,
+    CommentDeletionResult,
+    CommentRecord,
+    CommentWriteResult,
     PageReadResult,
     PageMetadataResult,
     PageTreeResult,
@@ -72,8 +75,11 @@ history and comments. Authenticate through `confluence-connector auth`, never th
 `auth_status` is offline and does not establish token validity.
 To edit a page, export it with `export_pages` (`format: "rich"`), change its body file with exact
 find-and-replace, then pass that body file to `update_page` as `body_file` with the same `page`.
-Comments are in a separate read-only file. Never retype a large body inline or rebuild it from text
-output.
+Never retype a large page body inline or rebuild it from text output. Use `get_comment` to read one
+comment, `add_comment` to create a footer comment or reply, and `update_comment` with its current
+version. `delete_comment` permanently removes a comment and cannot be undone; it requires
+`confirm_permanent_delete=true`. Inline comment anchors are metadata separate from the comment body;
+the connector does not create inline comments because REST creation needs a text selection anchor.
 """
 
 
@@ -574,6 +580,72 @@ def build_server(context: AppContext) -> FastMCP:
             notify_watchers=notify_watchers,
         )
         return result
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_logged
+    async def get_comment(
+        comment_id: Annotated[str, Field(description="Decimal footer or inline comment ID.")],
+    ) -> CommentRecord:
+        """Read one comment with its current version, page, author, parent and inline status."""
+        services = await context.services()
+        return await services.comment_management.get_comment(comment_id)
+
+    @mcp.tool(annotations=WRITE)
+    @_logged
+    async def add_comment(
+        page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
+        body: Annotated[str, Field(max_length=2_000_000, description="Comment body, up to 2 million characters.")],
+        format: Annotated[PageTextFormat | None, Field(description="rich markup (default) or escaped plain text.")] = None,
+        parent_comment_id: Annotated[str | None, Field(description="Optional comment ID to reply to on this page.")] = None,
+        notify_watchers: Annotated[bool, Field(description="Comment creation has no notification-suppression control; the result reports this.")] = True,
+    ) -> CommentWriteResult:
+        """Create a footer comment or reply. Inline comments require a selected text anchor and stay UI-only."""
+        services = await context.services()
+        return await services.comment_management.add_comment(
+            page,
+            body,
+            format=format if format is not None else "rich",
+            parent_comment_id=parent_comment_id,
+            notify_watchers=notify_watchers,
+        )
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def update_comment(
+        comment_id: Annotated[str, Field(description="Decimal footer or inline comment ID.")],
+        body: Annotated[str, Field(max_length=2_000_000, description="Replacement comment body, up to 2 million characters.")],
+        expected_version: Annotated[int, Field(ge=1, description="Current comment version; stale versions are refused.")],
+        format: Annotated[PageTextFormat | None, Field(description="rich markup (default) or escaped plain text.")] = None,
+        page: Annotated[str | None, Field(description="Optional page ID or URL used to verify comment ownership.")] = None,
+        notify_watchers: Annotated[bool, Field(description="Notify watchers; false sends version.minorEdit=true.")] = True,
+    ) -> CommentWriteResult:
+        """Replace a footer or inline comment body after checking its version; the inline anchor is retained."""
+        services = await context.services()
+        return await services.comment_management.update_comment(
+            comment_id,
+            body,
+            expected_version=expected_version,
+            format=format if format is not None else "rich",
+            page=page,
+            notify_watchers=notify_watchers,
+        )
+
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
+    @_logged
+    async def delete_comment(
+        comment_id: Annotated[str, Field(description="Decimal footer or inline comment ID.")],
+        confirm_permanent_delete: Annotated[bool, Field(description="Required confirmation: this permanently deletes the comment and cannot be undone.")] = False,
+        page: Annotated[str | None, Field(description="Optional page ID or URL used to verify comment ownership.")] = None,
+        notify_watchers: Annotated[bool, Field(description="This delete route has no notification-suppression control; the result reports this.")] = True,
+    ) -> CommentDeletionResult:
+        """Permanently delete one footer or inline comment. This cannot be undone; explicit confirmation is required."""
+        services = await context.services()
+        return await services.comment_management.delete_comment(
+            comment_id,
+            confirm_permanent_delete=confirm_permanent_delete,
+            page=page,
+            notify_watchers=notify_watchers,
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     @_logged

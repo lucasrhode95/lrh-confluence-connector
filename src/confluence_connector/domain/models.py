@@ -537,6 +537,38 @@ class PageComment(BaseModel):
     references: list[PageReference] = Field(default_factory=list)
 
 
+class CommentRecord(BaseModel):
+    comment_id: str
+    page_id: str
+    page_url: str | None = None
+    version: int
+    parent_comment_id: str | None = None
+    author: PersonSummary | None = None
+    created_at: str | None = None
+    body: str = ""
+    location: str | None = None
+    resolution: str | None = None
+    selected_text: str | None = None
+
+
+class CommentWriteResult(BaseModel):
+    comment: CommentRecord
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
+
+
+class CommentDeletionResult(BaseModel):
+    comment_id: str
+    page_id: str
+    page_url: str | None = None
+    deleted: bool = True
+    permanent: bool = True
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
+
+
 class RemotePageComment(BaseModel):
     """Mapped comment source fields before its rendered HTML body becomes plain text."""
 
@@ -545,6 +577,9 @@ class RemotePageComment(BaseModel):
     author: PersonSummary | None = None
     created_at: str | None = None
     body_view: str
+    body_storage: str | None = None
+    version: int | None = None
+    container_page_id: str | None = None
     location: str | None = None
     resolution: str | None = None
     selected_text: str | None = None

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1700" viewBox="0 0 1800 1700" role="img" aria-labelledby="title description">
   <title id="title">Confluence connector code map</title>
-  <desc id="description">The Confluence connector's main classes and who calls whom. The command line stores or clears the personal access token, shows status, or starts the MCP server after configuring logging. The MCP server's nineteen tools call account-bound services that AppContext in bootstrap.py builds and rebuilds when the stored username changes. The services validate input and call ConfluenceApi and PageLinkResolver, which send every request through ConfluenceTransport; the transport reads the token from TokenStore through the CredentialSource port. Hover an item for details.</desc>
+  <desc id="description">The Confluence connector's main classes and who calls whom. The command line stores or clears the personal access token, shows status, or starts the MCP server after configuring logging. The MCP server's twenty-seven tools call account-bound services that AppContext in bootstrap.py builds and rebuilds when the stored username changes. The services validate input and call ConfluenceApi and PageLinkResolver, which send every request through ConfluenceTransport; the transport reads the token from TokenStore through the CredentialSource port. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -39,11 +39,11 @@
   <text class="muted" x="98" y="388">exit codes 0, 1, 2 (sign-in required) and 130</text>
 
   <!-- MCP server. -->
-  <rect x="940" y="140" width="800" height="280" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="940" y="140" width="800" height="310" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M940 210 V154 Q940 140 954 140 H1726 Q1740 140 1740 154 V210 Z" fill="#183153"/>
   <text class="card-title" x="960" y="172">MCP SERVER</text>
   <text class="card-subtitle" x="960" y="196"><tspan class="code">surfaces/mcp_main.py</tspan> · <tspan class="code">build_server()</tspan> · FastMCP <tspan class="code">lrh-confluence-connector</tspan></text>
-  <rect x="960" y="226" width="760" height="174" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="960" y="226" width="760" height="210" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <g><title>Offline: configured instance, whether a token is stored, and its account name. → AppContext.auth_status</title><text class="detail" x="976" y="252">• <tspan class="code">auth_status</tspan></text></g>
   <g><title>Current and archived spaces. → SpaceService.list_spaces</title><text class="detail" x="976" y="274">• <tspan class="code">list_spaces</tspan></text></g>
   <g><title>Literal search with structured scope and cursors. → ContentSearch.search_content</title><text class="detail" x="976" y="296">• <tspan class="code">search_content</tspan></text></g>
@@ -63,15 +63,18 @@
   <g><title>Trash with refuse, move_up or trash for children. → PageStructure.delete_page</title><text class="detail" x="1474" y="296">• <tspan class="code">delete_page</tspan></text></g>
   <g><title>Visible trashed pages, one space or all. → PageStructure.list_trash</title><text class="detail" x="1474" y="318">• <tspan class="code">list_trash</tspan></text></g>
   <g><title>Restore, then caller, saved or space-root placement. → PageStructure.restore_page</title><text class="detail" x="1474" y="340">• <tspan class="code">restore_page</tspan></text></g>
-  <text class="muted" x="1474" y="384">annotated per tool</text>
+  <g><title>Read one footer or inline comment and its current version. → CommentManagement.get_comment</title><text class="detail" x="1474" y="362">• <tspan class="code">get_comment</tspan></text></g>
+  <g><title>Create a footer comment or reply; inline creation requires a selected text anchor. → CommentManagement.add_comment</title><text class="detail" x="1474" y="384">• <tspan class="code">add_comment</tspan></text></g>
+  <g><title>Update a comment at an expected version. → CommentManagement.update_comment</title><text class="detail" x="1474" y="406">• <tspan class="code">update_comment</tspan></text></g>
+  <g><title>Permanently delete a comment after explicit confirmation. → CommentManagement.delete_comment</title><text class="detail" x="1474" y="428">• <tspan class="code">delete_comment</tspan></text></g>
 
   <path class="call-flow" d="M460 420 V476"/>
-  <path class="call-flow" d="M1340 420 V476"/>
+  <path class="call-flow" d="M1340 450 V476"/>
 
   <!-- Composition root. -->
   <rect x="60" y="480" width="1680" height="110" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="80" y="518"><tspan class="code">AppContext</tspan><tspan class="detail" dx="12">bootstrap.py</tspan></text>
-  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
+  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, comments, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
 
   <path class="call-flow" d="M900 590 V646"/>
   <text class="flow-label" x="920" y="626"><tspan class="code">await services()</tspan> · domain models in, domain models out</text>
@@ -130,12 +133,19 @@
   <g><title>Account-specific output folders, seven-day cleanup and exclusive file claims.</title><text class="detail" x="1356" y="1010">• <tspan class="code">localfiles.py</tspan>: kept_dir, claim</text></g>
   <g><title>Measures the effective CQL offset with bounded read-only searches; run by the CLI only.</title><text class="detail" x="1356" y="1040">• <tspan class="code">timezone_calibration.py</tspan></text></g>
 
-  <rect x="80" y="1088" width="820" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="80" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="96" y="1120"><tspan class="code">PageWrites</tspan><tspan class="detail" dx="10">writes.py</tspan></text>
-  <g><title>create_page checks for a duplicate title, converts the body and places the page; update_page refuses a stale expected_version, then sends the next version so a concurrent edit gets 409. → ConfluenceApi.create_page, update_page, position_page</title><text class="detail" x="96" y="1154">• <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan>: duplicate title, expected version</text></g>
+  <g><title>create_page checks for a duplicate title, converts the body and places the page; update_page refuses a stale expected_version, then sends the next version so a concurrent edit gets 409. → ConfluenceApi.create_page, update_page, position_page</title><text class="detail" x="96" y="1154">• <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan>: placement, version</text></g>
   <g><title>New-page drafts only. delete_draft is permanent. → ConfluenceApi.list_drafts_page, publish_draft, delete_draft</title><text class="detail" x="96" y="1182">• <tspan class="code">list_drafts</tspan> · <tspan class="code">publish_draft</tspan> · <tspan class="code">delete_draft</tspan></text></g>
-  <g><title>One request per label change, in order, stopping at the first failure; successful changes are reported and never reversed. → ConfluenceApi.add_page_label, remove_page_label</title><text class="detail" x="96" y="1210">• <tspan class="code">set_labels</tspan>: sequential, stops at the first failure</text></g>
-  <g><title>to_storage converts and checks rich input (code macro, expand, void tags; refuses active content); content_loss compares inline-comment anchors, macros and attachment references.</title><text class="detail" x="96" y="1238">• <tspan class="code">write_markup.py</tspan>: <tspan class="code">to_storage</tspan>, <tspan class="code">content_loss</tspan></text></g>
+  <g><title>One request per label change, in order, stopping at the first failure; successful changes are reported and never reversed. → ConfluenceApi.add_page_label, remove_page_label</title><text class="detail" x="96" y="1210">• <tspan class="code">set_labels</tspan>: sequential changes</text></g>
+  <g><title>to_storage converts and checks rich input (code macro, expand, void tags; refuses active content); content_loss compares inline-comment anchors, macros and attachment references.</title><text class="detail" x="96" y="1238">• <tspan class="code">write_markup.py</tspan>: conversion, loss checks</text></g>
+
+  <rect x="500" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="516" y="1120"><tspan class="code">CommentManagement</tspan></text>
+  <g><title>Read one comment with page, author, parent, version and inline metadata. → ConfluenceApi.get_comment</title><text class="detail" x="516" y="1154">• <tspan class="code">get_comment</tspan>: one comment by ID</text></g>
+  <g><title>Create footer comments or replies after checking the page and parent ownership. Inline creation needs a text-selection anchor.</title><text class="detail" x="516" y="1182">• add footer comment or reply</text></g>
+  <g><title>Updates require the current version; deletes are permanent and require explicit confirmation.</title><text class="detail" x="516" y="1210">• version checks · confirmed delete</text></g>
+  <g><title>Optional page references are checked against the comment owner. Each write uses the account-bound transport.</title><text class="detail" x="516" y="1238">• ownership · account-bound writes</text></g>
 
   <rect x="920" y="1088" width="800" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="936" y="1120"><tspan class="code">PageStructure</tspan><tspan class="detail" dx="10">structure.py</tspan></text>
