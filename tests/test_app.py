@@ -267,6 +267,10 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         tools_by_name = {tool.name: tool for tool in tools}
         self.assertIn("pages", tools_by_name["get_pages"].outputSchema["properties"])
         self.assertIn("warnings", tools_by_name["update_page"].outputSchema["properties"])
+        for name in ("create_page", "update_page"):
+            body_schema = tools_by_name[name].model_dump(mode="json")["inputSchema"]["properties"]["body"]
+            self.assertNotIn("maxLength", body_schema)
+            self.assertNotIn("2 million characters", body_schema.get("description", ""))
         for name in (
             "download_attachments",
             "upload_attachments",

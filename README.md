@@ -141,6 +141,8 @@ Write tools accept `notify_watchers` (default `true`). Set it to `false` to supp
 versioned writes; operations without a suppression control report that in their result.
 `update_email_settings` changes the signed-in account's configuration, applies only the provided
 settings and returns a readback of the saved values.
+Page bodies have no connector-imposed character limit. Malformed rich markup is sent unchanged so
+Confluence can report the syntax error and its location.
 
 | MCP tool | Service module | Behavior |
 |---|---|---|

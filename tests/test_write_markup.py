@@ -24,6 +24,11 @@ class WriteMarkupChecks(unittest.TestCase):
             '<p data-x="a">&amp;<br/><img src="image.png"/></p>',
         )
 
+    def test_malformed_rich_markup_is_passed_to_confluence_without_repair(self) -> None:
+        for value in ("<p><strong>unfinished</p>", "<p>first</p><p>second"):
+            with self.subTest(value=value):
+                self.assertEqual(to_storage(value, "rich"), value)
+
     def test_pre_code_becomes_language_code_macro_and_safely_splits_cdata(self) -> None:
         value = "<pre><code class=\"language-python\">print(&lt;tag&gt;) ]]&gt;</code></pre>"
         self.assertEqual(
