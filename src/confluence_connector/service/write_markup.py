@@ -91,26 +91,68 @@ def file_to_storage(body: str, existing_storage: str | None) -> str:
 
 def content_loss(previous: str, replacement: str) -> tuple[bool, list[str]]:
     """Describe removed source anchors, macros and attachments without exposing their content."""
-    old_counts = Counter(_source_items(previous))
-    new_counts = Counter(_source_items(replacement))
+    old_items = _source_items(previous)
+    new_items = _source_items(replacement)
+    old_counts = Counter(old_items)
+    new_counts = Counter(new_items)
     anchor_loss = sum(
         count - new_counts[item]
         for item, count in old_counts.items()
         if item[0] == "inline-comment" and count > new_counts[item]
     )
     macro_losses: Counter[str] = Counter()
+    macro_changes: Counter[tuple[str, str]] = Counter()
     attachment_loss = 0
     for item, count in old_counts.items():
+        if item[0] == "macro":
+            continue
         removed = count - new_counts[item]
         if removed <= 0:
             continue
-        if item[0] == "macro":
-            macro_losses[item[1]] += removed
-        elif item[0] == "attachment":
+        if item[0] == "attachment":
             attachment_loss += removed
+    old_macro_ids = {item[1] for item in old_items if item[0] == "macro" and item[1]}
+    new_macro_ids = {item[1] for item in new_items if item[0] == "macro" and item[1]}
+    shared_macro_ids = old_macro_ids & new_macro_ids
+    old_macros = _macros_by_identity(
+        old_items, shared_ids=shared_macro_ids, other_items=new_items
+    )
+    new_macros = _macros_by_identity(
+        new_items, shared_ids=shared_macro_ids, other_items=old_items
+    )
+    for identity, old_shapes in old_macros.items():
+        new_shapes = new_macros.get(identity, Counter())
+        old_remaining = {
+            shape: count - new_shapes.get(shape, 0)
+            for shape, count in old_shapes.items()
+            if count > new_shapes.get(shape, 0)
+        }
+        new_remaining = {
+            shape: count - old_shapes.get(shape, 0)
+            for shape, count in new_shapes.items()
+            if count > old_shapes.get(shape, 0)
+        }
+        for old_shape, old_count in old_remaining.items():
+            for new_shape, new_count in new_remaining.items():
+                changed = min(old_count, new_count)
+                if changed:
+                    macro_changes[(old_shape[0], new_shape[0])] += changed
+                    old_remaining[old_shape] -= changed
+                    new_remaining[new_shape] -= changed
+                    old_count -= changed
+                    if old_count == 0:
+                        break
+        for shape, count in old_remaining.items():
+            if count > 0:
+                macro_losses[shape[0]] += count
     warnings: list[str] = []
     if anchor_loss:
         warnings.append(f"{anchor_loss} inline-comment anchor(s) would be detached.")
+    for (old_name, new_name), count in sorted(macro_changes.items()):
+        if old_name == new_name:
+            warnings.append(f"{count} {old_name} macro(s) changed.")
+        else:
+            warnings.append(f"{count} {old_name} macro(s) changed to {new_name}.")
     for name, count in sorted(macro_losses.items()):
         warnings.append(f"{count} {name} macro(s) would be removed.")
     if attachment_loss:
@@ -260,13 +302,39 @@ def _source_items(source: str) -> list[tuple[str, ...]]:
             identity = _attachment_identity(node)
             items.append(("attachment", identity))
         elif node.name == "ac:structured-macro":
-            name, identity = _macro_identity(node)
-            items.append(("macro", name, identity))
+            macro_id, fallback_identity, signature = _macro_identity(node)
+            name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
+            items.append(("macro", macro_id or "", fallback_identity, name, signature))
     return items
 
 
-def _macro_identity(node: Tag) -> tuple[str, str]:
+def _macros_by_identity(
+    items: list[tuple[str, ...]],
+    *,
+    shared_ids: set[str],
+    other_items: list[tuple[str, ...]],
+) -> dict[str, Counter[tuple[str, str]]]:
+    """Group macros by IDs shared across both bodies, or by the fallback when one lacks an ID."""
+    grouped: dict[str, Counter[tuple[str, str]]] = {}
+    other_without_id = {
+        item[2] for item in other_items if item[0] == "macro" and not item[1]
+    }
+    for item in items:
+        if item[0] == "macro":
+            _kind, macro_id, fallback, name, signature = item
+            if macro_id in shared_ids:
+                identity = f"macro-id:{macro_id}"
+            elif not macro_id or fallback in other_without_id:
+                identity = f"fallback:{fallback}"
+            else:
+                identity = f"unmatched-id:{macro_id}"
+            grouped.setdefault(identity, Counter())[(name, signature)] += 1
+    return grouped
+
+
+def _macro_identity(node: Tag) -> tuple[str | None, str, str]:
     name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
+    macro_id = node.get("ac:macro-id") or node.get("macro-id")
     parameters: list[tuple[str, str]] = []
     page_references: list[tuple[str, ...]] = []
     for child in node.find_all(True):
@@ -279,12 +347,25 @@ def _macro_identity(node: Tag) -> tuple[str, str]:
             page_references.append(_page_identity(child))
         elif child.name == "ri:attachment":
             page_references.append(("attachment", _attachment_identity(child)))
-    identity = json.dumps(
+    fallback_identity = json.dumps(
         [name, sorted(parameters), sorted(page_references)],
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    return name, identity
+    macro_id = macro_id.strip() if isinstance(macro_id, str) and macro_id.strip() else None
+    return macro_id, fallback_identity, _macro_signature(node)
+
+
+def _macro_signature(node: Tag) -> str:
+    """Serialize a macro's own source body while excluding nested macro implementations."""
+    soup = BeautifulSoup(str(node), "html.parser")
+    root = soup.find("ac:structured-macro")
+    if not isinstance(root, Tag):
+        return str(node)
+    for nested in list(root.find_all("ac:structured-macro")):
+        if nested is not root:
+            nested.decompose()
+    return str(root)
 
 
 def _page_identity(node: Tag) -> tuple[str, ...]:
