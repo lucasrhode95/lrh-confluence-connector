@@ -29,6 +29,7 @@ from confluence_connector.service.timezone_calibration import (
     calibrate_cql_timezone as _calibrate_cql_timezone,
 )
 from confluence_connector.service.tree import PageTree
+from confluence_connector.service.user_settings import EmailNotificationSettingsService
 from confluence_connector.service.users import UserSearch
 from confluence_connector.service.writes import PageWrites
 
@@ -49,6 +50,7 @@ class Services:
     attachments: AttachmentDownloads
     attachment_management: AttachmentManagement
     comment_management: CommentManagement
+    email_settings: EmailNotificationSettingsService
     exports: PageExports
     writes: PageWrites
     structure: PageStructure
@@ -156,6 +158,7 @@ class AppContext:
             attachments=attachments,
             attachment_management=AttachmentManagement(api, links, username),
             comment_management=CommentManagement(api, links, username, str(self.settings["base_url"])),
+            email_settings=EmailNotificationSettingsService(self._transport_or_raise(), username),
             exports=PageExports(api, links, pages, attachments, username),
             writes=PageWrites(api, links, username, str(self.settings["base_url"])),
             structure=PageStructure(api, links, username),
