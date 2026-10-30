@@ -7,10 +7,38 @@ probe CLI help.
 
 ## Implementation
 
-Sections 1–5 follow the priority the user set on 2026-10-30; 6 and 7 were decided or found the same
-day and have no rank yet.
+Section 1 is next (set by the user on 2026-10-30); 2–6 follow the priority the user set the same day;
+7 and 8 were decided or found that day and have no rank yet.
 
-### 1. Attachment management
+### 1. Separate rich-export files
+
+Requested by the user on 2026-10-30. A rich export is one `.html` per page: the header comment, the
+storage body and, by default, a comments section. The same file is the `body_file` input for edits,
+so an agent must remember `parse_scope.comments: false`; `update_page` refuses the comments section.
+Text exports are for reading and stay one file with body and comments.
+
+- **Files:** a rich page export writes the body file (header comment with `Page ID:` and `Version:`,
+  then storage only) and, when comments are in scope, a separate read-only comments file such as
+  `… vN.comments.html`. `update_page` never reads the comments file; it has no header, so passing it
+  as `body_file` is refused.
+- **Header stays in the body file:** the page ID and version travel with the file being edited, so it
+  cannot be paired with the wrong page. Confluence never receives it.
+- **Result contract:** list every file with a role (`body`, `comments`, `attachments`, `report`,
+  `archive`) and a location. The location is a local path today. The roles do not depend on it, so a
+  remote transport could later return MCP resource links instead of paths without changing them.
+- **Layout:** edit-oriented exports (rich, few pages, no attachment bytes) are plain files, so
+  `body_file` points straight at one. Bulk exports stay one ZIP, listed with the `archive` role;
+  decide the threshold or an explicit `archive` option.
+- **Remote transport:** not planned; the connector stays local and single-user. `body_file` is a local
+  path, so a remote `update_page` would need the body in the request or an upload step instead.
+- **Server instructions:** drop "comments off" from the file-edit text once the body file never
+  contains comments.
+- **Live check:** export a disposable page with comments as rich, confirm the body file round-trips
+  unchanged through `update_page` and the comments file holds every comment.
+- **Docs and tests:** synthetic tests for roles, both layouts, a comments file passed as `body_file`
+  and the unchanged text export; update requirements §9 and §10.2, architecture and README.
+
+### 2. Attachment management
 
 Approved by the user on 2026-10-30: full control over attachments. Reads exist (`get_pages` lists
 attachments; `download_attachments` fetches bytes). Writes are missing: on 2026-10-26 a doc refactor
@@ -49,7 +77,7 @@ three.
   uncertain outcomes; remove attachment writes from the requirements §4 non-goals; update
   requirements, architecture and README.
 
-### 2. Notify watchers flag
+### 3. Notify watchers flag
 
 Requested by the user on 2026-10-30, for minor fixes that should not email every watcher. Every
 connector edit notifies watchers today: `update_page` never sends `version.minorEdit`. The editor's
@@ -68,7 +96,7 @@ connector edit notifies watchers today: `update_page` never sends `version.minor
 - **Docs and tests:** synthetic tests that the field is sent only for `false`; update requirements
   §10, architecture and the tool descriptions.
 
-### 3. Comment management
+### 4. Comment management
 
 Approved by the user on 2026-10-28. Reads exist (`get_pages` returns threaded footer and inline
 comments with IDs). Writes are missing: on 2026-10-28 editing the user's own footer comment needed a
@@ -96,7 +124,7 @@ browser call to `PUT /rest/api/content/{id}` (type `comment`, container page, ve
   refusals and uncertain outcomes; remove comment writes from the requirements §4 non-goals; update
   architecture and README.
 
-### 4. Edited macros reported as removed
+### 5. Edited macros reported as removed
 
 On 2026-10-28 an `update_page` that changed eight status lozenges from one title and colour to
 another warned "8 status macro(s) would be removed". Nothing was removed: the stored page had the same
@@ -110,7 +138,7 @@ name plus every parameter, so any parameter edit counts as one removal and one a
 - **Tests:** synthetic regressions for a parameter edit (changed, not removed), a real removal, a
   macro without an ID, and an ID moved to a different macro name.
 
-### 5. Email notification settings
+### 6. Email notification settings
 
 Requested by the user on 2026-10-30: read and change the signed-in user's email notification
 settings (profile > Settings > Email), such as autowatch and notifications for one's own actions. The
@@ -130,7 +158,7 @@ user approved the undocumented UI form for this.
 - **Docs and tests:** synthetic form fixtures; this changes account configuration, so the tool
   description must say so.
 
-### 6. Write input handling
+### 7. Write input handling
 
 Decided by the user on 2026-10-30.
 
@@ -142,7 +170,7 @@ Decided by the user on 2026-10-30.
   the input is not well formed, send it unchanged and return Confluence's 400 with its row and column.
   Update requirements §10.1 and the tool descriptions.
 
-### 7. Macros inside included pages
+### 8. Macros inside included pages
 
 Found live on 2026-10-30 (research §5.1). Text output renders an included page's content, including
 its macro markers, but typed references list only the include itself: macro identities come from the
