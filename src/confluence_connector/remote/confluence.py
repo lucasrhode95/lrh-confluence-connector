@@ -219,7 +219,7 @@ class ConfluenceApi:
                 user = PersonSummary(
                     username=_optional_string(row.get("username")),
                     user_key=_optional_string(row.get("userKey")),
-                    display_name=_optional_string(row.get("title")),
+                    display_name=_search_snippet(row.get("title")),
                     user_type=_optional_string(row.get("type")),
                 )
             if user.username or user.user_key or user.display_name:
@@ -229,6 +229,7 @@ class ConfluenceApi:
             start=page.start,
             size=page.size,
             total_size=page.total_size,
+            has_more=page.has_more,
         )
 
     async def get_user(self, username: str, *, expected_username: str) -> PersonSummary:

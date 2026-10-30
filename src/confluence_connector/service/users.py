@@ -60,7 +60,7 @@ class UserSearch:
         page = await self._api.search_users_page(
             query, start=start, limit=limit, expected_username=self._username
         )
-        more = page.size == limit
+        more = page.size == limit or page.has_more is True
         next_cursor = None
         next_start = page.start + page.size
         if more and next_start <= MAX_OFFSET:

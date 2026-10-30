@@ -166,7 +166,9 @@ settings live in cursors. Compact hits omit excerpts and ancestor arrays. The JS
 checked after shaping; oversized pages are re-requested at the same CQL offset with a smaller server
 limit so the cursor can continue without skipping hits. Title search replaces punctuation with spaces
 and, on an unscoped first page, merges up to 20 quick-navigation matches after the CQL hits, within
-`limit`. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py) converts UTC bounds to CQL
+`limit`; `include_archived` does not gate them, because quick navigation never returns archived pages.
+Search and user search continue after a full page or when Confluence links a next page; an approximate
+total never extends a short page. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py) converts UTC bounds to CQL
 minutes in `cql_timezone` (requirements §7).
 
 `remote/confluence.py` already requests `content.version` to read each hit's modification time. The

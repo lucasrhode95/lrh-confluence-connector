@@ -31,6 +31,15 @@ class UserSearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([user.username for user in second.users], ["sample-user-b"])
         self.assertEqual([call[1] for call in api.user_calls], [0, 1])
 
+    async def test_short_user_page_with_a_next_link_continues(self) -> None:
+        api = _ReadApi(
+            users=[PersonSummary(username="sample-user-a"), PersonSummary(username="sample-user-b")],
+            user_page_size=1,
+            users_have_more=True,
+        )
+        result = await UserSearch(api, "sample-user").find_users("Sample", limit=10)  # type: ignore[arg-type]
+        self.assertIsNotNone(result.next_cursor)
+
     async def test_exact_username_path_supports_former_user(self) -> None:
         api = _ReadApi(exact_user=PersonSummary(username="former-user", user_key="former-user"))
         result = await UserSearch(api, "sample-user").find_users(username="former-user")  # type: ignore[arg-type]
@@ -157,8 +166,12 @@ class _ReadApi:
         metadata: dict[str, PageMetadata] | None = None,
         versions: dict[str, list[PageVersion]] | None = None,
         failures: dict[str, Exception] | None = None,
+        user_page_size: int | None = None,
+        users_have_more: bool | None = None,
     ) -> None:
         self.users = users or []
+        self.user_page_size = user_page_size
+        self.users_have_more = users_have_more
         self.exact_user = exact_user
         self.children = children or {}
         self.space_roots = space_roots or {}
@@ -173,8 +186,11 @@ class _ReadApi:
 
     async def search_users_page(self, name: str, *, start: int, limit: int, expected_username: str):
         self.user_calls.append((name, start, limit))
-        page_users = self.users[start : start + limit]
-        return RemoteUserSearchPage(users=page_users, start=start, size=len(page_users), total_size=len(self.users))
+        page_users = self.users[start : start + (self.user_page_size or limit)]
+        return RemoteUserSearchPage(
+            users=page_users, start=start, size=len(page_users), total_size=len(self.users),
+            has_more=self.users_have_more,
+        )
 
     async def get_user(self, username: str, *, expected_username: str):
         self.exact_user_calls.append(username)

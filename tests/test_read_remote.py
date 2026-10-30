@@ -239,6 +239,15 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen[1].url.params["username"], "former-user")
         self.assertEqual(user.username, "former-user")
 
+    async def test_user_search_fallback_name_is_plain_and_next_link_is_kept(self) -> None:
+        api = self.make_api(lambda request: httpx.Response(200, json={
+            "results": [{"title": "@@@hl@@@Sample@@@endhl@@@ O&#39;Neil", "username": "sample-user", "type": "user"}],
+            "start": 0, "size": 1, "_links": {"next": "/rest/api/search?start=1"},
+        }))
+        page = await api.search_users_page("Sample", start=0, limit=25, expected_username="sample-user")
+        self.assertEqual(page.users[0].display_name, "Sample O'Neil")
+        self.assertTrue(page.has_more)
+
     async def test_space_root_route_and_version_paging_use_actual_size(self) -> None:
         starts: list[int] = []
         routes: list[str] = []
