@@ -304,7 +304,10 @@ class ConfluenceApi:
             params={"expand": "permissions"},
             expected_username=expected_username,
         )
-        if not isinstance(payload.get("permissions"), list):
+        permissions = payload.get("permissions")
+        if isinstance(permissions, dict):
+            permissions = permissions.get("data")  # Data Center 9 wraps the list (research §6.4).
+        if not isinstance(permissions, list):
             raise Upstream("Confluence returned no readable space-permission list.")
         return True
 

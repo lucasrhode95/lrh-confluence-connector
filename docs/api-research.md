@@ -398,7 +398,9 @@ page in another global space, then back to the personal space root. Each long ta
 - `expand=operations` on a page lists the user's operations including restrictions: `delete` is there
   in the personal space and missing in a space where the user cannot delete. On a space it returns an
   empty list. `GET /rest/api/space/{key}?expand=permissions` lists permissions only in a space the user
-  administers and is 500 elsewhere. `/rest/api/content/{id}/permission/check` is 404.
+  administers and is 500 elsewhere. On 9.2.10 the list is wrapped: `permissions` is an object whose
+  `data` holds the entries (PAT, 2026-10-30, personal space). `/rest/api/content/{id}/permission/check`
+  is 404.
 
 Live REST, 2026-10-20: a successful restore response omitted space/version expansions. A fresh current
 read returned them, with version unchanged; placement must use fresh metadata after confirmed restore.

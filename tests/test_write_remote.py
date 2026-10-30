@@ -81,6 +81,16 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         update_body = json.loads(observed[1].content)
         self.assertEqual(update_body["version"], {"number": 2})
 
+    async def test_space_permissions_accept_the_wrapped_data_center_list_only(self) -> None:
+        for permissions, readable in (({"data": [{"operation": {}}], "_links": {}}, True), ({"data": None}, False), ("x", False)):
+            api = self.make_api(lambda request, value=permissions: httpx.Response(200, json={"key": "SYNTH", "permissions": value}))
+            with self.subTest(permissions=permissions):
+                if readable:
+                    self.assertTrue(await api.space_permissions_readable("SYNTH", expected_username="sample-user"))
+                else:
+                    with self.assertRaises(Upstream):
+                        await api.space_permissions_readable("SYNTH", expected_username="sample-user")
+
     async def test_draft_listing_uses_status_scope_and_maps_source_fields(self) -> None:
         observed: list[httpx.Request] = []
 
