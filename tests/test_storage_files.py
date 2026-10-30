@@ -57,6 +57,10 @@ class StorageFileChecks(unittest.TestCase):
             good.write_bytes("﻿<p>café</p>".encode("utf-8"))
             self.assertEqual(read_storage_file(str(good)), "<p>café</p>")
 
+            line_endings = Path(directory, "endings.html")
+            line_endings.write_bytes(b"<pre>a\r\nb\rc\nd</pre>")
+            self.assertEqual(read_storage_file(str(line_endings)), "<pre>a\r\nb\rc\nd</pre>")
+
             latin = Path(directory, "latin.html")
             latin.write_bytes("<p>café</p>".encode("latin-1"))
             with self.assertRaisesRegex(InvalidRequest, "UTF-8"):

@@ -38,7 +38,11 @@ def rich_export_content(header: str, page_id: str, body: str) -> str:
 
 
 def read_storage_file(path: Any) -> str:
-    """Entry point: read one absolute UTF-8 `body_file` path, without a byte-order mark."""
+    """Entry point: read one absolute UTF-8 `body_file` path, without a byte-order mark.
+
+    The bytes are decoded without newline translation, so CR and CRLF line endings reach Confluence
+    exactly as they are in the file.
+    """
     if not isinstance(path, str) or not path.strip():
         raise InvalidRequest("body_file must be an absolute file path.")
     file = Path(path)
@@ -47,7 +51,7 @@ def read_storage_file(path: Any) -> str:
     if not file.is_file():
         raise InvalidRequest("body_file does not name a readable file.")
     try:
-        text = file.read_text(encoding="utf-8")
+        text = file.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         raise InvalidRequest("body_file must be UTF-8 text.") from None
     except OSError as exc:
