@@ -112,10 +112,16 @@ def _validate_settings(settings: object) -> None:
             raise SystemExit("cql_timezone must be a valid IANA name or UTC±HH:MM fixed offset.") from None
     acceptance = settings.get("acceptance")
     if acceptance is not None:
-        if not isinstance(acceptance, dict) or set(acceptance) - {"personal_space_key", "cross_space_key"}:
-            raise SystemExit("acceptance may contain only personal_space_key and cross_space_key.")
+        allowed = {"personal_space_key", "cross_space_key", "cross_space_parent_id"}
+        if not isinstance(acceptance, dict) or set(acceptance) - allowed:
+            raise SystemExit(
+                "acceptance may contain only personal_space_key, cross_space_key and cross_space_parent_id."
+            )
         for key, value in acceptance.items():
-            if value is not None and not is_space_key(value):
+            if key == "cross_space_parent_id":
+                if value is not None and not (isinstance(value, str) and value.isdecimal()):
+                    raise SystemExit("acceptance.cross_space_parent_id must be a numeric page ID string or null.")
+            elif value is not None and not is_space_key(value):
                 raise SystemExit(f"acceptance.{key} must be a valid space key or null.")
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None

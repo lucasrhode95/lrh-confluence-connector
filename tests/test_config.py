@@ -137,6 +137,7 @@ class ConfigurationChecks(unittest.TestCase):
         config["acceptance"] = {
             "personal_space_key": "~sample.user@example.test",
             "cross_space_key": "SYNTH_TARGET",
+            "cross_space_parent_id": "4200",
         }
 
         loaded = self.configure(config)
@@ -147,6 +148,8 @@ class ConfigurationChecks(unittest.TestCase):
         for acceptance in (
             {"personal_space_key": "BAD/KEY"},
             {"cross_space_key": "~"},
+            {"cross_space_parent_id": "not-a-page"},
+            {"cross_space_parent_id": 4200},
             {"unknown": "SYNTH"},
         ):
             with self.subTest(acceptance=acceptance):

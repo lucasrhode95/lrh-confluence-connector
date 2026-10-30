@@ -23,9 +23,12 @@ is in [architecture §6](../docs/architecture.md#6-capability-routing) (capabili
 
 The probe and the acceptance scripts read the same private `confluence_config.json` as the connector,
 through the same loader ([README](../README.md#setup), step 2). No instance, query or credential is
-built in. `query` is the probe's search text, `form_auth_path` the route of the probe's form-login mode,
-and `acceptance.personal_space_key` and `acceptance.cross_space_key` the only spaces the acceptance
-scripts may write to.
+built in. `query` is the probe's search text, `form_auth_path` the route of the probe's form-login mode
+and `endpoints.search_pages` its search route; the connector does not need them, and the probe stops
+with their names when they are missing. `acceptance.personal_space_key` and
+`acceptance.cross_space_key` are the only spaces the acceptance scripts may write to. The optional
+`acceptance.cross_space_parent_id` is a page in the cross space that receives the cross-space move;
+without it the page moves to that space's root.
 
 ## Authentication probe
 
