@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from confluence_connector.domain.errors import (
@@ -33,6 +34,12 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.api = _WriteApi()
         self.service = PageWrites(self.api, _Links(self.api), "sample-user", "https://confluence.example.test/wiki")
+        exports = tempfile.TemporaryDirectory()
+        self.addCleanup(exports.cleanup)
+        self.exports = Path(exports.name)
+        roots = patch("confluence_connector.service.writes.exports_root", return_value=self.exports)
+        roots.start()
+        self.addCleanup(roots.stop)
 
     async def test_create_page_converts_text_and_uses_parent_space(self) -> None:
         result = await self.service.create_page("New page", "<safe>", format="text", parent_id="100")
@@ -204,7 +211,7 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.api.pages["55"] = _page("55", 7, storage)
         path = self._file(rich_export_content("# Synthetic 55\nVersion: 7 of 7", "55", storage))
 
-        result = await self.service.update_page(body_file=path)
+        result = await self.service.update_page("55", body_file=path)
 
         self.assertEqual(self.api.update_calls[0]["storage_body"], storage)
         self.assertEqual(self.api.update_calls[0]["next_version"], 8)
@@ -226,24 +233,24 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(InvalidRequest, "exported from page 55, not page 56"):
             await self.service.update_page("56", body_file=path)
         with self.assertRaisesRegex(InvalidRequest, "exported at version 7, not expected_version 6"):
-            await self.service.update_page(body_file=path, expected_version=6)
+            await self.service.update_page("55", body_file=path, expected_version=6)
         self.assertEqual(self.api.content_calls, [])
         self.assertEqual(self.api.update_calls, [])
 
     async def test_update_file_from_an_older_version_is_a_conflict(self) -> None:
         path = self._file(rich_export_content("# Synthetic 55\nVersion: 6", "55", "<p>new</p>"))
         with self.assertRaises(Conflict):
-            await self.service.update_page(body_file=path)
+            await self.service.update_page("55", body_file=path)
         self.assertEqual(self.api.update_calls, [])
 
     async def test_update_refuses_files_without_a_header_and_ambiguous_body_sources(self) -> None:
         plain = self._file("<p>no header</p>")
         exported = self._file(rich_export_content("# Synthetic 55\nVersion: 7", "55", "<p>new</p>"))
         cases = [
-            ({"body_file": plain}, "header comment"),
+            ({"page": "55", "body_file": plain}, "header comment"),
             ({"page": "55", "body": "<p>x</p>", "expected_version": 7, "body_file": exported}, "exactly one"),
-            ({"body_file": exported, "format": "text"}, "omit format"),
-            ({"page": "55", "body": "<p>x</p>"}, "expected_version are required"),
+            ({"page": "55", "body_file": exported, "format": "text"}, "omit format"),
+            ({"page": "55", "body": "<p>x</p>"}, "expected_version is required"),
         ]
         for kwargs, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(InvalidRequest, message):
@@ -260,11 +267,21 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.create_calls[1]["storage_body"], "<pre>preformatted</pre>")
 
     def _file(self, content: str) -> str:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        path = Path(directory.name, "page.html")
+        path = self.exports / f"page-{len(list(self.exports.iterdir()))}.html"
         path.write_text(content, encoding="utf-8", newline="")
         return str(path)
+
+    async def test_body_file_outside_exports_and_client_roots_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as elsewhere:
+            outside = Path(elsewhere, "secret.html")
+            outside.write_text(rich_export_content("# S\nVersion: 7", "55", "<p>x</p>"), encoding="utf-8")
+            with self.assertRaisesRegex(InvalidRequest, "exports folder or a folder the client shares"):
+                await self.service.update_page("55", body_file=str(outside))
+            with self.assertRaisesRegex(InvalidRequest, "exports folder or a folder the client shares"):
+                await self.service.create_page("Leak", body_file=str(outside), space_key="SYNTH")
+            await self.service.update_page("55", body_file=str(outside), body_file_roots=[Path(elsewhere)])
+        self.assertEqual(len(self.api.update_calls), 1)
+        self.assertEqual(self.api.create_calls, [])
 
     async def test_draft_cursor_reuses_space_and_limit_and_advances_from_actual_size(self) -> None:
         first = await self.service.list_drafts(space_key="SYNTH", limit=2)

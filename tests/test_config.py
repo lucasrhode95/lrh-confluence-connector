@@ -93,6 +93,20 @@ class ConfigurationChecks(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "endpoints must define"):
             self.configure(config)
 
+    def test_probe_only_settings_are_optional_but_validated_when_present(self) -> None:
+        config = settings()
+        for name in ("query", "form_auth_path"):
+            del config[name]
+        del config["endpoints"]["search_pages"]  # type: ignore[index]
+        self.assertNotIn("query", self.configure(config))
+        for name, value in (("query", " "), ("form_auth_path", "/absolute")):
+            with self.subTest(name=name):
+                _read_config.cache_clear()
+                invalid = settings()
+                invalid[name] = value
+                with self.assertRaises(SystemExit):
+                    self.configure(invalid)
+
     def test_cql_timezone_accepts_iana_and_fixed_offsets(self) -> None:
         for timezone_name in ("Atlantic/Reykjavik", "UTC+05:30", "UTC-03:00"):
             with self.subTest(timezone=timezone_name):
@@ -123,6 +137,7 @@ class ConfigurationChecks(unittest.TestCase):
         config["acceptance"] = {
             "personal_space_key": "~sample.user@example.test",
             "cross_space_key": "SYNTH_TARGET",
+            "cross_space_parent_id": "4200",
         }
 
         loaded = self.configure(config)
@@ -133,6 +148,8 @@ class ConfigurationChecks(unittest.TestCase):
         for acceptance in (
             {"personal_space_key": "BAD/KEY"},
             {"cross_space_key": "~"},
+            {"cross_space_parent_id": "not-a-page"},
+            {"cross_space_parent_id": 4200},
             {"unknown": "SYNTH"},
         ):
             with self.subTest(acceptance=acceptance):

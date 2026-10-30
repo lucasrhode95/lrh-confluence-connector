@@ -198,6 +198,7 @@ async def _run_live(
 
     await report.run("fixture", _pass)
     cross_space_key = (settings.get("acceptance") or {}).get("cross_space_key")
+    cross_space_parent_id = (settings.get("acceptance") or {}).get("cross_space_parent_id")
     await report.run(
         "spaces",
         lambda: _check_spaces(services, personal_space, cross_space_key),
@@ -241,7 +242,9 @@ async def _run_live(
         else:
             await report.run(
                 "cross_space_move",
-                lambda: _check_cross_space_move(services, fixture, page_ids, str(cross_space_key)),
+                lambda: _check_cross_space_move(
+                    services, fixture, page_ids, str(cross_space_key), cross_space_parent_id
+                ),
             )
         if report.results[-1].detail == "ScratchCleanupRequired":
             return report  # The operator must inspect partial writes before any further write group.
@@ -724,11 +727,20 @@ async def _check_cross_space_move(
     fixture: AcceptanceFixture,
     pages: _FixturePages,
     cross_space_key: str,
+    cross_space_parent_id: str | None = None,
 ) -> None:
-    """Move one disposable page out and back only when a distinct visible target is configured."""
+    """Move one disposable page out and back only when a distinct visible target is configured.
+
+    With ``cross_space_parent_id`` the page goes under that page in the cross space, not its root. A
+    move follows its parent's space, so the parent is verified before the first write.
+    """
+    if cross_space_key == pages.personal_space:
+        raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
+    if cross_space_parent_id is not None:
+        parent = await services.api.get_page_metadata(cross_space_parent_id, expected_username=services.username)
+        if parent.content_type != "page" or parent.status != "current" or parent.space_key != cross_space_key:
+            raise AssertionError("acceptance.cross_space_parent_id must be a current page in cross_space_key")
     async with _ScratchPages(services, pages.personal_space, pages.root) as scratch:
-        if cross_space_key == pages.personal_space:
-            raise AssertionError("acceptance.cross_space_key must differ from personal_space_key")
         created = await scratch.create(
             f"Connector Lab Cross-Space Check [{fixture.run_id}]",
             f"crossspacecheck{fixture.run_id}",
@@ -736,13 +748,16 @@ async def _check_cross_space_move(
             parent_id=pages.root,
         )
         cross = await services.structure.move_page(
-            created.page_id, space_key=cross_space_key, position="last"
+            created.page_id,
+            parent_id=cross_space_parent_id,
+            space_key=None if cross_space_parent_id else cross_space_key,
+            position="last",
         )
         if cross.position_applied is None:
             raise UncertainWrite("Cross-space move is still uncertain.")
         if not cross.moved or cross.space_key != cross_space_key or cross.position_applied is not True:
             raise AssertionError("cross-space long task did not confirm its target")
-        await _assert_placement(services, created.page_id, cross_space_key, None, "last")
+        await _assert_placement(services, created.page_id, cross_space_key, cross_space_parent_id, "last")
         back = await services.structure.move_page(created.page_id, space_key=pages.personal_space)
         if back.position_applied is None:
             raise UncertainWrite("Cross-space return is still uncertain.")

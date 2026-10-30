@@ -336,6 +336,28 @@ class SearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.more_results_available)
         self.assertIsNone(result.next_cursor)
 
+    async def test_short_page_with_a_next_link_continues(self) -> None:
+        api = _SearchApi(pages=[_hit("1", "one"), _hit("2", "two")], page_size=1, has_more=True)
+        result = await ContentSearch(api, _Links(), "sample-user").search_content(
+            "one", limit=10
+        )  # type: ignore[arg-type]
+        self.assertTrue(result.more_results_available)
+        self.assertIsNotNone(result.next_cursor)
+
+    async def test_quick_navigation_runs_without_archived_scope_and_notes_only_the_first_page(self) -> None:
+        api = _SearchApi(
+            pages=[_hit(str(n), f"Guide {n}") for n in range(1, 5)],
+            quicknav=[_hit("9", "Guide nine", source="quicknav")],
+        )
+        service = ContentSearch(api, _Links(), "sample-user")  # type: ignore[arg-type]
+        first = await service.search_content(
+            "Guide", fields="title", limit=2, scope={"include_archived": False}
+        )
+        self.assertEqual(len(api.quicknav_calls), 1)
+        self.assertTrue(any("quick navigation" in note for note in first.notes))
+        second = await service.search_content(cursor=first.next_cursor)
+        self.assertFalse(any("first page can include" in note for note in second.notes))
+
     async def test_cursor_must_be_the_only_search_argument(self) -> None:
         service = ContentSearch(_SearchApi(), _Links(), "sample-user")  # type: ignore[arg-type]
         with self.assertRaisesRegex(InvalidRequest, "Pass only the cursor"):
@@ -401,12 +423,14 @@ class _SearchApi:
         quicknav_error: bool | Exception = False,
         page_size: int | None = None,
         total_size: int | None = None,
+        has_more: bool | None = None,
     ) -> None:
         self.pages = pages or []
         self.quicknav = quicknav or []
         self.quicknav_error = quicknav_error
         self.page_size = page_size
         self.total_size = total_size
+        self.has_more = has_more
         self.search_calls: list[tuple[str, int, int, bool]] = []
         self.quicknav_calls: list[tuple[str, int]] = []
 
@@ -427,6 +451,7 @@ class _SearchApi:
             start=start,
             size=len(hits),
             total_size=self.total_size,
+            has_more=self.has_more,
         )
 
     async def quicknav_title_matches(

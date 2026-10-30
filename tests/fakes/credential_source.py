@@ -13,3 +13,6 @@ class FakeCredentialSource:
     def load(self) -> StoredCredential | None:
         self.loads += 1
         return self.credential
+
+    def revision(self) -> object | None:
+        return None if self.credential is None else (self.credential.username, self.credential.token)

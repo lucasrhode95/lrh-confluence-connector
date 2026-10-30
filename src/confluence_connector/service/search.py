@@ -390,7 +390,8 @@ def _search_result(
     else:
         hits = full_hits
     notes = list(notes)
-    more = page.size == page_limit
+    # A short page ends the results unless Confluence links a next page; approximate totals never do.
+    more = page.size == page_limit or page.has_more is True
     next_start = page.start + page.size
     next_cursor = None
     if more and next_start <= MAX_OFFSET:
@@ -416,7 +417,7 @@ def _search_result(
         notes.append("The page size was reduced to fit the response budget; continue with next_cursor.")
     if page.total_size is not None:
         notes.append("The total is Confluence's approximate count and can change between pages.")
-    if query is not None and fields == "title" and quicknav_allowed:
+    if query is not None and fields == "title" and quicknav_allowed and start == 0:
         notes.append("The first page can include additional title matches from quick navigation.")
     elif query is not None and fields == "title" and start == 0:
         notes.append("Quick navigation was skipped so its unfiltered results cannot bypass scope filters.")
@@ -591,8 +592,11 @@ def _text_search_term(value: str) -> str:
 
 
 def _quicknav_allowed(scope: SearchScope) -> bool:
-    """Quick navigation has no filters; supplement only an otherwise unscoped title search."""
-    return scope.include_archived and not any(
+    """Quick navigation has no filters; supplement only an otherwise unscoped title search.
+
+    It never returns pages from archived spaces (research §4.3), so `include_archived` does not gate it.
+    """
+    return not any(
         (
             scope.space_keys,
             scope.space_type,

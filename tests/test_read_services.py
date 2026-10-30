@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import patch
 
-from confluence_connector.domain.errors import InvalidRequest, NotFound
+from confluence_connector.domain.errors import InvalidRequest, NotFound, Upstream
 from confluence_connector.domain.models import (
     PageMetadata,
     PageSummary,
@@ -30,6 +31,15 @@ class UserSearchChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.start, 1)
         self.assertEqual([user.username for user in second.users], ["sample-user-b"])
         self.assertEqual([call[1] for call in api.user_calls], [0, 1])
+
+    async def test_short_user_page_with_a_next_link_continues(self) -> None:
+        api = _ReadApi(
+            users=[PersonSummary(username="sample-user-a"), PersonSummary(username="sample-user-b")],
+            user_page_size=1,
+            users_have_more=True,
+        )
+        result = await UserSearch(api, "sample-user").find_users("Sample", limit=10)  # type: ignore[arg-type]
+        self.assertIsNotNone(result.next_cursor)
 
     async def test_exact_username_path_supports_former_user(self) -> None:
         api = _ReadApi(exact_user=PersonSummary(username="former-user", user_key="former-user"))
@@ -101,6 +111,79 @@ class PageTreeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.child_calls, [])
         self.assertEqual(api.space_root_calls, [])
 
+    async def test_depth_counts_levels_below_the_root_for_pages_and_spaces(self) -> None:
+        children = {"1": [_hit("2", "Child")], "2": [_hit("3", "Grandchild")]}
+        api = _ReadApi(
+            children=children,
+            space_roots={"SYNTH": [_hit("2", "Child")]},
+            metadata={"1": PageMetadata(page_id="1", title="Root", content_type="page", space_key="SYNTH")},
+        )
+        service = PageTree(api, _Links("1"), "sample-user")  # type: ignore[arg-type]
+        page_tree = await service.get_page_tree(page="1", max_depth=1)
+        space_tree = await service.get_page_tree(space_key="SYNTH", max_depth=1)
+        self.assertEqual([node.page_id for node in page_tree.children], ["2"])
+        self.assertEqual(page_tree.children[0].children, [])
+        self.assertEqual([node.page_id for node in space_tree.children], ["2"])
+        deeper = await service.get_page_tree(page="1", max_depth=2)
+        self.assertEqual([node.page_id for node in deeper.children[0].children], ["3"])
+
+    async def test_child_listings_overlap_up_to_the_concurrency_bound(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit(str(n), f"Top {n}") for n in range(1, 11)]})
+        in_flight = peak = 0
+        original = api.list_child_pages
+
+        async def slow_children(page_id: str, *, start: int, expected_username: str):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return await original(page_id, start=start, expected_username=expected_username)
+
+        api.list_child_pages = slow_children  # type: ignore[method-assign]
+        result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
+        self.assertEqual(len(result.children), 10)
+        self.assertEqual(peak, 6)
+
+    async def test_cap_keeps_shallow_levels_and_cuts_the_deepest(self) -> None:
+        api = _ReadApi(
+            space_roots={"SYNTH": [_hit("1", "A"), _hit("2", "B")]},
+            children={"1": [_hit("11", "A1"), _hit("12", "A2")], "2": [_hit("21", "B1")]},
+        )
+        with patch("confluence_connector.service.tree.MAX_TREE_PAGES", 3):
+            result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
+        self.assertEqual([node.page_id for node in result.children], ["1", "2"])
+        self.assertEqual([node.page_id for node in result.children[0].children], ["11"])
+        self.assertFalse(result.complete)
+
+    async def test_wide_tree_reads_stop_at_the_remaining_page_budget(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit(str(n), f"Top {n}") for n in range(1, 1000)]})
+        child_calls: list[tuple[str, int]] = []
+
+        async def wide_children(page_id: str, *, start: int, expected_username: str):
+            child_calls.append((page_id, start))
+            hits = [_hit(f"{page_id}0{n}", "Child") for n in range(start, min(start + 500, 2_000))]
+            return RemoteContentSearchPage(hits=hits, start=start, size=len(hits), total_size=2_000)
+
+        api.list_child_pages = wide_children  # type: ignore[method-assign]
+        result = await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=3)  # type: ignore[arg-type]
+        self.assertEqual(result.total_pages, 1_000)
+        self.assertEqual([node.page_id for node in result.children[0].children], ["100"])
+        self.assertFalse(result.complete)
+        self.assertEqual(child_calls, [(str(n), 0) for n in range(1, 7)])
+
+    async def test_one_failed_listing_fails_the_tree(self) -> None:
+        api = _ReadApi(space_roots={"SYNTH": [_hit("1", "A"), _hit("2", "B")]})
+
+        async def failing(page_id: str, *, start: int, expected_username: str):
+            if page_id == "2":
+                raise Upstream("synthetic child listing failure")
+            return RemoteContentSearchPage(hits=[], start=start, size=0, total_size=0)
+
+        api.list_child_pages = failing  # type: ignore[method-assign]
+        with self.assertRaises(Upstream):
+            await PageTree(api, _Links("1"), "sample-user").get_page_tree(space_key="SYNTH", max_depth=2)  # type: ignore[arg-type]
+
 
 class PageMetadataChecks(unittest.IsolatedAsyncioTestCase):
     async def test_metadata_is_ordered_with_per_reference_failures(self) -> None:
@@ -157,8 +240,12 @@ class _ReadApi:
         metadata: dict[str, PageMetadata] | None = None,
         versions: dict[str, list[PageVersion]] | None = None,
         failures: dict[str, Exception] | None = None,
+        user_page_size: int | None = None,
+        users_have_more: bool | None = None,
     ) -> None:
         self.users = users or []
+        self.user_page_size = user_page_size
+        self.users_have_more = users_have_more
         self.exact_user = exact_user
         self.children = children or {}
         self.space_roots = space_roots or {}
@@ -173,8 +260,11 @@ class _ReadApi:
 
     async def search_users_page(self, name: str, *, start: int, limit: int, expected_username: str):
         self.user_calls.append((name, start, limit))
-        page_users = self.users[start : start + limit]
-        return RemoteUserSearchPage(users=page_users, start=start, size=len(page_users), total_size=len(self.users))
+        page_users = self.users[start : start + (self.user_page_size or limit)]
+        return RemoteUserSearchPage(
+            users=page_users, start=start, size=len(page_users), total_size=len(self.users),
+            has_more=self.users_have_more,
+        )
 
     async def get_user(self, username: str, *, expected_username: str):
         self.exact_user_calls.append(username)

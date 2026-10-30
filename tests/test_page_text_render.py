@@ -130,6 +130,11 @@ class PageTextRenderingChecks(unittest.TestCase):
             self.assertEqual(len(table_blocks), 1, blocks)
             self.assertIn("</table>", table_blocks[0])
 
+    def test_paragraph_starting_with_a_literal_table_tag_stays_its_own_block(self) -> None:
+        rendered = _render("<p>&lt;table&gt; is the HTML table tag.</p><p>Second</p><p>Third</p>")
+        self.assertEqual(len(rendered.blocks), 3)
+        self.assertEqual(rendered.blocks[0].text, "<table> is the HTML table tag.")
+
     def test_table_tags_quoted_in_prose_do_not_merge_budget_blocks(self) -> None:
         rendered = _render(
             "<p>Use the <code>&lt;table&gt;</code> tag for grids.</p><p>Close it with &lt;/table&gt;.</p>"

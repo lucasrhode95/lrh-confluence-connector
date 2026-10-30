@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
@@ -64,9 +64,16 @@ class _LongTaskFailure(Conflict):
 class ConfluenceApi:
     """Own configured REST routes and map source JSON before returning typed values."""
 
-    def __init__(self, settings: Mapping[str, Any], transport: ConfluenceTransport) -> None:
+    def __init__(
+        self,
+        settings: Mapping[str, Any],
+        transport: ConfluenceTransport,
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         self._settings = settings
         self._transport = transport
+        self._sleep = sleep
 
     async def current_user(
         self, *, token_override: str | None = None, expected_username: str | None = None
@@ -219,7 +226,7 @@ class ConfluenceApi:
                 user = PersonSummary(
                     username=_optional_string(row.get("username")),
                     user_key=_optional_string(row.get("userKey")),
-                    display_name=_optional_string(row.get("title")),
+                    display_name=_search_snippet(row.get("title")),
                     user_type=_optional_string(row.get("type")),
                 )
             if user.username or user.user_key or user.display_name:
@@ -229,6 +236,7 @@ class ConfluenceApi:
             start=page.start,
             size=page.size,
             total_size=page.total_size,
+            has_more=page.has_more,
         )
 
     async def get_user(self, username: str, *, expected_username: str) -> PersonSummary:
@@ -304,7 +312,10 @@ class ConfluenceApi:
             params={"expand": "permissions"},
             expected_username=expected_username,
         )
-        if not isinstance(payload.get("permissions"), list):
+        permissions = payload.get("permissions")
+        if isinstance(permissions, dict):
+            permissions = permissions.get("data")  # Data Center 9 wraps the list (research §6.4).
+        if not isinstance(permissions, list):
             raise Upstream("Confluence returned no readable space-permission list.")
         return True
 
@@ -665,7 +676,7 @@ class ConfluenceApi:
                     raise _LongTaskFailure("Confluence's asynchronous page move did not complete successfully.")
                 raise UncertainWrite("Confluence returned an unreadable terminal move status; inspect the page.")
             if attempt + 1 < LONGTASK_MAX_POLLS:
-                await asyncio.sleep(LONGTASK_POLL_INTERVAL_SECONDS)
+                await self._sleep(LONGTASK_POLL_INTERVAL_SECONDS)
         raise UncertainWrite("Confluence's page move is still pending; inspect the page before retrying.")
 
     async def list_page_attachments(
@@ -1357,7 +1368,7 @@ def _nonnegative_int(value: Any, *, default: int) -> int:
 
 
 def _page_id(value: Any) -> bool:
-    return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).isdigit()
+    return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).isdecimal()
 
 
 def _attachment_download_route(base_url: str, value: str) -> tuple[str, dict[str, str]]:

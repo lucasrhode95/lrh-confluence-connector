@@ -93,12 +93,13 @@ def write_cql_timezone_if_missing(value: str, path: Path | None = None) -> bool:
 
 def _validate_settings(settings: object) -> None:
     """Validate configuration once at the file boundary before callers trust its values."""
-    required = {"base_url", "query", "form_auth_path", "endpoints"}
-    optional = {"cql_timezone", "acceptance", "search_response_max_chars"}
+    required = {"base_url", "endpoints"}
+    # query and form_auth_path are read only by the research probe, which requires them itself.
+    optional = {"cql_timezone", "acceptance", "search_response_max_chars", "query", "form_auth_path"}
     if not isinstance(settings, dict) or not required <= set(settings) or set(settings) - required - optional:
         raise SystemExit(
-            "Configuration must contain base_url, query, form_auth_path, endpoints and only the optional "
-            "cql_timezone, acceptance and search_response_max_chars settings."
+            "Configuration must contain base_url and endpoints, and only the optional cql_timezone, "
+            "acceptance, search_response_max_chars, query and form_auth_path settings."
         )
     response_max_chars = settings.get("search_response_max_chars", DEFAULT_SEARCH_RESPONSE_MAX_CHARS)
     if type(response_max_chars) is not int or not 1_000 <= response_max_chars <= 1_000_000:
@@ -111,10 +112,16 @@ def _validate_settings(settings: object) -> None:
             raise SystemExit("cql_timezone must be a valid IANA name or UTC±HH:MM fixed offset.") from None
     acceptance = settings.get("acceptance")
     if acceptance is not None:
-        if not isinstance(acceptance, dict) or set(acceptance) - {"personal_space_key", "cross_space_key"}:
-            raise SystemExit("acceptance may contain only personal_space_key and cross_space_key.")
+        allowed = {"personal_space_key", "cross_space_key", "cross_space_parent_id"}
+        if not isinstance(acceptance, dict) or set(acceptance) - allowed:
+            raise SystemExit(
+                "acceptance may contain only personal_space_key, cross_space_key and cross_space_parent_id."
+            )
         for key, value in acceptance.items():
-            if value is not None and not is_space_key(value):
+            if key == "cross_space_parent_id":
+                if value is not None and not (isinstance(value, str) and value.isdecimal()):
+                    raise SystemExit("acceptance.cross_space_parent_id must be a numeric page ID string or null.")
+            elif value is not None and not is_space_key(value):
                 raise SystemExit(f"acceptance.{key} must be a valid space key or null.")
     url = settings["base_url"]
     parsed = urlsplit(url) if isinstance(url, str) else None
@@ -132,27 +139,16 @@ def _validate_settings(settings: object) -> None:
         parsed.port
     except ValueError:
         raise SystemExit("base_url must contain a valid HTTPS port.") from None
-    if not isinstance(settings["query"], str) or not settings["query"].strip():
+    if "query" in settings and (not isinstance(settings["query"], str) or not settings["query"].strip()):
         raise SystemExit("query must contain a nonempty synthetic search term.")
-    auth_path = settings["form_auth_path"]
-    if (
-        not isinstance(auth_path, str)
-        or not auth_path
-        or auth_path.startswith("/")
-        or not re.fullmatch(r"[A-Za-z0-9_./-]+", auth_path)
-        or ".." in auth_path.split("/")
-    ):
+    if "form_auth_path" in settings and not _relative_route(settings["form_auth_path"]):
         raise SystemExit("form_auth_path must be a relative API path without query or traversal.")
     endpoints = settings["endpoints"]
-    if not isinstance(endpoints, dict) or set(endpoints) != {
-        "current_user",
-        "search_pages",
-        "ui_search",
-        "spaces",
-        "content",
-    }:
+    product_endpoints = {"current_user", "ui_search", "spaces", "content"}
+    if not isinstance(endpoints, dict) or not product_endpoints <= set(endpoints) or set(endpoints) - product_endpoints - {"search_pages"}:
         raise SystemExit(
-            "endpoints must define current_user, search_pages, ui_search, spaces and content."
+            "endpoints must define current_user, ui_search, spaces and content, and may add the probe's "
+            "search_pages."
         )
     for key, endpoint in endpoints.items():
         if (
@@ -169,6 +165,16 @@ def _validate_settings(settings: object) -> None:
             raise SystemExit(
                 "Only content may contain one {page_id} placeholder; endpoint queries are not allowed."
             )
+
+
+def _relative_route(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and not value.startswith("/")
+        and re.fullmatch(r"[A-Za-z0-9_./-]+", value) is not None
+        and ".." not in value.split("/")
+    )
 
 
 def _atomic_write_json(path: Path, settings: dict) -> None:

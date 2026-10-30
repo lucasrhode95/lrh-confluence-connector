@@ -93,12 +93,16 @@ Only design rules that the code layout does not make obvious are listed here. To
   destination stream while the transport applies the shared retry, status and account checks. Fixture
   multipart uploads use the same write policy. Decoded response snapshots omit compression headers.
 - **Reads** retry up to 3 attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
-  `Retry-After`, otherwise with short jittered backoff.
+  `Retry-After` up to 30 s (a longer one is reported, not waited for), otherwise with short jittered
+  backoff.
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
   was 429 or 503. A timeout after sending, an incomplete answer or a 504 raises `UncertainWrite` and is
   never resent.
 - **Account checks.** The username is read before and after every exchange; if it changed, the result
-  is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`.
+  is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`. The store's
+  revision (its file's modification time and size, read before decrypting) is compared after the
+  exchange; when it is unchanged the account cannot have changed, so the store is decrypted once per
+  request. The token is never kept in memory between requests.
 - **401** raises `AuthenticationRequired` (run `auth`); **403** raises `PermissionDenied` for that page
   or operation, never a sign-in problem. Error messages carry the status and Confluence's message, never
   URLs or bodies.
@@ -165,7 +169,9 @@ settings live in cursors. Compact hits omit excerpts and ancestor arrays. The JS
 checked after shaping; oversized pages are re-requested at the same CQL offset with a smaller server
 limit so the cursor can continue without skipping hits. Title search replaces punctuation with spaces
 and, on an unscoped first page, merges up to 20 quick-navigation matches after the CQL hits, within
-`limit`. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py) converts UTC bounds to CQL
+`limit`; `include_archived` does not gate them, because quick navigation never returns archived pages.
+Search and user search continue after a full page or when Confluence links a next page; an approximate
+total never extends a short page. [`cql_dates.py`](../src/confluence_connector/service/cql_dates.py) converts UTC bounds to CQL
 minutes in `cql_timezone` (requirements §7).
 
 `remote/confluence.py` already requests `content.version` to read each hit's modification time. The
@@ -181,7 +187,11 @@ once, then fails without a result to persist. The CLI calls it; `config.py` writ
 under a lock.
 
 **[`tree.py`](../src/confluence_connector/service/tree.py)** reads space roots with `depth=root` and
-each page's children in server order, stopping at depth 5 or 1,000 pages with `complete: false`.
+page children in server order, level by level below the root, listing six parents' children at once.
+Each listing stops one result past the pages the 1,000-page cap still allows, and no listing starts
+once the cap is reached, so wide trees cost a bounded number of requests. `max_depth` counts levels
+below the root for pages and spaces alike (at most 5). At the cap shallower levels are complete, the
+deepest level read is cut short, and `complete` is false.
 
 **[`pages.py`](../src/confluence_connector/service/pages.py) and
 [`page_text.py`](../src/confluence_connector/service/page_text.py)** convert a body in three steps:
@@ -198,7 +208,9 @@ each page's children in server order, stopping at depth 5 or 1,000 pages with `c
 3. markdownify converts the result, with table handling (merged cells, nested tables or
    code fall back to minimal HTML) and code fences longer than any backtick run in the source code.
    Ordinary tables use markdownify directly. Minimal tables retain links and remain whole budget
-   blocks; other text splits at blank lines outside matching code fences.
+   blocks: the converter emits a placeholder line with a random token and substitutes the table HTML
+   after splitting, so no table markup is recognized in text. Other text splits at blank lines outside
+   matching code fences.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body

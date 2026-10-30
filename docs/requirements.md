@@ -143,8 +143,9 @@ storage technique is shared (§5).
   which the connector cannot change. The tool description states the observed rules so agents retry
   with variants, such as Portuguese plurals.
 - **References:** tools accept page IDs and every same-instance page URL form (D7, §10.4). Trees are
-  read in server order with bounded depth; users are found by display name, or by exact username for
-  former users.
+  read in server order with bounded depth, counted as levels below the root for a page or a space
+  alike (1 lists direct children or top-level pages; 1–5, default 3); users are found by display name,
+  or by exact username for former users.
 
 ## 8. Reading and parsing (D3, D4)
 
@@ -223,7 +224,9 @@ Writes run only when a write tool is called, and are tested only on disposable s
 - `create_page` and `update_page` take exactly one of `body` and `body_file`, plus `format`. `rich`
   (default) is HTML plus Confluence storage tags, written as storage. `text` is escaped and split into
   paragraphs at blank lines. No wiki markup or Markdown input. `body_file` is an absolute path to a
-  UTF-8 `rich` storage file; a leading byte-order mark is ignored.
+  UTF-8 `rich` storage file; a leading byte-order mark is ignored. The resolved file must be inside the
+  connector's exports folder or a folder the MCP client shares as a root, so a request cannot copy
+  other local files into a page.
 - Before sending `rich`, three conversions fix HTML that AI tools write and Confluence stores badly
   (research §6.5): `<pre><code class="language-X">` and plain `<pre>` become the code macro;
   HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
@@ -231,7 +234,9 @@ Writes run only when a write tool is called, and are tested only on disposable s
   conversions; a `<pre>` already in the stored body (Confluence's preformatted style) is kept, and void
   elements are not rewritten, so unparseable markup returns Confluence's 400.
 - Refused before sending: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `on*` attributes,
-  `javascript:` URLs, the HTML macro, and more than 128 nested elements. Other unparseable markup
+  `javascript:` URLs, the HTML macro, and more than 128 nested elements. Inline `body` markup is
+  currently reparsed with BeautifulSoup, which repairs some malformed input before sending (roadmap §7
+  tracks returning Confluence's error instead); a `body_file` is sent as is, so its unparseable markup
   returns Confluence's 400 with row and column.
 - Write tool descriptions carry a short storage reference (code, panels, expand, status, table of
   contents, tasks, page and attachment links, images, mentions).
@@ -245,11 +250,14 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - `expected_version` is required with `body`. A stale version is refused before writing, and a
   concurrent edit is refused by Confluence's 409; neither is retried.
 - File-based edits (approved 2026-10-28): export the page with `export_pages` (`format: "rich"`,
-  comments off), edit the file, and pass it as `body_file`. The header's page ID and version take the
-  place of `page` and `expected_version`; explicit values must match. Files without the header, text
-  exports, files from another page and files with the comments section are refused. An unedited file
+  comments off), edit the file, and pass it as `body_file` with the same `page`. The caller always
+  names the target: the header is editable text, so its page ID must match `page` but never selects
+  it. The header's version is the expected version; an explicit `expected_version` must match it.
+  Files without the header, text exports, files from another page and files with the comments section
+  are refused. Line endings are kept as they are in the file. An unedited file
   leaves the stored body byte-identical. `create_page` also accepts a plain storage file; a rich
-  export's header is dropped there and its storage kept as is.
+  export's header is dropped there and its storage kept as is. Export files are removed seven days
+  after their last change, so an edit that takes longer must export the page again.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
   so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
   reported as warnings.
@@ -275,8 +283,8 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - Avoid routes and fields known to be deprecated, documented or not. Experimental routes, such as the
   version list, are flagged in the research record.
 - Pages are identified by ID, which survives renames and moves; titles are unique only within a space.
-  Tools resolve every reference to an ID first: `/spaces/KEY/pages/ID/…` and `viewpage.action?pageId=`
-  carry it; `/x/…` short links are followed; `/display/KEY/Title` is looked up by title and fails
+  Tools resolve every reference to an ID first: `/spaces/KEY/pages/ID/…`, `viewpage.action?pageId=`
+  and the editor's `editpage.action?pageId=` carry it; `/x/…` short links are followed; `/display/KEY/Title` is looked up by title and fails
   clearly after a rename. `pageVersion` selects a version; anchors are ignored. Other hosts are
   refused.
 - Placement is one `parent_id` (the space follows from it) or `space_key` alone for the root, plus an
@@ -331,7 +339,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   are not used: they stop at 25 and omit replies.
 - Timeouts: 10 s to connect or wait for a pooled connection, 30 s to read or write.
 - Reads retry up to three attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
-  `Retry-After`. A write is retried only when it provably never applied (not sent, or answered 429 or
+  `Retry-After` up to 30 s; a longer `Retry-After` is reported at once. A write is retried only when it
+  provably never applied (not sent, or answered 429 or
   503); a timeout or any other uncertain outcome is reported for inspection, never resent.
 - Slow operations are described in tool descriptions so agents choose them knowingly; a broad query
   needs no extra confirmation.

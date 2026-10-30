@@ -108,7 +108,7 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
                 wraps=BeautifulSoup,
             ) as parse_html,
             patch(
-                "confluence_connector.service.page_text._to_markdown",
+                "confluence_connector.service.page_text._markdown_blocks",
                 side_effect=AssertionError("rich reads must not convert Markdown"),
             ) as markdown,
         ):

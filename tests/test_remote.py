@@ -16,6 +16,7 @@ from confluence_connector.domain.errors import (
     Conflict,
     InvalidRequest,
     NotFound,
+    Throttled,
     UncertainWrite,
     Upstream,
 )
@@ -328,6 +329,21 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         await transport.get_json("rest/api/user/current")
         sleep.assert_awaited_once_with(2.5)
 
+    async def test_long_retry_after_is_reported_instead_of_waited_for(self) -> None:
+        attempts = 0
+        sleep = AsyncMock()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return httpx.Response(429, headers={"Retry-After": "3600"}, json={})
+
+        _, transport = self.make_client(handler, sleep=sleep)
+        with self.assertRaises(Throttled):
+            await transport.get_json("rest/api/user/current")
+        self.assertEqual(attempts, 1)
+        sleep.assert_not_awaited()
+
     async def test_write_connect_failure_is_safe_to_retry(self) -> None:
         attempts = 0
 
@@ -345,7 +361,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["updated"])
         self.assertEqual(attempts, 2)
 
-    async def test_account_is_read_from_store_for_each_request(self) -> None:
+    async def test_store_is_decrypted_once_per_request_when_unchanged(self) -> None:
         credentials = FakeCredentialSource()
         observed_tokens: list[str] = []
 
@@ -356,7 +372,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         _, transport = self.make_client(handler, credentials=credentials)
         await transport.get_json("rest/api/user/current", expected_username="sample-user")
         self.assertEqual(observed_tokens, ["Bearer synthetic-pat"])
-        self.assertGreaterEqual(credentials.loads, 2)
+        self.assertEqual(credentials.loads, 1)
 
     async def test_account_switch_is_rejected_before_a_request(self) -> None:
         credentials = FakeCredentialSource(username="sample-user-b")
@@ -566,6 +582,7 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
                 "345",
                 3,
             ),
+            ("https://confluence.example.test/wiki/pages/editpage.action?pageId=456", "456", None),
         )
         for reference, expected_id, expected_version in values:
             with self.subTest(reference=reference):

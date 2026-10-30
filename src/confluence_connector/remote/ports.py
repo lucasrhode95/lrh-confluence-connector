@@ -11,3 +11,7 @@ class CredentialSource(Protocol):
     """A source that reads the current account-bound token for each remote request."""
 
     def load(self) -> StoredCredential | None: ...
+
+    def revision(self) -> object | None:
+        """Return a cheap marker that changes whenever the credential is saved or cleared, or None."""
+        ...

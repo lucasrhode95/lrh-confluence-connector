@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,7 +23,7 @@ from confluence_connector.bootstrap import AppContext
 from confluence_connector.domain.errors import AuthenticationRequired
 from confluence_connector.domain.models import AuthStatus
 from confluence_connector.service.timezone_calibration import CqlTimezoneCalibration
-from confluence_connector.surfaces.mcp_main import build_server
+from confluence_connector.surfaces.mcp_main import build_server, root_paths
 from fakes.credential_source import FakeCredentialSource
 from fakes.settings import settings
 
@@ -297,11 +298,19 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         }
         update = schemas["update_page"]
         self.assertIn("body_file", update["properties"])
-        self.assertEqual(update.get("required", []), [])
+        self.assertEqual(update["required"], ["page"])
         self.assertIn("body_file", schemas["create_page"]["properties"])
         self.assertEqual(schemas["create_page"]["required"], ["title"])
         self.assertIn("as `body_file`", server.instructions)
         await context.aclose()
+
+    def test_client_root_uris_map_to_local_paths_and_other_schemes_are_ignored(self) -> None:
+        paths = root_paths([
+            Path("C:/work/repo one").as_uri() if os.name == "nt" else Path("/work/repo one").as_uri(),
+            "https://example.test/not-a-root",
+        ])
+        expected = Path("C:/work/repo one") if os.name == "nt" else Path("/work/repo one")
+        self.assertEqual(paths, [expected])
 
     async def test_read_mcp_tools_round_trip_synthetic_responses(self) -> None:
         cases = (

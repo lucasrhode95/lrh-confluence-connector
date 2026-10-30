@@ -30,6 +30,8 @@ from confluence_connector.domain.errors import (
 from confluence_connector.remote.ports import CredentialSource
 
 MAX_ATTEMPTS = 3
+# A longer Retry-After is reported to the caller instead of holding the tool call open.
+MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_JSON_BYTES = 16 * 1024 * 1024
 READ_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WRITE_RETRY_STATUSES = frozenset({429, 503})
@@ -183,7 +185,7 @@ class ConfluenceTransport:
         method = method.upper()
         is_read = method in {"GET", "HEAD"}
         for attempt in range(MAX_ATTEMPTS):
-            token = self._credential(token_override, expected_username)
+            token, revision = self._credential(token_override, expected_username)
             headers = {"Accept": accept, "Authorization": f"Bearer {token}"}
             if skip_atlassian_token_check:
                 headers["X-Atlassian-Token"] = "no-check"
@@ -195,8 +197,13 @@ class ConfluenceTransport:
                 async with self._limit:
                     response = await self._client.send(request, stream=True)
                     retryable = response.status_code in (READ_RETRY_STATUSES if is_read else WRITE_RETRY_STATUSES)
-                    if retryable and attempt + 1 < MAX_ATTEMPTS:
-                        retry_delay = _retry_delay(response.headers, attempt)
+                    delay = (
+                        _retry_delay(response.headers, attempt)
+                        if retryable and attempt + 1 < MAX_ATTEMPTS
+                        else None
+                    )
+                    if delay is not None and delay <= MAX_RETRY_DELAY_SECONDS:
+                        retry_delay = delay
                     elif response.status_code in REDIRECT_STATUSES and not allow_redirect:
                         await response.aclose()
                         response = None
@@ -260,7 +267,7 @@ class ConfluenceTransport:
                 _raise_status(response.status_code, response.content, method=method)
             if token_override is None:
                 try:
-                    self._assert_account(expected_username)
+                    self._assert_account(expected_username, revision)
                 except (AccountMismatch, AuthenticationRequired):
                     if not is_read:
                         raise UncertainWrite(
@@ -271,18 +278,25 @@ class ConfluenceTransport:
             return _ExchangeResult(response, streamed_bytes)
         raise Upstream("The Confluence request failed after the allowed attempts.")
 
-    def _credential(self, token_override: str | None, expected_username: str | None) -> str:
+    def _credential(
+        self, token_override: str | None, expected_username: str | None
+    ) -> tuple[str, object | None]:
+        """Return the request token and the store revision read before it, for the post-response check."""
         if token_override is not None:
-            return token_override
+            return token_override, None
+        revision = self._credentials.revision()
         credential = self._credentials.load()
         if credential is None:
             raise AuthenticationRequired("No Confluence token is stored.")
         if expected_username and credential.username.casefold() != expected_username.casefold():
             raise AccountMismatch("The active Confluence account changed; retry the request.")
-        return credential.token
+        return credential.token, revision
 
-    def _assert_account(self, expected_username: str | None) -> None:
+    def _assert_account(self, expected_username: str | None, revision: object | None) -> None:
+        """Confirm the account after a response; an unchanged store revision proves it without decrypting."""
         if expected_username is None:
+            return
+        if revision is not None and self._credentials.revision() == revision:
             return
         current = self._credentials.load()
         if current is None:

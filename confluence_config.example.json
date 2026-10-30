@@ -4,7 +4,8 @@
   "search_response_max_chars": 40000,
   "acceptance": {
     "personal_space_key": null,
-    "cross_space_key": null
+    "cross_space_key": null,
+    "cross_space_parent_id": null
   },
   "query": "example probe query",
   "form_auth_path": "rest/tsv/1.0/authenticate",
