@@ -234,7 +234,9 @@ Writes run only when a write tool is called, and are tested only on disposable s
   conversions; a `<pre>` already in the stored body (Confluence's preformatted style) is kept, and void
   elements are not rewritten, so unparseable markup returns Confluence's 400.
 - Refused before sending: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `on*` attributes,
-  `javascript:` URLs, the HTML macro, and more than 128 nested elements. Other unparseable markup
+  `javascript:` URLs, the HTML macro, and more than 128 nested elements. Inline `body` markup is
+  currently reparsed with BeautifulSoup, which repairs some malformed input before sending (roadmap §7
+  tracks returning Confluence's error instead); a `body_file` is sent as is, so its unparseable markup
   returns Confluence's 400 with row and column.
 - Write tool descriptions carry a short storage reference (code, panels, expand, status, table of
   contents, tasks, page and attachment links, images, mentions).
@@ -254,7 +256,8 @@ Outlook connectors; there are no section, append or find-and-replace modes.
   Files without the header, text exports, files from another page and files with the comments section
   are refused. Line endings are kept as they are in the file. An unedited file
   leaves the stored body byte-identical. `create_page` also accepts a plain storage file; a rich
-  export's header is dropped there and its storage kept as is.
+  export's header is dropped there and its storage kept as is. Export files are removed seven days
+  after their last change, so an edit that takes longer must export the page again.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
   so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
   reported as warnings.
