@@ -297,7 +297,7 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         }
         update = schemas["update_page"]
         self.assertIn("body_file", update["properties"])
-        self.assertEqual(update.get("required", []), [])
+        self.assertEqual(update["required"], ["page"])
         self.assertIn("body_file", schemas["create_page"]["properties"])
         self.assertEqual(schemas["create_page"]["required"], ["title"])
         self.assertIn("as `body_file`", server.instructions)

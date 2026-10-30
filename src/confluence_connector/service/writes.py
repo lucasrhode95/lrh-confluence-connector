@@ -131,7 +131,7 @@ class PageWrites:
 
     async def update_page(
         self,
-        page: str | None = None,
+        page: str,
         body: str | None = None,
         *,
         expected_version: int | None = None,
@@ -142,9 +142,11 @@ class PageWrites:
     ) -> PageWriteResult:
         """Replace a whole page body after checking its version and source references.
 
-        With ``body_file``, a rich export file supplies the page and expected version from its header;
-        an explicit ``page`` or ``expected_version`` must agree with it.
+        The caller always names the target ``page``. A ``body_file`` header is editable text, so its
+        page ID only has to agree with ``page``; it never selects the page. The header's version is the
+        expected version unless ``expected_version`` is given, which must then agree with it.
         """
+        reference = page_reference(page)
         _one_body_source(body, body_file, format)
         header = None
         file_body = ""
@@ -160,13 +162,11 @@ class PageWrites:
                     f"body_file was exported at version {header.version}, not expected_version "
                     f"{expected_version}."
                 )
-            reference = page_reference(page) if page is not None else header.page_id
             version = header.version
             storage_body = ""
         else:
-            if page is None or expected_version is None:
-                raise InvalidRequest("page and expected_version are required with body.")
-            reference = page_reference(page)
+            if expected_version is None:
+                raise InvalidRequest("expected_version is required with body.")
             version = _expected_version(expected_version)
             storage_body = _write_body(body, format)
         new_title = _title(title) if title is not None else None

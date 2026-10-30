@@ -204,7 +204,7 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.api.pages["55"] = _page("55", 7, storage)
         path = self._file(rich_export_content("# Synthetic 55\nVersion: 7 of 7", "55", storage))
 
-        result = await self.service.update_page(body_file=path)
+        result = await self.service.update_page("55", body_file=path)
 
         self.assertEqual(self.api.update_calls[0]["storage_body"], storage)
         self.assertEqual(self.api.update_calls[0]["next_version"], 8)
@@ -226,24 +226,24 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(InvalidRequest, "exported from page 55, not page 56"):
             await self.service.update_page("56", body_file=path)
         with self.assertRaisesRegex(InvalidRequest, "exported at version 7, not expected_version 6"):
-            await self.service.update_page(body_file=path, expected_version=6)
+            await self.service.update_page("55", body_file=path, expected_version=6)
         self.assertEqual(self.api.content_calls, [])
         self.assertEqual(self.api.update_calls, [])
 
     async def test_update_file_from_an_older_version_is_a_conflict(self) -> None:
         path = self._file(rich_export_content("# Synthetic 55\nVersion: 6", "55", "<p>new</p>"))
         with self.assertRaises(Conflict):
-            await self.service.update_page(body_file=path)
+            await self.service.update_page("55", body_file=path)
         self.assertEqual(self.api.update_calls, [])
 
     async def test_update_refuses_files_without_a_header_and_ambiguous_body_sources(self) -> None:
         plain = self._file("<p>no header</p>")
         exported = self._file(rich_export_content("# Synthetic 55\nVersion: 7", "55", "<p>new</p>"))
         cases = [
-            ({"body_file": plain}, "header comment"),
+            ({"page": "55", "body_file": plain}, "header comment"),
             ({"page": "55", "body": "<p>x</p>", "expected_version": 7, "body_file": exported}, "exactly one"),
-            ({"body_file": exported, "format": "text"}, "omit format"),
-            ({"page": "55", "body": "<p>x</p>"}, "expected_version are required"),
+            ({"page": "55", "body_file": exported, "format": "text"}, "omit format"),
+            ({"page": "55", "body": "<p>x</p>"}, "expected_version is required"),
         ]
         for kwargs, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(InvalidRequest, message):

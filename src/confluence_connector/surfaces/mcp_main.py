@@ -66,8 +66,8 @@ its target. Recreating a page after a refused move is a separate recovery plan: 
 history and comments. Authenticate through `confluence-connector auth`, never through an MCP tool;
 `auth_status` is offline and does not establish token validity.
 To edit a page, export it with `export_pages` (`format: "rich"`, comments off), change the file with
-exact find-and-replace, then pass it to `update_page` as `body_file`. Never retype a large body inline
-or rebuild it from text output.
+exact find-and-replace, then pass it to `update_page` as `body_file` with the same `page`. Never retype
+a large body inline or rebuild it from text output.
 """
 
 
@@ -419,9 +419,9 @@ def build_server(context: AppContext) -> FastMCP:
     @_logged
     async def update_page(
         page: Annotated[
-            str | None,
-            Field(description="Published page ID or same-instance URL; optional with body_file, which names it."),
-        ] = None,
+            str,
+            Field(description="Published page ID or same-instance URL; a body_file must come from this page."),
+        ],
         body: Annotated[
             str | None,
             Field(
@@ -449,10 +449,11 @@ def build_server(context: AppContext) -> FastMCP:
     ) -> PageWriteResult:
         """Replace a published page's complete body, with an optional title change.
 
-        body_file takes a rich export_pages file (comments off): its header names the page and
-        version, and the storage is sent unchanged apart from new pre/details blocks. Files without
-        the header, text exports and files with the comments section are refused. With body,
-        page and expected_version are required. A stale version is never overwritten. Rich is the default:
+        body_file takes a rich export_pages file (comments off) of the same page: its header's page
+        must match page and its version is the expected version, and the storage is sent unchanged
+        apart from new pre/details blocks. Files without the header, text exports and files with the
+        comments section are refused. With body, expected_version is required. A stale version is
+        never overwritten. Rich is the default:
         provide HTML and Confluence storage tags, not Markdown or wiki markup. The connector converts
         pre/code to the code macro, details/summary to expand, and HTML void tags to self-closing
         tags. It refuses scripts, styles, frames, objects, embeds, event handlers, javascript URLs

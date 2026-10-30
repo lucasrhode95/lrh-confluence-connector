@@ -245,9 +245,11 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - `expected_version` is required with `body`. A stale version is refused before writing, and a
   concurrent edit is refused by Confluence's 409; neither is retried.
 - File-based edits (approved 2026-10-28): export the page with `export_pages` (`format: "rich"`,
-  comments off), edit the file, and pass it as `body_file`. The header's page ID and version take the
-  place of `page` and `expected_version`; explicit values must match. Files without the header, text
-  exports, files from another page and files with the comments section are refused. An unedited file
+  comments off), edit the file, and pass it as `body_file` with the same `page`. The caller always
+  names the target: the header is editable text, so its page ID must match `page` but never selects
+  it. The header's version is the expected version; an explicit `expected_version` must match it.
+  Files without the header, text exports, files from another page and files with the comments section
+  are refused. Line endings are kept as they are in the file. An unedited file
   leaves the stored body byte-identical. `create_page` also accepts a plain storage file; a rich
   export's header is dropped there and its storage kept as is.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
