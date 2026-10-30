@@ -275,7 +275,6 @@ Outlook connectors; there are no section, append or find-and-replace modes.
   This deliberately makes the verified private action required for all same-space moves; failures are
   reported without falling back to a version-creating content update. After page creation, a refused
   positioning action leaves the created page in place and reports that positioning was not applied.
-  Implementation is tracked in the [roadmap](roadmap.md#one-route-for-same-space-moves).
 - Cross-space moves use `movepage.action` with the target space and wait on the documented long-task
   route; ID, version, children, attachments, comments and labels are kept (research §6.3). If
   Confluence refuses one, the tool description tells agents that recreating the page in the target

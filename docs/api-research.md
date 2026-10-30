@@ -76,7 +76,7 @@ punctuation when configuring or resolving personal spaces.
 - **PAT, Live (script), 2026-10-07 and 2026-10-19:** a bearer PAT works for every read and write the
   connector makes, including the private `movepage.action` with `X-Atlassian-Token: no-check` and no
   `atl_token`. A REST `POST` with a bearer needs no `X-Atlassian-Token` header. Expiry and revocation
-  responses are untested ([roadmap](roadmap.md#token-lifecycle)).
+  responses are untested ([roadmap](roadmap.md#live-verification)).
 - **Anonymous, Live, 2026-10-07:** 401 on current user, both searches and spaces.
 - **Single sign-on, Browser, 2026-10-07:** sign-in goes `/login.action` →
   `/plugins/servlet/external-login/{id}` → Microsoft SAML → `POST /plugins/servlet/samlconsumer` →
@@ -166,7 +166,7 @@ Live (browser), 2026-10-19:
 - A binary search of `lastmodified >=` minute cutoffs on one page matched its REST modification
   instant at the same minute. The account's profile zone and the measured offset were both `+00:00`,
   so this cannot tell UTC, profile zone and server zone apart
-  ([roadmap](roadmap.md#cql-time-zone)). REST timestamps are UTC `Z` instants, and
+  ([roadmap](roadmap.md#live-verification)). REST timestamps are UTC `Z` instants, and
   `/rest/api/user/current` exposes no zone.
 - A date-only upper bound includes the whole day (2026-10-20). `now("-Nm")` works at minute precision.
 

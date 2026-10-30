@@ -1,39 +1,11 @@
 # Confluence Connector Roadmap
 
-Open implementation, decisions and live verification. Requirements own behavior; architecture owns
-design; research holds dated integration evidence. Merged work is available in Git/PR history.
-The review fixes below remain until the user reviews this pass. Snapshot **2026-10-21**.
-Offline checks: 290 tests pass (one platform skip), compilation, pyflakes and probe CLI help.
+Pending implementation, decisions and live verification only. Requirements own behavior; architecture
+owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
+Snapshot **2026-10-30**. Offline checks: 304 tests pass (one platform skip), compilation, pyflakes and
+probe CLI help.
 
 ## Implementation
-
-### Review fixes awaiting user review
-
-| Finding | What changed and how it is checked offline |
-|---|---|
-| Compressed JSON decoded twice | Snapshot decoded bytes without compression headers; gzip read/write regressions verify one request each. |
-| Async move returned before completion | Require terminal task completion; a successful-but-18%-complete response now keeps polling. |
-| Exact title lookup missed quotes and archived content | Use the content collection for current/trashed titles; tests verify quoted titles and status-specific routes. Archived-space coverage remains a live check. |
-| Short/empty collection pages hid incomplete results | Share validated envelopes and continuation offsets; attachments/comments page to 5,000 items or fail explicitly. Tests cover short pages and empty continuations. |
-| Content-loss checks ignored target ownership | Include owning page and space in attachment/macro identities; regressions change only the owner/space. |
-| Complex tables lost external links | Preserve passive link destinations and whole table budget blocks. Ordinary tables use markdownify; merged/nested/code tables retain minimal HTML. Golden and focused tests cover output. |
-| Acceptance failures left scratch pages | Track confirmed creations, return foreign-space pages before trashing, and clean on definite failure. Stop for inspection on uncertain writes/account changes; synthetic tests cover both. |
-| PAT could follow a changed instance config | Bind encrypted records to canonical instance URL/context and account. Mismatches and unbound records fail closed; sign-out works without config. Store tests cover switching and URL normalization. |
-| Move acceptance omitted version invariance | Independently compare version before/after same-space moves, alongside parent/order. Synthetic version drift is rejected. |
-
-### Simplifications awaiting user review
-
-- Shared public reference/placement validation, collection envelopes and draft/trash request code.
-  Draft and trash MCP tools retain distinct names; the common route is internal.
-- Removed unreachable restore compensation and its unused partial status, duplicate reference
-  deduplication and test-only storage wrapper, repeated Pydantic defaults and annotation constants.
-- FastMCP serializes typed results and publishes output schemas; tests check schemas and actual tool
-  round trips. General server instructions no longer repeat every tool description.
-- Multipart fixture uploads use the product retry/account policy. Download batches scan the output
-  folder once. Export collisions use source metadata and shared filename bounds.
-- Removed redundant fixture-string/upload-retry checks and replaced a hard-coded export year assertion.
-  Requirements, architecture, research and README were consolidated; the completed UI session itinerary
-  and duplicated per-tool manual were removed.
 
 ### Attachment management
 
@@ -182,24 +154,25 @@ scope.
 
 - **Attachment management:** requirements §4 lists attachment writes as a non-goal. Documentation
   work needs create, version, update, trash and restore, and embedding SVG diagrams needs upload
-  (see Implementation). Decide whether to lift
-  the non-goal for attachments. Comment writes are approved (see Implementation).
+  (see Implementation). Decide whether to lift the non-goal for attachments. Comment writes are
+  approved (see Implementation).
 
 A whole-page cleaned-HTML read format is not implemented; `rich` remains verbatim Confluence storage
 for editing. Teams HTML conversion is tracked in that connector's roadmap.
 
 ## Live verification
 
-No live Confluence requests were made in this implementation pass. Each check needs explicit
-authorization for reads/writes and targets; synthetic pages moved to another space must be returned
-and removed immediately. Use the [research toolkit](../research/README.md#synthetic-acceptance-fixture).
+Each check needs explicit authorization for reads/writes and targets; synthetic pages moved to
+another space must be returned and removed immediately. Use the
+[research toolkit](../research/README.md#synthetic-acceptance-fixture). The live acceptance suite
+passed on 2026-10-29 (14 passed, 3 skipped), as did quoted current/trashed titles, an archived-space
+title lookup and cleanup after a forced failure.
 
-- **Updated acceptance:** verify these fixes on the configured instance, including compressed replies,
-  terminal move state, paged attachments/comments, no-version same-space moves and failure cleanup.
-  Earlier acceptance and targeted date/cross-space checks passed on 2026-10-20; inline-comment marker
-  and loss-refusal checks still need an operator-added inline comment in the disposable fixture.
-- **Archived spaces and titles:** compare current/archived lists with the UI, direct exact-title
-  resolution in archived spaces, and quick-navigation coverage for personal/archived spaces and quotes.
+- **Acceptance gaps:** the inline-comment marker and loss-refusal checks need an operator-added inline
+  comment in the disposable fixture. Asynchronous cross-space moves, including terminal long-task
+  state, need `acceptance.cross_space_key`.
+- **Archived spaces:** compare current/archived space lists with the UI, and check quick-navigation
+  coverage for personal and archived spaces.
 - **CQL timezone:** confirm calibration/conversion on another zone and whether CQL follows profile or
   server zone when they differ; check repeated daylight-saving hours.
 - **Search behavior:** check `siteSearch` ordering and `content.version.by` across supported Data Center
