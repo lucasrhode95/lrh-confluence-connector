@@ -9,12 +9,14 @@ file's page identity; nothing else in the file is interpreted.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from bs4 import BeautifulSoup
 
+from confluence_connector import config
 from confluence_connector.domain.errors import InvalidRequest
 
 COMMENTS_SECTION_CLASS = "confluence-comments"
@@ -37,19 +39,36 @@ def rich_export_content(header: str, page_id: str, body: str) -> str:
     return f"<!--\n{metadata}\n-->\n{body}"
 
 
-def read_storage_file(path: Any) -> str:
-    """Entry point: read one absolute UTF-8 `body_file` path, without a byte-order mark.
+def exports_root() -> Path:
+    """Return the connector's exports folder, where `export_pages` writes rich files for editing."""
+    return config.data_dir() / "exports"
 
-    The bytes are decoded without newline translation, so CR and CRLF line endings reach Confluence
-    exactly as they are in the file.
+
+def read_storage_file(path: Any, allowed_roots: Sequence[Path]) -> str:
+    """Entry point: read one absolute UTF-8 `body_file` path inside an allowed folder.
+
+    The resolved path must lie in one of ``allowed_roots`` (the exports folder and any MCP roots the
+    client shares), so a request cannot read other local files into a page. The bytes are decoded
+    without newline translation, so CR and CRLF reach Confluence exactly as they are in the file; a
+    byte-order mark is dropped.
     """
     if not isinstance(path, str) or not path.strip():
         raise InvalidRequest("body_file must be an absolute file path.")
     file = Path(path)
     if not file.is_absolute():
         raise InvalidRequest("body_file must be an absolute file path.")
-    if not file.is_file():
+    try:
+        resolved = file.resolve(strict=True)
+    except OSError:
+        raise InvalidRequest("body_file does not name a readable file.") from None
+    if not resolved.is_file():
         raise InvalidRequest("body_file does not name a readable file.")
+    if not any(resolved.is_relative_to(root.resolve()) for root in allowed_roots):
+        raise InvalidRequest(
+            "body_file must be inside the connector's exports folder or a folder the client shares as an "
+            "MCP root."
+        )
+    file = resolved
     try:
         text = file.read_bytes().decode("utf-8")
     except UnicodeDecodeError:

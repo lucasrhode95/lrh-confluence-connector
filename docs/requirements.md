@@ -223,7 +223,9 @@ Writes run only when a write tool is called, and are tested only on disposable s
 - `create_page` and `update_page` take exactly one of `body` and `body_file`, plus `format`. `rich`
   (default) is HTML plus Confluence storage tags, written as storage. `text` is escaped and split into
   paragraphs at blank lines. No wiki markup or Markdown input. `body_file` is an absolute path to a
-  UTF-8 `rich` storage file; a leading byte-order mark is ignored.
+  UTF-8 `rich` storage file; a leading byte-order mark is ignored. The resolved file must be inside the
+  connector's exports folder or a folder the MCP client shares as a root, so a request cannot copy
+  other local files into a page.
 - Before sending `rich`, three conversions fix HTML that AI tools write and Confluence stores badly
   (research §6.5): `<pre><code class="language-X">` and plain `<pre>` become the code macro;
   HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A

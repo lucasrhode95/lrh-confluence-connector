@@ -5,11 +5,15 @@ from __future__ import annotations
 import functools
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
+from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.shared.exceptions import McpError
+from mcp.types import ClientCapabilities, RootsCapability, ToolAnnotations
 from pydantic import Field
 from confluence_connector import config
 from confluence_connector.bootstrap import AppContext
@@ -352,6 +356,7 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=WRITE)
     @_logged
     async def create_page(
+        ctx: Context,
         title: Annotated[str, Field(max_length=255, description="New page title, up to 255 characters.")],
         body: Annotated[
             str | None,
@@ -412,12 +417,14 @@ def build_server(context: AppContext) -> FastMCP:
             position=position,
             sibling=sibling,
             body_file=body_file,
+            body_file_roots=await _client_roots(ctx) if body_file is not None else (),
         )
         return result
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def update_page(
+        ctx: Context,
         page: Annotated[
             str,
             Field(description="Published page ID or same-instance URL; a body_file must come from this page."),
@@ -471,6 +478,7 @@ def build_server(context: AppContext) -> FastMCP:
             title=title,
             allow_comment_loss=allow_comment_loss,
             body_file=body_file,
+            body_file_roots=await _client_roots(ctx) if body_file is not None else (),
         )
         return result
 
@@ -672,6 +680,31 @@ def build_server(context: AppContext) -> FastMCP:
 def serve_mcp(*, context: AppContext | None = None) -> None:
     """Run the stdio server; stdout is reserved for protocol traffic."""
     build_server(context or AppContext()).run("stdio")
+
+
+async def _client_roots(ctx: Context) -> list[Path]:
+    """Return the local folders the client shares as MCP roots; none when it does not support roots."""
+    session = ctx.session
+    if not session.check_client_capability(ClientCapabilities(roots=RootsCapability())):
+        return []
+    try:
+        result = await session.list_roots()
+    except McpError as exc:
+        log.info("MCP roots could not be listed (%s)", type(exc).__name__)
+        return []
+    return root_paths(str(root.uri) for root in result.roots)
+
+
+def root_paths(uris: Iterable[str]) -> list[Path]:
+    """Map `file:` root URIs to local paths, ignoring any other scheme."""
+    paths: list[Path] = []
+    for uri in uris:
+        parts = urlsplit(uri)
+        if parts.scheme.casefold() != "file":
+            continue
+        location = f"//{parts.netloc}{parts.path}" if parts.netloc not in ("", "localhost") else parts.path
+        paths.append(Path(url2pathname(location)))
+    return paths
 
 
 def _logged[**P, R](function: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:

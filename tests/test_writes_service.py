@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from confluence_connector.domain.errors import (
@@ -33,6 +34,12 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.api = _WriteApi()
         self.service = PageWrites(self.api, _Links(self.api), "sample-user", "https://confluence.example.test/wiki")
+        exports = tempfile.TemporaryDirectory()
+        self.addCleanup(exports.cleanup)
+        self.exports = Path(exports.name)
+        roots = patch("confluence_connector.service.writes.exports_root", return_value=self.exports)
+        roots.start()
+        self.addCleanup(roots.stop)
 
     async def test_create_page_converts_text_and_uses_parent_space(self) -> None:
         result = await self.service.create_page("New page", "<safe>", format="text", parent_id="100")
@@ -260,11 +267,21 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.create_calls[1]["storage_body"], "<pre>preformatted</pre>")
 
     def _file(self, content: str) -> str:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        path = Path(directory.name, "page.html")
+        path = self.exports / f"page-{len(list(self.exports.iterdir()))}.html"
         path.write_text(content, encoding="utf-8", newline="")
         return str(path)
+
+    async def test_body_file_outside_exports_and_client_roots_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as elsewhere:
+            outside = Path(elsewhere, "secret.html")
+            outside.write_text(rich_export_content("# S\nVersion: 7", "55", "<p>x</p>"), encoding="utf-8")
+            with self.assertRaisesRegex(InvalidRequest, "exports folder or a folder the client shares"):
+                await self.service.update_page("55", body_file=str(outside))
+            with self.assertRaisesRegex(InvalidRequest, "exports folder or a folder the client shares"):
+                await self.service.create_page("Leak", body_file=str(outside), space_key="SYNTH")
+            await self.service.update_page("55", body_file=str(outside), body_file_roots=[Path(elsewhere)])
+        self.assertEqual(len(self.api.update_calls), 1)
+        self.assertEqual(self.api.create_calls, [])
 
     async def test_draft_cursor_reuses_space_and_limit_and_advances_from_actual_size(self) -> None:
         first = await self.service.list_drafts(space_key="SYNTH", limit=2)

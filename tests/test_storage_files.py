@@ -55,24 +55,34 @@ class StorageFileChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             good = Path(directory, "page.html")
             good.write_bytes("﻿<p>café</p>".encode("utf-8"))
-            self.assertEqual(read_storage_file(str(good)), "<p>café</p>")
+            self.assertEqual(read_storage_file(str(good), [Path(directory)]), "<p>café</p>")
 
             line_endings = Path(directory, "endings.html")
             line_endings.write_bytes(b"<pre>a\r\nb\rc\nd</pre>")
-            self.assertEqual(read_storage_file(str(line_endings)), "<pre>a\r\nb\rc\nd</pre>")
+            self.assertEqual(read_storage_file(str(line_endings), [Path(directory)]), "<pre>a\r\nb\rc\nd</pre>")
 
             latin = Path(directory, "latin.html")
             latin.write_bytes("<p>café</p>".encode("latin-1"))
             with self.assertRaisesRegex(InvalidRequest, "UTF-8"):
-                read_storage_file(str(latin))
+                read_storage_file(str(latin), [Path(directory)])
             with self.assertRaisesRegex(InvalidRequest, "readable file"):
-                read_storage_file(str(Path(directory, "missing.html")))
+                read_storage_file(str(Path(directory, "missing.html")), [Path(directory)])
             with self.assertRaisesRegex(InvalidRequest, "readable file"):
-                read_storage_file(directory)
+                read_storage_file(directory, [Path(directory)])
         with self.assertRaisesRegex(InvalidRequest, "absolute"):
-            read_storage_file("relative/page.html")
+            read_storage_file("relative/page.html", [])
         with self.assertRaisesRegex(InvalidRequest, "absolute"):
-            read_storage_file(None)
+            read_storage_file(None, [])
+
+    def test_read_refuses_files_outside_the_allowed_roots_including_through_dot_dot(self) -> None:
+        with tempfile.TemporaryDirectory() as allowed, tempfile.TemporaryDirectory() as other:
+            outside = Path(other, "page.html")
+            outside.write_text("<p>x</p>", encoding="utf-8")
+            escaped = Path(allowed, "..", Path(other).name, "page.html")
+            for path in (outside, escaped):
+                with self.subTest(path=str(path)), self.assertRaisesRegex(InvalidRequest, "MCP root"):
+                    read_storage_file(str(path), [Path(allowed)])
+            self.assertEqual(read_storage_file(str(outside), [Path(other)]), "<p>x</p>")
 
 
 if __name__ == "__main__":

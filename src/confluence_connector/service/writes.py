@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urljoin
 
@@ -31,7 +33,7 @@ from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceAp
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
 from confluence_connector.service.placement import PagePlacementResolver
-from confluence_connector.service.storage_files import read_storage_file, split_export_header
+from confluence_connector.service.storage_files import exports_root, read_storage_file, split_export_header
 from confluence_connector.service.write_markup import content_loss, file_to_storage, to_storage
 
 MAX_TITLE_CHARS = 255
@@ -70,6 +72,7 @@ class PageWrites:
         position: str | None = None,
         sibling: str | None = None,
         body_file: str | None = None,
+        body_file_roots: Sequence[Path] = (),
     ) -> PageWriteResult:
         """Create a current page or new-page draft under one validated placement.
 
@@ -79,7 +82,7 @@ class PageWrites:
         clean_title = _title(title)
         _one_body_source(body, body_file, format)
         if body_file is not None:
-            header, file_body = split_export_header(read_storage_file(body_file))
+            header, file_body = split_export_header(_read_body_file(body_file, body_file_roots))
             storage_body = file_to_storage(file_body, file_body if header is not None else None)
         else:
             storage_body = _write_body(body, format)
@@ -139,6 +142,7 @@ class PageWrites:
         title: str | None = None,
         allow_comment_loss: bool = False,
         body_file: str | None = None,
+        body_file_roots: Sequence[Path] = (),
     ) -> PageWriteResult:
         """Replace a whole page body after checking its version and source references.
 
@@ -151,7 +155,7 @@ class PageWrites:
         header = None
         file_body = ""
         if body_file is not None:
-            header, file_body = split_export_header(read_storage_file(body_file))
+            header, file_body = split_export_header(_read_body_file(body_file, body_file_roots))
             if header is None:
                 raise InvalidRequest(
                     "body_file must be a rich export_pages file with its header comment; text exports "
@@ -412,6 +416,11 @@ def _title(value: Any) -> str:
     if not result or len(result) > MAX_TITLE_CHARS or any(not char.isprintable() for char in result):
         raise InvalidRequest(f"title must contain 1 to {MAX_TITLE_CHARS} printable characters.")
     return result
+
+
+def _read_body_file(path: Any, client_roots: Sequence[Path]) -> str:
+    """Read a body file from the exports folder or one of the client's shared MCP roots."""
+    return read_storage_file(path, [exports_root(), *client_roots])
 
 
 def _one_body_source(body: Any, body_file: Any, page_format: Any) -> None:
