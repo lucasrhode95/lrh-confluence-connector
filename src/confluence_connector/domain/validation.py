@@ -9,6 +9,9 @@ from confluence_connector.domain.errors import InvalidRequest
 from confluence_connector.domain.models import PageMetadata
 
 MAX_PAGE_REFERENCE_LENGTH = 2_048
+NOTIFICATION_SUPPRESSION_UNAVAILABLE = (
+    "Confluence does not expose notification suppression for this operation; its default behavior applies."
+)
 _SPACE_KEY = re.compile(r"^(?:[A-Za-z0-9_-]{1,255}|~[A-Za-z0-9_.@-]{1,254})$")
 
 
@@ -24,6 +27,13 @@ def page_reference(value: Any, *, field: str = "page") -> str:
             raise InvalidRequest("Pass a non-empty page ID or supported same-instance page URL.")
         raise InvalidRequest(f"{field} must be a page ID or supported page URL.")
     return value.strip()
+
+
+def validate_notify_watchers(value: Any) -> bool:
+    """Validate the public write preference before it reaches a service operation."""
+    if not isinstance(value, bool):
+        raise InvalidRequest("notify_watchers must be a boolean.")
+    return value
 
 
 def page_references(value: Any, *, maximum: int, field: str = "pages") -> list[str]:

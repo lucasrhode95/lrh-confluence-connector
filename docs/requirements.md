@@ -349,6 +349,17 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 - Inline images, including SVG, use an `ac:image` / `ri:attachment` reference. The `view-file` macro
   shows SVG as a file icon, and raw inline SVG is stripped by Confluence.
 
+### 10.7 Watcher notifications
+
+- Every write tool accepts `notify_watchers`, default `true`. For writes that create a content version,
+  `false` sends `minorEdit: true`; `true` omits the field and keeps Confluence's default behavior.
+  This applies to page edits, draft publishing, page restore and attachment versions, including
+  multipart uploads. The result echoes the requested value; Confluence reads `minorEdit` back as
+  `false`, so it cannot confirm which value was sent.
+- Page creation, draft deletion, label changes, moves and trash routes have no verified suppression
+  field. Their tool descriptions and results report that limitation and the server's default behavior.
+  A page restore followed by a placement move reports the same limitation when the move is applied.
+
 ## 11. Reliability
 
 - Report inaccessible pages, unsupported elements, failed downloads and partial coverage explicitly.

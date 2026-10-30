@@ -335,6 +335,9 @@ class AttachmentMutationResult(BaseModel):
     attachments: list[AttachmentChange] = Field(default_factory=list)
     failures: list[AttachmentChangeFailure] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = True
+    notification_note: str | None = None
 
 
 class SavedAttachment(BaseModel):
@@ -383,6 +386,9 @@ class PageWriteResult(BaseModel):
     version: int | None = None
     url: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = True
+    notification_note: str | None = None
 
 
 class PagePlacement(BaseModel):
@@ -404,6 +410,9 @@ class PageMoveResult(BaseModel):
     moved: bool
     position_applied: bool | None = None
     warnings: list[str] = Field(default_factory=list)
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
 
 
 class PageStructureOutcome(BaseModel):
@@ -424,6 +433,9 @@ class PageDeleteResult(BaseModel):
     pages: list[PageStructureOutcome]
     warnings: list[str] = Field(default_factory=list)
     failure: str | None = None
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
 
 
 class TrashPageSummary(BaseModel):
@@ -453,6 +465,9 @@ class PageRestoreResult(BaseModel):
     placement_source: Literal["caller", "saved_property", "space_root"]
     placement_status: Literal["applied", "root", "unknown"]
     warnings: list[str] = Field(default_factory=list)
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = True
+    notification_note: str | None = None
 
 
 class DraftSummary(BaseModel):
@@ -479,6 +494,9 @@ class DraftDeletionResult(BaseModel):
     title: str
     deleted: bool
     permanent: bool = True
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
 
 
 class RemoteDraftPage(PageEnvelope):
@@ -502,6 +520,9 @@ class LabelChangeResult(BaseModel):
     unchanged: list[str] = Field(default_factory=list)
     failures: list[LabelChangeFailure] = Field(default_factory=list)
     not_attempted: list[LabelChangeFailure] = Field(default_factory=list)
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = False
+    notification_note: str | None = None
 
 
 class PageComment(BaseModel):

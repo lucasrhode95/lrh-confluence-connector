@@ -18,7 +18,11 @@ from confluence_connector.domain.models import (
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service.errors import raise_account_error
-from confluence_connector.domain.validation import page_references
+from confluence_connector.domain.validation import (
+    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    page_references,
+    validate_notify_watchers,
+)
 
 MAX_ATTACHMENT_MUTATIONS = 100
 
@@ -32,8 +36,14 @@ class AttachmentManagement:
         self._username = username
 
     async def upload_attachments(
-        self, page: str, file_paths: list[str], *, comment: str | None = None
+        self,
+        page: str,
+        file_paths: list[str],
+        *,
+        comment: str | None = None,
+        notify_watchers: bool = True,
     ) -> AttachmentMutationResult:
+        notify = validate_notify_watchers(notify_watchers)
         paths = _upload_paths(file_paths)
         clean_comment = _comment(comment)
         resolved = await self._resolve_page(page)
@@ -45,7 +55,11 @@ class AttachmentManagement:
                 resolved.page_id, expected_username=self._username
             )
         }
-        result = AttachmentMutationResult(page_id=resolved.page_id)
+        result = AttachmentMutationResult(
+            page_id=resolved.page_id,
+            notify_watchers=notify,
+            notification_suppression_supported=True,
+        )
         for index, (_path, filename, media_type, content) in enumerate(prepared):
             try:
                 current = existing.get(filename.casefold())
@@ -57,6 +71,7 @@ class AttachmentManagement:
                         media_type=media_type,
                         comment=clean_comment,
                         expected_username=self._username,
+                        notify_watchers=notify,
                     )
                 else:
                     attachment = await self._api.upload_attachment_version(
@@ -67,6 +82,7 @@ class AttachmentManagement:
                         media_type=media_type,
                         comment=clean_comment,
                         expected_username=self._username,
+                        notify_watchers=notify,
                     )
                 existing[filename.casefold()] = attachment
                 result.attachments.append(_change(attachment))
@@ -94,7 +110,9 @@ class AttachmentManagement:
         filename: str | None = None,
         comment: str | None = None,
         media_type: str | None = None,
+        notify_watchers: bool = True,
     ) -> AttachmentMutationResult:
+        notify = validate_notify_watchers(notify_watchers)
         selected_id = _attachment_id(attachment_id)
         clean_filename = _filename(filename) if filename is not None else None
         clean_comment = _comment(comment)
@@ -116,8 +134,14 @@ class AttachmentManagement:
             media_type=clean_media_type or attachment.media_type or _media_type(attachment.filename),
             comment=clean_comment,
             expected_username=self._username,
+            notify_watchers=notify,
         )
-        return AttachmentMutationResult(page_id=resolved.page_id, attachments=[_change(updated)])
+        return AttachmentMutationResult(
+            page_id=resolved.page_id,
+            attachments=[_change(updated)],
+            notify_watchers=notify,
+            notification_suppression_supported=True,
+        )
 
     async def trash_attachments(
         self,
@@ -125,7 +149,9 @@ class AttachmentManagement:
         attachment_ids: list[str],
         *,
         allow_referenced: bool = False,
+        notify_watchers: bool = True,
     ) -> AttachmentMutationResult:
+        notify = validate_notify_watchers(notify_watchers)
         ids = _attachment_ids(attachment_ids)
         if not isinstance(allow_referenced, bool):
             raise InvalidRequest("allow_referenced must be a boolean.")
@@ -148,6 +174,9 @@ class AttachmentManagement:
         result = AttachmentMutationResult(
             page_id=resolved.page_id,
             notes=["References from other pages are not searched."],
+            notify_watchers=notify,
+            notification_suppression_supported=False,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
         )
         for index, attachment_id in enumerate(ids):
             attachment = attachments[attachment_id]
@@ -183,8 +212,13 @@ class AttachmentManagement:
         return result
 
     async def restore_attachments(
-        self, page: str, attachment_ids: list[str]
+        self,
+        page: str,
+        attachment_ids: list[str],
+        *,
+        notify_watchers: bool = True,
     ) -> AttachmentMutationResult:
+        notify = validate_notify_watchers(notify_watchers)
         ids = _attachment_ids(attachment_ids)
         resolved = await self._resolve_page(page)
         result = AttachmentMutationResult(page_id=resolved.page_id)
@@ -199,7 +233,7 @@ class AttachmentManagement:
                     raise InvalidRequest("The attachment does not belong to the named page.")
                 result.attachments.append(
                     _change(await self._api.restore_page_attachment(
-                        attachment, expected_username=self._username
+                        attachment, expected_username=self._username, notify_watchers=notify
                     ))
                 )
             except ConnectorError as exc:
@@ -216,6 +250,8 @@ class AttachmentManagement:
                         for remaining in ids[index + 1 :]
                     )
                     break
+        result.notify_watchers = notify
+        result.notification_suppression_supported = True
         return result
 
     async def _resolve_page(self, page: str) -> ResolvedPageReference:

@@ -330,17 +330,22 @@ def build_server(context: AppContext) -> FastMCP:
             Field(min_length=1, max_length=100, description="One to 100 absolute local file paths with unique filenames."),
         ],
         comment: Annotated[str | None, Field(max_length=255, description="Optional attachment version comment.")] = None,
+        notify_watchers: Annotated[bool, Field(description="Notify watchers of attachment versions; false sends minorEdit=true.")] = True,
     ) -> AttachmentMutationResult:
         """Upload new attachments or add versions when a filename already exists on the page.
 
         Files are read from the supplied local paths. The instance enforces its own size limit. Results
-        include each attachment ID, version, media type and download URL, plus per-file failures. To
+        include each attachment ID, version, media type and download URL, plus per-file failures. Set
+        notify_watchers=false to send minorEdit=true for the version; the result echoes the request,
+        which Confluence does not read back. To
         show an image inline (PNG, JPEG, GIF or SVG), upload it and reference it as
         `<ac:image><ri:attachment ri:filename="name.svg"/></ac:image>`. Do not use the `view-file`
         macro or raw `<svg>` markup: Confluence displays the former as a file icon and strips the latter.
         """
         services = await context.services()
-        return await services.attachment_management.upload_attachments(page, file_paths, comment=comment)
+        return await services.attachment_management.upload_attachments(
+            page, file_paths, comment=comment, notify_watchers=notify_watchers
+        )
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
@@ -350,11 +355,13 @@ def build_server(context: AppContext) -> FastMCP:
         filename: Annotated[str | None, Field(max_length=255, description="New filename; omit to keep the current name.")] = None,
         comment: Annotated[str | None, Field(max_length=255, description="New version comment; omit to keep the current comment.")] = None,
         media_type: Annotated[str | None, Field(max_length=255, description="New MIME type, such as image/svg+xml.")] = None,
+        notify_watchers: Annotated[bool, Field(description="Notify watchers of the metadata version; false sends minorEdit=true.")] = True,
     ) -> AttachmentMutationResult:
-        """Rename an attachment or change its comment or media type without uploading bytes."""
+        """Rename or update metadata without uploading bytes; false suppresses version email where supported."""
         services = await context.services()
         return await services.attachment_management.update_attachment(
-            page, attachment_id, filename=filename, comment=comment, media_type=media_type
+            page, attachment_id, filename=filename, comment=comment, media_type=media_type,
+            notify_watchers=notify_watchers,
         )
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
@@ -366,16 +373,18 @@ def build_server(context: AppContext) -> FastMCP:
             bool,
             Field(description="Confirm trashing attachments still referenced in this page's body (default false)."),
         ] = False,
+        notify_watchers: Annotated[bool, Field(description="This trash route has no notification-suppression control.")] = True,
     ) -> AttachmentMutationResult:
         """Move selected page attachments to the space trash; this can be restored later.
 
         IDs must belong to the named page. By default attachments referenced by that page's current
         body are refused. The tool checks the separate attachment delete permission before each write.
-        References from other pages are not searched and are called out in the result.
+        References from other pages are not searched and are called out in the result. This route has
+        no notification-suppression control; its result reports that limitation.
         """
         services = await context.services()
         return await services.attachment_management.trash_attachments(
-            page, attachment_ids, allow_referenced=allow_referenced
+            page, attachment_ids, allow_referenced=allow_referenced, notify_watchers=notify_watchers
         )
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
@@ -383,10 +392,13 @@ def build_server(context: AppContext) -> FastMCP:
     async def restore_attachments(
         page: Annotated[str, Field(description="Original page ID or supported same-instance page URL.")],
         attachment_ids: Annotated[list[str], Field(min_length=1, max_length=100)],
+        notify_watchers: Annotated[bool, Field(description="Notify watchers of the restore version; false sends minorEdit=true.")] = True,
     ) -> AttachmentMutationResult:
-        """Restore selected attachments from the space trash to their original page."""
+        """Restore selected attachments; false sends minorEdit=true on each restore version."""
         services = await context.services()
-        return await services.attachment_management.restore_attachments(page, attachment_ids)
+        return await services.attachment_management.restore_attachments(
+            page, attachment_ids, notify_watchers=notify_watchers
+        )
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
@@ -466,6 +478,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Absolute path of a UTF-8 storage file to use as the body instead of body."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="Page creation has no notification-suppression control; reported in the result.")] = True,
     ) -> PageWriteResult:
         """Create a page or new-page draft in exactly one parent or space root.
 
@@ -477,7 +490,8 @@ def build_server(context: AppContext) -> FastMCP:
         Text is escaped and split into paragraphs. A duplicate title in the target space is refused.
         Position defaults to last; before/after require sibling in the same parent.
         body_file sends a rich storage file unchanged apart from new pre/details blocks; a rich
-        export's header is dropped and its storage kept as is.
+        export's header is dropped and its storage kept as is. Page creation has no watcher-suppression
+        control; the result echoes notify_watchers and reports this limitation.
         """
         services = await context.services()
         result: PageWriteResult = await services.writes.create_page(
@@ -491,6 +505,7 @@ def build_server(context: AppContext) -> FastMCP:
             sibling=sibling,
             body_file=body_file,
             body_file_roots=await _client_roots(ctx) if body_file is not None else (),
+            notify_watchers=notify_watchers,
         )
         return result
 
@@ -526,6 +541,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Absolute path of an edited rich export_pages file, instead of body."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="Notify watchers of the edit; false sends version.minorEdit=true.")] = True,
     ) -> PageWriteResult:
         """Replace a published page's complete body, with an optional title change.
 
@@ -541,7 +557,9 @@ def build_server(context: AppContext) -> FastMCP:
         and the Confluence HTML macro. Storage can use code, expand, panels, status, table of
         contents, task lists, page/attachment links, images and mentions. Text is escaped and split
         into paragraphs. Inline-comment anchors that would be detached require allow_comment_loss.
-        Removed macros and attachment references are reported in warnings.
+        Removed macros and attachment references are reported in warnings. Set notify_watchers=false
+        to send version.minorEdit=true and suppress edit email; the result echoes the flag, which
+        Confluence does not read back.
         """
         services = await context.services()
         result: PageWriteResult = await services.writes.update_page(
@@ -553,6 +571,7 @@ def build_server(context: AppContext) -> FastMCP:
             allow_comment_loss=allow_comment_loss,
             body_file=body_file,
             body_file_roots=await _client_roots(ctx) if body_file is not None else (),
+            notify_watchers=notify_watchers,
         )
         return result
 
@@ -580,21 +599,23 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def publish_draft(
-        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
+        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")],
+        notify_watchers: Annotated[bool, Field(description="Notify watchers on publish; false sends version.minorEdit=true.")] = True,
     ) -> PageWriteResult:
-        """Publish a new-page draft without changing its page ID."""
+        """Publish a draft without changing its page ID; false suppresses the publish email."""
         services = await context.services()
-        result: PageWriteResult = await services.writes.publish_draft(draft)
+        result: PageWriteResult = await services.writes.publish_draft(draft, notify_watchers=notify_watchers)
         return result
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @_logged
     async def delete_draft(
-        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")]
+        draft: Annotated[str, Field(description="New-page draft ID or supported same-instance page URL.")],
+        notify_watchers: Annotated[bool, Field(description="This delete route has no notification-suppression control.")] = True,
     ) -> DraftDeletionResult:
-        """Permanently delete a new-page draft. This bypasses the trash and cannot be restored."""
+        """Permanently delete a draft. This bypasses the trash; notification suppression is unavailable."""
         services = await context.services()
-        result: DraftDeletionResult = await services.writes.delete_draft(draft)
+        result: DraftDeletionResult = await services.writes.delete_draft(draft, notify_watchers=notify_watchers)
         return result
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
@@ -609,18 +630,21 @@ def build_server(context: AppContext) -> FastMCP:
             list[str] | None,
             Field(description="Global labels to remove; removals are destructive."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="This label route has no notification-suppression control.")] = True,
     ) -> LabelChangeResult:
         """Add or remove global labels on one published page; removals are destructive.
 
         Changes run sequentially and stop at the first failure. Prior successful operations remain
         applied and are reported; the connector does not reverse them because Confluence does not
         identify whether this request caused a label transition. Inspect partial results before retrying.
+        This route has no notification-suppression control; the result reports that limitation.
         """
         services = await context.services()
         result: LabelChangeResult = await services.writes.set_labels(
             page,
             add=add,
             remove=remove,
+            notify_watchers=notify_watchers,
         )
         return result
 
@@ -644,6 +668,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="The move action has no notification-suppression control.")] = True,
     ) -> PageMoveResult:
         """Move one current page under a parent or to a space root.
 
@@ -652,7 +677,7 @@ def build_server(context: AppContext) -> FastMCP:
         a definite refusal preserves placement. Cross-space moves are waited on through Confluence's
         long-task status route. If Confluence refuses one, recreating the page in the target space
         and trashing the original is a separate recovery plan; it loses the page ID, history and
-        comments.
+        comments. The move action has no notification-suppression control; the result reports that limitation.
         """
         services = await context.services()
         result: PageMoveResult = await services.structure.move_page(
@@ -661,6 +686,7 @@ def build_server(context: AppContext) -> FastMCP:
             space_key=space_key,
             position=position,
             sibling=sibling,
+            notify_watchers=notify_watchers,
         )
         return result
 
@@ -672,17 +698,20 @@ def build_server(context: AppContext) -> FastMCP:
             Literal["refuse", "move_up", "trash"] | None,
             Field(description="Direct-child handling: refuse (default), move_up, or trash subtree."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="The delete route has no notification-suppression control.")] = True,
     ) -> PageDeleteResult:
         """Move a page to the trash after checking delete permission on every affected page.
 
         children defaults to refuse. move_up reparents direct children in order before trashing the
         page. trash removes the subtree bottom-up and refuses more than 100 pages. The result reports
         each confirmed, uncertain and unattempted step; no completed step is undone automatically.
+        Delete/trash routes have no notification-suppression control; the result reports that limitation.
         """
         services = await context.services()
         result: PageDeleteResult = await services.structure.delete_page(
             page,
             children=children if children is not None else "refuse",
+            notify_watchers=notify_watchers,
         )
         return result
 
@@ -731,12 +760,14 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Sibling page ID/reference required for before or after position."),
         ] = None,
+        notify_watchers: Annotated[bool, Field(description="Notify watchers of the restore; false sends version.minorEdit=true. A later placement move cannot be silenced.")] = True,
     ) -> PageRestoreResult:
         """Restore a trashed page, then use caller placement, saved placement or the space root.
 
         Pass exactly one of parent_id or space_key to choose placement explicitly. Without placement,
         the connector uses the best-effort record saved during delete; Confluence itself restores at
-        the space root. The result states the confirmed placement and any fallback reason.
+        the space root. Set notify_watchers=false to suppress the restore version email; a later placement
+        move cannot be silenced. The result states the confirmed placement and any limitation.
         """
         services = await context.services()
         result: PageRestoreResult = await services.structure.restore_page(
@@ -745,6 +776,7 @@ def build_server(context: AppContext) -> FastMCP:
             space_key=space_key,
             position=position,
             sibling=sibling,
+            notify_watchers=notify_watchers,
         )
         return result
 

@@ -2,32 +2,13 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 361 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 363 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Implementation
 
-Items 2–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found that day and
+Items 3–6 follow the priority the user set on 2026-10-30; 7 and 8 were decided or found that day and
 have no rank yet.
-
-### 3. Notify watchers flag
-
-Requested by the user on 2026-10-30, for minor fixes that should not email every watcher. Every
-connector edit notifies watchers today: `update_page` never sends `version.minorEdit`. The editor's
-"Notify watchers" checkbox is exactly that field, and leaving it unset suppresses the edit email
-(research §6.1).
-
-- **Flag:** one optional `notify_watchers` flag, default `true`, on every write tool (decided
-  2026-10-30). `false` sends `version.minorEdit: true` wherever the request creates a version. For
-  writes without a version field (moves, trash, restore, labels), find whether Confluence offers a
-  way to suppress their notifications; where it does not, say so in the tool description and result.
-- **Result:** echo the flag sent. Confluence reads back `minorEdit: false` either way, so the result
-  cannot confirm it.
-- **Live check:** on disposable fixture pages, confirm that `false` sends no edit email and `true`
-  does, and which version-less writes can suppress notifications. Use "Notify on my actions" with the
-  user's approval, and restore it.
-- **Docs and tests:** synthetic tests that the field is sent only for `false`; update requirements
-  §10, architecture and the tool descriptions.
 
 ### 4. Comment management
 
