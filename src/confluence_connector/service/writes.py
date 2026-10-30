@@ -31,7 +31,8 @@ from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceAp
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
 from confluence_connector.service.placement import PagePlacementResolver
-from confluence_connector.service.write_markup import content_loss, to_storage
+from confluence_connector.service.storage_files import read_storage_file, split_export_header
+from confluence_connector.service.write_markup import content_loss, file_to_storage, to_storage
 
 MAX_TITLE_CHARS = 255
 MAX_WRITE_BODY_CHARS = 2_000_000
@@ -60,7 +61,7 @@ class PageWrites:
     async def create_page(
         self,
         title: str,
-        body: str,
+        body: str | None = None,
         *,
         format: str = "rich",
         status: PageWriteStatus = "current",
@@ -68,10 +69,20 @@ class PageWrites:
         space_key: str | None = None,
         position: str | None = None,
         sibling: str | None = None,
+        body_file: str | None = None,
     ) -> PageWriteResult:
-        """Create a current page or new-page draft under one validated placement."""
+        """Create a current page or new-page draft under one validated placement.
+
+        ``body_file`` is a storage file; a rich export's header is dropped and its body is treated as
+        existing Confluence storage, so only the caller's new pre/details blocks are converted.
+        """
         clean_title = _title(title)
-        storage_body = _write_body(body, format)
+        _one_body_source(body, body_file, format)
+        if body_file is not None:
+            header, file_body = split_export_header(read_storage_file(body_file))
+            storage_body = file_to_storage(file_body, file_body if header is not None else None)
+        else:
+            storage_body = _write_body(body, format)
         if not isinstance(status, str) or status not in {"current", "draft"}:
             raise InvalidRequest("status must be current or draft.")
         placement_kind, parent_reference, selected_space, validated_sibling = placement_inputs(
@@ -120,22 +131,52 @@ class PageWrites:
 
     async def update_page(
         self,
-        page: str,
-        body: str,
+        page: str | None = None,
+        body: str | None = None,
         *,
-        expected_version: int,
+        expected_version: int | None = None,
         format: str = "rich",
         title: str | None = None,
         allow_comment_loss: bool = False,
+        body_file: str | None = None,
     ) -> PageWriteResult:
-        """Replace a whole page body after checking its version and source references."""
-        reference = page_reference(page)
-        storage_body = _write_body(body, format)
-        version = _expected_version(expected_version)
+        """Replace a whole page body after checking its version and source references.
+
+        With ``body_file``, a rich export file supplies the page and expected version from its header;
+        an explicit ``page`` or ``expected_version`` must agree with it.
+        """
+        _one_body_source(body, body_file, format)
+        header = None
+        file_body = ""
+        if body_file is not None:
+            header, file_body = split_export_header(read_storage_file(body_file))
+            if header is None:
+                raise InvalidRequest(
+                    "body_file must be a rich export_pages file with its header comment; text exports "
+                    "and files without the header cannot update a page."
+                )
+            if expected_version is not None and _expected_version(expected_version) != header.version:
+                raise InvalidRequest(
+                    f"body_file was exported at version {header.version}, not expected_version "
+                    f"{expected_version}."
+                )
+            reference = page_reference(page) if page is not None else header.page_id
+            version = header.version
+            storage_body = ""
+        else:
+            if page is None or expected_version is None:
+                raise InvalidRequest("page and expected_version are required with body.")
+            reference = page_reference(page)
+            version = _expected_version(expected_version)
+            storage_body = _write_body(body, format)
         new_title = _title(title) if title is not None else None
         if not isinstance(allow_comment_loss, bool):
             raise InvalidRequest("allow_comment_loss must be a boolean.")
         resolved = await self._resolve_page(reference)
+        if header is not None and resolved.page_id != header.page_id:
+            raise InvalidRequest(
+                f"body_file was exported from page {header.page_id}, not page {resolved.page_id}."
+            )
         current = await self._api.get_page_content(
             resolved.page_id, expected_username=self._username, include_storage=True
         )
@@ -145,6 +186,8 @@ class PageWrites:
                 f"The page is now version {current.version}; expected_version was {version}. "
                 "Read it again and reapply the changes."
             )
+        if header is not None:
+            storage_body = file_to_storage(file_body, current.storage_body)
         final_title = new_title or current.metadata.title
         anchor_loss, warnings = content_loss(current.storage_body, storage_body)
         if anchor_loss and not allow_comment_loss:
@@ -369,6 +412,13 @@ def _title(value: Any) -> str:
     if not result or len(result) > MAX_TITLE_CHARS or any(not char.isprintable() for char in result):
         raise InvalidRequest(f"title must contain 1 to {MAX_TITLE_CHARS} printable characters.")
     return result
+
+
+def _one_body_source(body: Any, body_file: Any, page_format: Any) -> None:
+    if (body is None) == (body_file is None):
+        raise InvalidRequest("Pass exactly one of body and body_file.")
+    if body_file is not None and page_format != "rich":
+        raise InvalidRequest("body_file holds rich storage markup; omit format or pass rich.")
 
 
 def _write_body(value: Any, page_format: Any) -> str:
