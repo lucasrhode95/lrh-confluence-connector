@@ -830,10 +830,13 @@ async def _check_delete_and_restore(
         subtree = await services.structure.delete_page(trash_parent.page_id, children="trash")
         if not subtree.complete or sum(item.status == "trashed" for item in subtree.pages) != 3:
             raise AssertionError("bottom-up subtree deletion did not trash all three pages")
+        # The trash lists oldest first, so new scratch pages can be past the first page.
         listed = await services.structure.list_trash(space_key=pages.personal_space, limit=100)
-        if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= {
-            item.page_id for item in listed.pages
-        }:
+        trashed_ids = {item.page_id for item in listed.pages}
+        while listed.next_cursor:
+            listed = await services.structure.list_trash(cursor=listed.next_cursor)
+            trashed_ids.update(item.page_id for item in listed.pages)
+        if not {trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id} <= trashed_ids:
             raise AssertionError("fixture subtree was missing from the trash listing")
         for page_id in (trash_parent.page_id, trash_child.page_id, trash_grandchild.page_id):
             restored_page = await services.structure.restore_page(page_id)
