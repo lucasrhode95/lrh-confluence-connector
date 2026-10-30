@@ -2,26 +2,8 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 382 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-30**. Offline checks: 385 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
-
-## Implementation
-
-Item 8 was found on 2026-10-30 and has no rank yet.
-
-### 8. Macros inside included pages
-
-Found live on 2026-10-30 (research §5.1). Text output renders an included page's content, including
-its macro markers, but typed references list only the include itself: macro identities come from the
-host's storage. An included HTML macro is missed entirely, because its `view` output has no wrapper
-and only the included page's storage names it.
-
-- **Identity:** resolve each `include` and `excerpt-include` target, read its storage once, and add its
-  macro identities to the host's references, marked with the page they came from.
-- **Bounds:** follow nested includes to a fixed depth and stop on cycles; report includes that could
-  not be read.
-- **Tests:** synthetic host and target pages covering status, expand and HTML macros, nesting and a
-  cycle.
 
 ## Decisions
 
