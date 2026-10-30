@@ -192,7 +192,8 @@ On 2026-10-30 the acceptance suite passed with an inline comment in the fixture 
 cross-space check was run separately under an authorized parent page and passed). The same day
 settled: the archived space list against the UI, quick-navigation coverage, CQL's zone, revoked
 tokens, write bounds, and HTML macros inside includes (research §2.2, §4.1, §4.3, §4.4, §5.1, §6.1,
-§6.3).
+§6.3). Client setup passed in Claude and Codex: after a restart, each discovered the tools and ran
+`auth_status` and an approved page-metadata read.
 
 - **CQL timezone:** check repeated daylight-saving hours.
 - **Search behavior:** check `siteSearch` ordering and `content.version.by` across supported Data Center
@@ -215,7 +216,5 @@ tokens, write bounds, and HTML macros inside includes (research §2.2, §4.1, §
   what happens to replies when a parent is deleted, and editing another user's comment (expect 403).
 - **Email settings:** once implemented, check that every setting round-trips without changing the
   others.
-- **Client setup in Codex:** after registration and a full restart, confirm tool discovery and a small
-  approved read. Claude passed on 2026-10-30.
 - **Parked:** paging beyond 500 children and tree/delete preflight caps; judged unnecessary for now on
   2026-10-30.
