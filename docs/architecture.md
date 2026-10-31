@@ -275,9 +275,10 @@ saved comment for the result.
 
 **[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
 undocumented HTML email settings form from the REST adapter. It reads the form through the shared,
-account-bound transport, merges partial updates with the currently read values, submits all eight
-settings with the form token and the `X-Atlassian-Token: no-check` header, and rereads them to report
-mismatches. A redirect to the login page is an authentication failure, not a save. An update that
+account-bound transport and takes stored values from the view page, whose form only opens the editor.
+It merges partial updates with those values, reads the editor's save form for its token and `confirm`
+button, submits all eight settings with the `X-Atlassian-Token: no-check` header, and rereads the view
+page to report mismatches. A redirect to the login page is an authentication failure, not a save. An update that
 changes nothing returns the current values without a form submission.
 
 **[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
@@ -320,7 +321,7 @@ destructive annotation and does not accept that content-write option.
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
 | Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for footer comments; inline resolution has no verified write route |
-| Email notification settings | `GET /users/viewmyemailsettings.action`, `POST /users/editmyemailsettings.action` | **No**; isolated UI form with `atl_token` (research §6.7) |
+| Email notification settings | `GET /users/viewmyemailsettings.action`, `GET /users/editmyemailsettings.action`, `POST /users/doeditmyemailsettings.action` | **No**; isolated UI form with `atl_token`, verified live (research §6.7) |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
 | Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |
 | Create, update, publish, draft delete | `POST`, `PUT`, `DELETE /rest/api/content…` | Yes |

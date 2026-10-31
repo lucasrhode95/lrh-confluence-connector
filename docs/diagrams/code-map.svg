@@ -157,8 +157,8 @@
   <text class="section-title" x="936" y="1120"><tspan class="code">user_settings.py</tspan></text>
   <g><title>Reads and updates the signed-in account's eight email notification settings. → get_settings, update_settings</title><text class="detail" x="936" y="1154">• <tspan class="code">EmailNotificationSettingsService</tspan></text></g>
   <g><title>Merges selected fields into the current state, sends the full form, rereads it and reports mismatches; an unchanged update sends nothing.</title><text class="detail" x="936" y="1182">• full-state form, readback</text></g>
-  <g><title>Reads the view page and posts its atl_token form with the no-check header through the shared account-bound transport; it does not depend on the REST adapter.</title><text class="detail" x="936" y="1210">• isolated UI form · account-bound</text></g>
-  <g><title>The configured account received HTTP 403 for the save; a live round trip is still open (roadmap).</title><text class="detail" x="936" y="1238">• save not yet verified live</text></g>
+  <g><title>Reads the editor's atl_token form and posts it with the no-check header through the shared account-bound transport; it does not depend on the REST adapter.</title><text class="detail" x="936" y="1210">• isolated UI form · account-bound</text></g>
+  <g><title>Values come from the view page; the editor's form (doeditmyemailsettings.action, confirm button) saves. A one-setting round trip and restore were verified live (research §6.7).</title><text class="detail" x="936" y="1238">• editor form saves · verified live</text></g>
 
   <rect x="1340" y="1088" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="1356" y="1120"><tspan class="code">PageStructure</tspan><tspan class="detail" dx="10">structure.py</tspan></text>

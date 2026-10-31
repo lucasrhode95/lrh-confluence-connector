@@ -395,7 +395,7 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 - `get_email_settings` reads the signed-in account's autowatch, daily updates, all blog posts,
   network, new followers, own-action notifications, changed-content display and recommended updates.
 - `update_email_settings` changes only provided fields. It reads current values, merges the requested
-  fields, submits the complete state through the isolated email settings form, then rereads all eight
+  fields, submits the complete state through the editor's save form, then rereads all eight
   values. Results report the confirmed values and any mismatches. An empty update is refused. An
   update that changes nothing returns the current values and sends no form. A redirect to the login
   page is reported as an authentication failure.
