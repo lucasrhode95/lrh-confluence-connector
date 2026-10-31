@@ -563,7 +563,8 @@ def build_server(context: AppContext) -> FastMCP:
         and the Confluence HTML macro. Storage can use code, expand, panels, status, table of
         contents, task lists, page/attachment links, images and mentions. Text is escaped and split
         into paragraphs. Inline-comment anchors that would be detached require allow_comment_loss.
-        Removed macros and attachment references are reported in warnings. Set notify_watchers=false
+        Removed macros and attachment references are reported in warnings. A macro with the same
+        ac:macro-id but changed parameters or body is reported as changed. Set notify_watchers=false
         to send version.minorEdit=true and suppress edit email; the result echoes the flag, which
         Confluence does not read back.
         """
