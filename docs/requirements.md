@@ -364,9 +364,9 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   multipart uploads. The result echoes the requested value; Confluence reads `minorEdit` back as
   `false`, so it cannot confirm which value was sent.
 - Page creation, footer comment creation, draft deletion, label changes, moves, comment deletion and
-  trash routes have no verified suppression field. Their tool descriptions and results report that
-  limitation and the server's default behavior.
-  A page restore followed by a placement move reports the same limitation when the move is applied.
+  trash routes have no verified suppression field. Their tool descriptions say so, and their results
+  set `notification_suppression_supported: false`; a note explains it only when `false` was requested.
+  A page restore reports the same limitation when its placement move ran or may have run.
 
 ### 10.8 Comment management
 

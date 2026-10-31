@@ -24,7 +24,7 @@ from confluence_connector.domain.models import (
     ResolvedPageReference,
 )
 from confluence_connector.domain.validation import (
-    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    notification_outcome,
     optional_space_key,
     page_reference,
     require_current_page,
@@ -133,9 +133,7 @@ class PageWrites:
             version=created.version,
             url=created.url,
             warnings=warnings,
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
 
     async def update_page(
@@ -232,8 +230,7 @@ class PageWrites:
             version=updated.version or version + 1,
             url=updated.url or current.metadata.url,
             warnings=warnings,
-            notify_watchers=notify,
-            notification_suppression_supported=True,
+            **notification_outcome(notify, supported=True),
         )
 
     async def list_drafts(
@@ -319,8 +316,7 @@ class PageWrites:
             status="current",
             version=published.version,
             url=published.url or metadata.url,
-            notify_watchers=notify,
-            notification_suppression_supported=True,
+            **notification_outcome(notify, supported=True),
         )
 
     async def delete_draft(self, draft: str, *, notify_watchers: bool = True) -> DraftDeletionResult:
@@ -338,9 +334,7 @@ class PageWrites:
             page_id=metadata.page_id,
             title=metadata.title,
             deleted=True,
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
 
     async def set_labels(
@@ -381,9 +375,7 @@ class PageWrites:
         result = LabelChangeResult(
             page_id=metadata.page_id,
             unchanged=unchanged,
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
         for index, (action, label) in enumerate(operations):
             try:

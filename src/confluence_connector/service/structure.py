@@ -29,7 +29,7 @@ from confluence_connector.domain.models import (
     TrashListResult,
 )
 from confluence_connector.domain.validation import (
-    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    notification_outcome,
     optional_space_key,
     page_reference,
     require_current_page,
@@ -429,9 +429,8 @@ class PageStructure:
             placement_source=placement_source,
             placement_status=placement_status,
             warnings=warnings,
-            notify_watchers=notify,
-            notification_suppression_supported=chosen is None,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE if chosen is not None else None,
+            # A placement move that ran, or may have run, has no suppression control.
+            **notification_outcome(notify, supported=chosen is None or placement_status == "root"),
         )
 
     async def _move_resolved(
@@ -459,9 +458,7 @@ class PageStructure:
                 parent_id=target.parent_id,
                 moved=True,
                 position_applied=True,
-                notify_watchers=notify_watchers,
-                notification_suppression_supported=False,
-                notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+                **notification_outcome(notify_watchers, supported=False),
             )
 
         try:
@@ -489,9 +486,7 @@ class PageStructure:
                     if uncertain
                     else f"The requested same-space move was refused ({type(exc).__name__}); the page's previous placement remains in effect."
                 ],
-                notify_watchers=notify_watchers,
-                notification_suppression_supported=False,
-                notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+                **notification_outcome(notify_watchers, supported=False),
             )
         return PageMoveResult(
             page_id=metadata.page_id,
@@ -500,9 +495,7 @@ class PageStructure:
             parent_id=target.parent_id,
             moved=True,
             position_applied=True,
-            notify_watchers=notify_watchers,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify_watchers, supported=False),
         )
 
     def _move_action_target(self, target: PagePlacement) -> tuple[str, str | None]:
@@ -816,9 +809,7 @@ def _delete_result(
         pages=list(outcomes.values()),
         warnings=warnings,
         failure=failure,
-        notify_watchers=notify_watchers,
-        notification_suppression_supported=False,
-        notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+        **notification_outcome(notify_watchers, supported=False),
     )
 
 

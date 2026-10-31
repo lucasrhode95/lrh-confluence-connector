@@ -100,7 +100,8 @@ Only design rules that the code layout does not make obvious are listed here. To
   never resent.
 - **Watcher notifications.** Versioned writes omit `version.minorEdit` by default; `notify_watchers=false`
   adds it as `true`. Multipart attachment writes send the equivalent form field. Routes without a
-  version field leave Confluence's behavior untouched and return a capability note.
+  version field leave Confluence's behavior untouched; their results say suppression is unsupported,
+  with a note only when `false` was requested. Write results share the `NotificationOutcome` fields.
 - **Account checks.** The username is read before and after every exchange; if it changed, the result
   is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`. The store's
   revision (its file's modification time and size, read before decrypting) is compared after the

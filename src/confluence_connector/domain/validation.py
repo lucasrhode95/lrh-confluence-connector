@@ -36,6 +36,15 @@ def validate_notify_watchers(value: Any) -> bool:
     return value
 
 
+def notification_outcome(notify_watchers: bool, *, supported: bool) -> dict[str, Any]:
+    """Result fields for a write's watcher preference; the note appears only for an unmet false."""
+    return {
+        "notify_watchers": notify_watchers,
+        "notification_suppression_supported": supported,
+        "notification_note": None if supported or notify_watchers else NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    }
+
+
 def page_references(value: Any, *, maximum: int, field: str = "pages") -> list[str]:
     """Validate one or more public references once before page resolution begins."""
     if isinstance(value, str):

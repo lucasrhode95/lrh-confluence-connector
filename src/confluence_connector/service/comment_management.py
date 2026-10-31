@@ -11,7 +11,7 @@ from confluence_connector.domain.models import (
     RemotePageComment,
 )
 from confluence_connector.domain.validation import (
-    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    notification_outcome,
     page_reference,
     require_current_page,
     validate_notify_watchers,
@@ -74,9 +74,7 @@ class CommentManagement:
         )
         return CommentWriteResult(
             comment=record,
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
 
     async def update_comment(
@@ -119,8 +117,7 @@ class CommentManagement:
         )
         return CommentWriteResult(
             comment=self._record(updated, metadata),
-            notify_watchers=notify,
-            notification_suppression_supported=True,
+            **notification_outcome(notify, supported=True),
         )
 
     async def delete_comment(
@@ -150,9 +147,7 @@ class CommentManagement:
             page_url=metadata.url,
             deleted=True,
             permanent=True,
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
 
     async def _resolve_current_page(self, reference: str) -> PageMetadata:

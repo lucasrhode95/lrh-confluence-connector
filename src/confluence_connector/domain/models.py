@@ -22,6 +22,14 @@ class CurrentUser(BaseModel):
     username: str
 
 
+class NotificationOutcome(BaseModel):
+    """Watcher-notification fields shared by write results; the note explains an unmet false."""
+
+    notify_watchers: bool = True
+    notification_suppression_supported: bool = True
+    notification_note: str | None = None
+
+
 class AuthStatus(BaseModel):
     configured: bool
     token_stored: bool
@@ -364,14 +372,11 @@ class AttachmentChangeFailure(BaseModel):
     error: str
 
 
-class AttachmentMutationResult(BaseModel):
+class AttachmentMutationResult(NotificationOutcome):
     page_id: str
     attachments: list[AttachmentChange] = Field(default_factory=list)
     failures: list[AttachmentChangeFailure] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
-    notify_watchers: bool = True
-    notification_suppression_supported: bool = True
-    notification_note: str | None = None
 
 
 class SavedAttachment(BaseModel):
@@ -413,16 +418,13 @@ class PageExportResult(BaseModel):
     files: list[PageExportFile] = Field(default_factory=list)
 
 
-class PageWriteResult(BaseModel):
+class PageWriteResult(NotificationOutcome):
     page_id: str
     title: str
     status: PageWriteStatus
     version: int | None = None
     url: str | None = None
     warnings: list[str] = Field(default_factory=list)
-    notify_watchers: bool = True
-    notification_suppression_supported: bool = True
-    notification_note: str | None = None
 
 
 class PagePlacement(BaseModel):
@@ -436,7 +438,7 @@ class PagePlacement(BaseModel):
     sibling_id: str | None = None
 
 
-class PageMoveResult(BaseModel):
+class PageMoveResult(NotificationOutcome):
     page_id: str
     title: str
     space_key: str
@@ -444,9 +446,7 @@ class PageMoveResult(BaseModel):
     moved: bool
     position_applied: bool | None = None
     warnings: list[str] = Field(default_factory=list)
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
 class PageStructureOutcome(BaseModel):
@@ -459,7 +459,7 @@ class PageStructureOutcome(BaseModel):
     detail: str | None = None
 
 
-class PageDeleteResult(BaseModel):
+class PageDeleteResult(NotificationOutcome):
     page_id: str
     title: str
     children_mode: Literal["refuse", "move_up", "trash"]
@@ -467,9 +467,7 @@ class PageDeleteResult(BaseModel):
     pages: list[PageStructureOutcome]
     warnings: list[str] = Field(default_factory=list)
     failure: str | None = None
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
 class TrashPageSummary(BaseModel):
@@ -491,7 +489,7 @@ class TrashListResult(BaseModel):
     next_cursor: str | None = None
 
 
-class PageRestoreResult(BaseModel):
+class PageRestoreResult(NotificationOutcome):
     page_id: str
     title: str
     space_key: str | None = None
@@ -499,9 +497,6 @@ class PageRestoreResult(BaseModel):
     placement_source: Literal["caller", "saved_property", "space_root"]
     placement_status: Literal["applied", "root", "unknown"]
     warnings: list[str] = Field(default_factory=list)
-    notify_watchers: bool = True
-    notification_suppression_supported: bool = True
-    notification_note: str | None = None
 
 
 class DraftSummary(BaseModel):
@@ -523,14 +518,12 @@ class DraftListResult(BaseModel):
     next_cursor: str | None = None
 
 
-class DraftDeletionResult(BaseModel):
+class DraftDeletionResult(NotificationOutcome):
     page_id: str
     title: str
     deleted: bool
     permanent: bool = True
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
 class RemoteDraftPage(PageEnvelope):
@@ -547,16 +540,14 @@ class LabelChangeFailure(BaseModel):
     error: str
 
 
-class LabelChangeResult(BaseModel):
+class LabelChangeResult(NotificationOutcome):
     page_id: str
     added: list[str] = Field(default_factory=list)
     removed: list[str] = Field(default_factory=list)
     unchanged: list[str] = Field(default_factory=list)
     failures: list[LabelChangeFailure] = Field(default_factory=list)
     not_attempted: list[LabelChangeFailure] = Field(default_factory=list)
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
 class PageComment(BaseModel):
@@ -585,22 +576,18 @@ class CommentRecord(BaseModel):
     selected_text: str | None = None
 
 
-class CommentWriteResult(BaseModel):
+class CommentWriteResult(NotificationOutcome):
     comment: CommentRecord
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
-class CommentDeletionResult(BaseModel):
+class CommentDeletionResult(NotificationOutcome):
     comment_id: str
     page_id: str
     page_url: str | None = None
     deleted: bool = True
     permanent: bool = True
-    notify_watchers: bool = True
     notification_suppression_supported: bool = False
-    notification_note: str | None = None
 
 
 class RemotePageComment(BaseModel):

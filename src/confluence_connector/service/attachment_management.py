@@ -19,7 +19,7 @@ from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service.errors import raise_account_error
 from confluence_connector.domain.validation import (
-    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+    notification_outcome,
     page_references,
     validate_notify_watchers,
 )
@@ -57,8 +57,7 @@ class AttachmentManagement:
         }
         result = AttachmentMutationResult(
             page_id=resolved.page_id,
-            notify_watchers=notify,
-            notification_suppression_supported=True,
+            **notification_outcome(notify, supported=True),
         )
         for index, (_path, filename, media_type, content) in enumerate(prepared):
             try:
@@ -139,8 +138,7 @@ class AttachmentManagement:
         return AttachmentMutationResult(
             page_id=resolved.page_id,
             attachments=[_change(updated)],
-            notify_watchers=notify,
-            notification_suppression_supported=True,
+            **notification_outcome(notify, supported=True),
         )
 
     async def trash_attachments(
@@ -174,9 +172,7 @@ class AttachmentManagement:
         result = AttachmentMutationResult(
             page_id=resolved.page_id,
             notes=["References from other pages are not searched."],
-            notify_watchers=notify,
-            notification_suppression_supported=False,
-            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+            **notification_outcome(notify, supported=False),
         )
         for index, attachment_id in enumerate(ids):
             attachment = attachments[attachment_id]
@@ -221,7 +217,9 @@ class AttachmentManagement:
         notify = validate_notify_watchers(notify_watchers)
         ids = _attachment_ids(attachment_ids)
         resolved = await self._resolve_page(page)
-        result = AttachmentMutationResult(page_id=resolved.page_id)
+        result = AttachmentMutationResult(
+            page_id=resolved.page_id, **notification_outcome(notify, supported=True)
+        )
         for index, attachment_id in enumerate(ids):
             try:
                 attachment = await self._api.get_page_attachment(
@@ -250,8 +248,6 @@ class AttachmentManagement:
                         for remaining in ids[index + 1 :]
                     )
                     break
-        result.notify_watchers = notify
-        result.notification_suppression_supported = True
         return result
 
     async def _resolve_page(self, page: str) -> ResolvedPageReference:
