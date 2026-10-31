@@ -33,7 +33,7 @@ There is no daemon. MCP runs only for its client session; `auth` and `status` ar
 
 | Command | Lifetime | Does |
 |---|---|---|
-| `confluence-connector mcp` | One stdio process per MCP client session | Serves the 19 tools (§8) |
+| `confluence-connector mcp` | One stdio process per MCP client session | Serves the 29 tools (§8) |
 | `confluence-connector auth [--sign-out]` | One-shot | Prompts for a PAT, verifies and stores it, calibrates `cql_timezone`; or deletes the local token |
 | `confluence-connector status [--check]` | One-shot | Offline account status; `--check` verifies the token and checks `cql_timezone` |
 
@@ -114,7 +114,8 @@ Only design rules that the code layout does not make obvious are listed here. To
 
 ### 5.3 [`remote/confluence.py`](../src/confluence_connector/remote/confluence.py)
 
-- `ConfluenceApi` is the only code that knows routes and wire fields. Configured endpoint paths come from
+- `ConfluenceApi` owns REST routes and wire fields; the isolated email settings service owns its UI
+  form routes and fields. Configured endpoint paths come from
   the private settings, relative to `base_url` and its context path.
 - **Paging** advances on the returned `start + size`, never on the echoed `limit` or `content/search`'s
   `next` link, which skip results (research §5.2). Space listing reads 500 per request; children 500;
@@ -299,7 +300,7 @@ Returns typed models directly; FastMCP handles serialization and result schemas.
 Annotations: reads are read-only and idempotent (`auth_status` also closed-world). Writes are never
 read-only, and all but `create_page`, `add_comment` and `restore_page` are marked destructive. `download_attachments`
 and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
-outputs. Every write declaration exposes `notify_watchers`; the result model echoes the flag and
+outputs. Every content write declaration exposes `notify_watchers`; the result model echoes the flag and
 indicates whether the route supports suppression. The account settings update has its own explicit
 destructive annotation and does not accept that content-write option.
 
