@@ -90,6 +90,8 @@ def file_to_storage(body: str, existing_storage: str | None) -> str:
     soup = BeautifulSoup(body, "html.parser")
     _check_active_content(soup)
     _check_markup_depth(soup, MAX_RICH_MARKUP_DEPTH)
+    if not _is_well_formed_fragment(body):
+        return body
     replacements: list[tuple[int, int, str]] = []
     for start, end, name in _block_spans(body, frozenset({"pre", "details"})):
         source = body[start:end]
@@ -206,14 +208,19 @@ def _numeric_html_entities(source: str) -> str:
 
 def _close_html_void_elements(source: str) -> str:
     """Normalize only HTML void start tags for XML validation; do not repair other malformed markup."""
-    if not any(f"<{tag}" in source.casefold() for tag in _VOID_TAGS):
+    folded = source.casefold()
+    if not any(f"<{tag}" in folded for tag in _VOID_TAGS):
         return source
     parser = _VoidTagNormalizer(source)
     parser.feed(source)
     parser.close()
-    for offset in reversed(parser.insertions):
-        source = source[:offset] + "/" + source[offset:]
-    return source
+    parts: list[str] = []
+    start = 0
+    for offset in parser.insertions:
+        parts.extend((source[start:offset], "/"))
+        start = offset
+    parts.append(source[start:])
+    return "".join(parts)
 
 
 class _VoidTagNormalizer(HTMLParser):

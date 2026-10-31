@@ -11,6 +11,21 @@ from confluence_connector.service.write_markup import content_loss, file_to_stor
 
 
 class WriteMarkupChecks(unittest.TestCase):
+    def test_file_conversion_preserves_malformed_blocks_for_server_diagnostics(self) -> None:
+        for body in (
+            "<details><summary>More</summary><p>Unclosed</details>",
+            "<pre><code>x</pre>",
+            "<p>Unclosed<pre><code>x</code></pre>",
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(file_to_storage(body, None), body)
+
+    def test_many_void_elements_keep_conversion_and_code_content(self) -> None:
+        body = "<p>" + "line<br>" * 3000 + "</p><pre><code>x</code></pre>"
+        converted = to_storage(body, "rich")
+        self.assertEqual(converted.count("<br/>"), 3000)
+        self.assertIn('ac:name="code"', converted)
+
     def test_text_is_escaped_and_split_into_paragraphs(self) -> None:
         self.assertEqual(
             to_storage("  <first & second>  \nline\n\nthird", "text"),

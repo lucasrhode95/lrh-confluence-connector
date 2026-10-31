@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock
 
-from confluence_connector.domain.errors import Conflict, InvalidRequest, Upstream
+from confluence_connector.domain.errors import AccountMismatch, AuthenticationRequired, Conflict, InvalidRequest, Upstream
 from confluence_connector.domain.models import PageMetadata, RemotePageComment, ResolvedPageReference
 from confluence_connector.service.comment_management import CommentManagement
 
@@ -39,6 +39,15 @@ class CommentManagementChecks(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((result.comment.comment_id, result.comment.version, result.comment.body), ("501", 1, ""))
         self.assertIn("could not be read back (Upstream)", result.warnings[0])
+
+    async def test_saved_comment_readback_does_not_hide_account_failures(self) -> None:
+        for error in (AccountMismatch, AuthenticationRequired):
+            with self.subTest(error=error):
+                api = _Api()
+                api.reread_error = error("synthetic account change")
+                with self.assertRaises(error):
+                    await _service(api).add_comment("55", "note", format="text")
+                api.create_comment.assert_awaited_once()
 
     async def test_get_comment_returns_identity_and_inline_metadata_without_page_reads(self) -> None:
         api = _Api()

@@ -240,7 +240,8 @@ markup as an XML fragment before conversion, after spelling HTML named entities 
 and closing void tags for the check only. Malformed markup is passed unchanged to Confluence for
 its syntax error; well-formed markup gets the targeted code, expand and void-tag conversions
 (requirements §10.1).
-`file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
+`file_to_storage` runs the same safety and well-formedness checks on a `body_file`, passing malformed
+input unchanged. It never reserializes the whole file: `html.parser` source
 positions locate the outermost `<pre>` and `<details>` elements (CDATA is not markup), and only those not
 already in the stored body are converted and spliced back, so every other byte is unchanged.
 `content_loss` compares inline-comment anchors and full attachment identities between the stored and
@@ -271,7 +272,9 @@ uncertain writes. It distinguishes attachment-delete access from page-update acc
 comment, validates page and reply ownership, checks comment versions before updates, and requires an
 explicit flag before permanent deletion. The comment read carries its page ID and URL, so ownership
 checks need no page read. Updates send the body only, never inline anchor metadata; writes reread the
-saved comment for the result.
+saved comment for the result. The adapter verifies the returned content type and ID before any
+comment mutation. Ordinary readback failures return known write facts with a warning; account-boundary
+failures propagate instead of returning content from the earlier account.
 
 **[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
 undocumented HTML email settings form from the REST adapter. It reads the form through the shared,

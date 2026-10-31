@@ -386,7 +386,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   failures remain explicit. The DELETE route has no notification-suppression control.
 - Every write is bound to the authenticated account; an uncertain outcome is never resent. Results
   include the comment ID, page, URL and version where applicable; create and update reread the saved
-  comment, and a failed reread returns the known ID and version with a warning. Inline-comment
+  comment, and an ordinary failed reread returns the known ID and version with a warning. Account
+  changes or sign-out during readback remain explicit errors. Inline-comment
   resolve/reopen is not exposed because the configured instance has no verified REST write route for
   that state.
 
