@@ -88,7 +88,8 @@ Only design rules that the code layout does not make obvious are listed here. To
 
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
   timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
-  across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
+  across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk. Cookies Confluence
+  sets are cleared when the stored account changes, so no session outlives its account.
 - JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
   destination stream while the transport applies the shared retry, status and account checks. Fixture
   multipart uploads use the same write policy. Decoded response snapshots omit compression headers.
@@ -100,7 +101,8 @@ Only design rules that the code layout does not make obvious are listed here. To
   never resent.
 - **Watcher notifications.** Versioned writes omit `version.minorEdit` by default; `notify_watchers=false`
   adds it as `true`. Multipart attachment writes send the equivalent form field. Routes without a
-  version field leave Confluence's behavior untouched and return a capability note.
+  version field leave Confluence's behavior untouched; their results say suppression is unsupported,
+  with a note only when `false` was requested. Write results share the `NotificationOutcome` fields.
 - **Account checks.** The username is read before and after every exchange; if it changed, the result
   is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`. The store's
   revision (its file's modification time and size, read before decrypting) is compared after the
@@ -220,9 +222,12 @@ deepest level read is cut short, and `complete` is false.
    matching code fences.
 
 When `macros_from_storage` is enabled, the page service resolves `include` and `excerpt-include`
-targets and reads each included page's storage once. It adds those macro references with the source
-page ID, follows nested includes to depth 5, and reads at most 100 included pages per requested page.
-Cycles, unresolved targets and unreadable pages stop that branch and appear in the page's `notes`.
+targets and reads each included page's storage once, without its view or metadata. It walks one
+include level at a time, resolving and reading each level's pages concurrently, adds their macro
+references with the source page ID, follows nested includes to depth 5, and reads at most 100 included
+pages per requested page. An `excerpt-include` contributes only the target's excerpt. Cycles,
+unresolved targets and unreadable pages stop that branch and appear in the page's `notes`. A cursor
+continuation of the same page skips the walk; the first part already returned those references.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body
@@ -231,15 +236,16 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 **[`writes.py`](../src/confluence_connector/service/writes.py) and
 [`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: page body strings have no
 connector-imposed length limit. `to_storage` checks active content and nesting, then validates rich
-markup as an XML fragment before conversion. Malformed markup is passed unchanged to Confluence for
+markup as an XML fragment before conversion, after spelling HTML named entities numerically
+and closing void tags for the check only. Malformed markup is passed unchanged to Confluence for
 its syntax error; well-formed markup gets the targeted code, expand and void-tag conversions
 (requirements §10.1).
 `file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
 positions locate the outermost `<pre>` and `<details>` elements (CDATA is not markup), and only those not
 already in the stored body are converted and spliced back, so every other byte is unchanged.
 `content_loss` compares inline-comment anchors and full attachment identities between the stored and
-new bodies. Macros match by `ac:macro-id` when present in both bodies; their source shape is compared
-separately to report changes. Macros without IDs use name and parameters as the fallback identity.
+new bodies. Macros match by `ac:macro-id` when present in both bodies; a matched macro whose name or
+parameters differ is reported as changed; edits inside its body are not reported. Macros without IDs use name and parameters as the fallback identity.
 
 **[`storage_files.py`](../src/confluence_connector/service/storage_files.py)** owns the rich export
 file format. Body files contain the provenance comment with a `Page ID:` line and storage only;
@@ -263,13 +269,17 @@ uncertain writes. It distinguishes attachment-delete access from page-update acc
 
 **[`comment_management.py`](../src/confluence_connector/service/comment_management.py)** reads one
 comment, validates page and reply ownership, checks comment versions before updates, and requires an
-explicit flag before permanent deletion. The REST adapter supplies comment source metadata so inline
-anchors remain outside the body update.
+explicit flag before permanent deletion. The comment read carries its page ID and URL, so ownership
+checks need no page read. Updates send the body only, never inline anchor metadata; writes reread the
+saved comment for the result.
 
 **[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
 undocumented HTML email settings form from the REST adapter. It reads the form through the shared,
-account-bound transport, merges partial updates with the currently read values, submits all eight
-settings with the form token, and rereads them to report mismatches.
+account-bound transport and takes stored values from the view page, whose form only opens the editor.
+It merges partial updates with those values, reads the editor's save form for its token and `confirm`
+button, submits all eight settings with the `X-Atlassian-Token: no-check` header, and rereads the view
+page to report mismatches. A redirect to the login page is an authentication failure, not a save. An update that
+changes nothing returns the current values without a form submission.
 
 **[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
 folders, cleanup of files older than seven days when a folder is next used (tolerating files another
@@ -282,7 +292,7 @@ Returns typed models directly; FastMCP handles serialization and result schemas.
 `build_server` declares the tools with their annotations and the server instructions; each tool calls
 `await context.services()` and one service method, and logs its name, outcome and duration.
 Annotations: reads are read-only and idempotent (`auth_status` also closed-world). Writes are never
-read-only, and all but `create_page` and `restore_page` are marked destructive. `download_attachments`
+read-only, and all but `create_page`, `add_comment` and `restore_page` are marked destructive. `download_attachments`
 and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
 outputs. Every write declaration exposes `notify_watchers`; the result model echoes the flag and
 indicates whether the route supports suppression. The account settings update has its own explicit
@@ -311,7 +321,7 @@ destructive annotation and does not accept that content-write option.
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
 | Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for footer comments; inline resolution has no verified write route |
-| Email notification settings | `GET /users/viewmyemailsettings.action`, `POST /users/editmyemailsettings.action` | **No**; isolated UI form with `atl_token` (research §6.7) |
+| Email notification settings | `GET /users/viewmyemailsettings.action`, `GET /users/editmyemailsettings.action`, `POST /users/doeditmyemailsettings.action` | **No**; isolated UI form with `atl_token`, verified live (research §6.7) |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
 | Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |
 | Create, update, publish, draft delete | `POST`, `PUT`, `DELETE /rest/api/content…` | Yes |

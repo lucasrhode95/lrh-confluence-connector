@@ -39,44 +39,48 @@
   <text class="muted" x="98" y="388">exit codes 0, 1, 2 (sign-in required) and 130</text>
 
   <!-- MCP server. -->
-  <rect x="940" y="140" width="800" height="310" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="940" y="140" width="800" height="322" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M940 210 V154 Q940 140 954 140 H1726 Q1740 140 1740 154 V210 Z" fill="#183153"/>
   <text class="card-title" x="960" y="172">MCP SERVER</text>
   <text class="card-subtitle" x="960" y="196"><tspan class="code">surfaces/mcp_main.py</tspan> · <tspan class="code">build_server()</tspan> · FastMCP <tspan class="code">lrh-confluence-connector</tspan></text>
-  <rect x="960" y="226" width="760" height="210" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="960" y="226" width="760" height="226" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <g><title>Offline: configured instance, whether a token is stored, and its account name. → AppContext.auth_status</title><text class="detail" x="976" y="252">• <tspan class="code">auth_status</tspan></text></g>
-  <g><title>Current and archived spaces. → SpaceService.list_spaces</title><text class="detail" x="976" y="274">• <tspan class="code">list_spaces</tspan></text></g>
-  <g><title>Literal search with structured scope and cursors. → ContentSearch.search_content</title><text class="detail" x="976" y="296">• <tspan class="code">search_content</tspan></text></g>
-  <g><title>Display-name search, or an exact username. → UserSearch.find_users</title><text class="detail" x="976" y="318">• <tspan class="code">find_users</tspan></text></g>
-  <g><title>Ordered children from a page or space root. → PageTree.get_page_tree</title><text class="detail" x="976" y="340">• <tspan class="code">get_page_tree</tspan></text></g>
-  <g><title>History, versions, labels, contributors and ancestors. → PageMetadataService.get_page_metadata</title><text class="detail" x="976" y="362">• <tspan class="code">get_page_metadata</tspan></text></g>
-  <g><title>Budgeted text or unchanged storage, with version-pinned cursors. → PageTextService.get_pages</title><text class="detail" x="976" y="384">• <tspan class="code">get_pages</tspan></text></g>
-  <g><title>Read the signed-in account's eight email notification settings. → EmailNotificationSettingsService.get_settings</title><text class="detail" x="976" y="406">• <tspan class="code">get_email_settings</tspan></text></g>
-  <g><title>Update selected email settings for the signed-in account. → EmailNotificationSettingsService.update_settings</title><text class="detail" x="976" y="428">• <tspan class="code">update_email_settings</tspan></text></g>
-  <g><title>Saves selected attachments of one page locally. LOCAL_FILE annotation. → AttachmentDownloads.download_attachments</title><text class="detail" x="1212" y="252">• <tspan class="code">download_attachments</tspan></text></g>
-  <g><title>Full pages as one file or a flat ZIP. LOCAL_FILE annotation. → PageExports.export_pages</title><text class="detail" x="1212" y="274">• <tspan class="code">export_pages</tspan></text></g>
-  <g><title>Current page or new-page draft. → PageWrites.create_page</title><text class="detail" x="1212" y="296">• <tspan class="code">create_page</tspan></text></g>
-  <g><title>Whole-body replacement with expected_version. → PageWrites.update_page</title><text class="detail" x="1212" y="318">• <tspan class="code">update_page</tspan></text></g>
-  <g><title>The user's new-page drafts. → PageWrites.list_drafts</title><text class="detail" x="1212" y="340">• <tspan class="code">list_drafts</tspan></text></g>
-  <g><title>Publishes a new-page draft under the same ID. → PageWrites.publish_draft</title><text class="detail" x="1212" y="362">• <tspan class="code">publish_draft</tspan></text></g>
-  <g><title>Permanent; bypasses the trash. → PageWrites.delete_draft</title><text class="detail" x="1212" y="384">• <tspan class="code">delete_draft</tspan></text></g>
-  <g><title>Adds and removes global labels, one request each. → PageWrites.set_labels</title><text class="detail" x="1474" y="252">• <tspan class="code">set_labels</tspan></text></g>
-  <g><title>Parent, space-root or sibling placement. → PageStructure.move_page</title><text class="detail" x="1474" y="274">• <tspan class="code">move_page</tspan></text></g>
-  <g><title>Trash with refuse, move_up or trash for children. → PageStructure.delete_page</title><text class="detail" x="1474" y="296">• <tspan class="code">delete_page</tspan></text></g>
-  <g><title>Visible trashed pages, one space or all. → PageStructure.list_trash</title><text class="detail" x="1474" y="318">• <tspan class="code">list_trash</tspan></text></g>
-  <g><title>Restore, then caller, saved or space-root placement. → PageStructure.restore_page</title><text class="detail" x="1474" y="340">• <tspan class="code">restore_page</tspan></text></g>
-  <g><title>Read one footer or inline comment and its current version. → CommentManagement.get_comment</title><text class="detail" x="1474" y="362">• <tspan class="code">get_comment</tspan></text></g>
-  <g><title>Create a footer comment or reply; inline creation requires a selected text anchor. → CommentManagement.add_comment</title><text class="detail" x="1474" y="384">• <tspan class="code">add_comment</tspan></text></g>
-  <g><title>Update a comment at an expected version. → CommentManagement.update_comment</title><text class="detail" x="1474" y="406">• <tspan class="code">update_comment</tspan></text></g>
-  <g><title>Permanently delete a comment after explicit confirmation. → CommentManagement.delete_comment</title><text class="detail" x="1474" y="428">• <tspan class="code">delete_comment</tspan></text></g>
+  <g><title>Current and archived spaces. → SpaceService.list_spaces</title><text class="detail" x="976" y="273">• <tspan class="code">list_spaces</tspan></text></g>
+  <g><title>Literal search with structured scope and cursors. → ContentSearch.search_content</title><text class="detail" x="976" y="294">• <tspan class="code">search_content</tspan></text></g>
+  <g><title>Display-name search, or an exact username. → UserSearch.find_users</title><text class="detail" x="976" y="315">• <tspan class="code">find_users</tspan></text></g>
+  <g><title>Ordered children from a page or space root. → PageTree.get_page_tree</title><text class="detail" x="976" y="336">• <tspan class="code">get_page_tree</tspan></text></g>
+  <g><title>History, versions, labels, contributors and ancestors. → PageMetadataService.get_page_metadata</title><text class="detail" x="976" y="357">• <tspan class="code">get_page_metadata</tspan></text></g>
+  <g><title>Budgeted text or unchanged storage, with version-pinned cursors. → PageTextService.get_pages</title><text class="detail" x="976" y="378">• <tspan class="code">get_pages</tspan></text></g>
+  <g><title>Saves selected attachments of one page locally. LOCAL_FILE annotation. → AttachmentDownloads.download_attachments</title><text class="detail" x="976" y="399">• <tspan class="code">download_attachments</tspan></text></g>
+  <g><title>Full pages as one file or a flat ZIP. LOCAL_FILE annotation. → PageExports.export_pages</title><text class="detail" x="976" y="420">• <tspan class="code">export_pages</tspan></text></g>
+  <g><title>Read the signed-in account's eight email notification settings. → EmailNotificationSettingsService.get_settings</title><text class="detail" x="976" y="441">• <tspan class="code">get_email_settings</tspan></text></g>
+  <g><title>Current page or new-page draft. → PageWrites.create_page</title><text class="detail" x="1212" y="252">• <tspan class="code">create_page</tspan></text></g>
+  <g><title>Whole-body replacement with expected_version. → PageWrites.update_page</title><text class="detail" x="1212" y="273">• <tspan class="code">update_page</tspan></text></g>
+  <g><title>The user's new-page drafts. → PageWrites.list_drafts</title><text class="detail" x="1212" y="294">• <tspan class="code">list_drafts</tspan></text></g>
+  <g><title>Publishes a new-page draft under the same ID. → PageWrites.publish_draft</title><text class="detail" x="1212" y="315">• <tspan class="code">publish_draft</tspan></text></g>
+  <g><title>Permanent; bypasses the trash. → PageWrites.delete_draft</title><text class="detail" x="1212" y="336">• <tspan class="code">delete_draft</tspan></text></g>
+  <g><title>Adds and removes global labels, one request each. → PageWrites.set_labels</title><text class="detail" x="1212" y="357">• <tspan class="code">set_labels</tspan></text></g>
+  <g><title>Parent, space-root or sibling placement. → PageStructure.move_page</title><text class="detail" x="1212" y="378">• <tspan class="code">move_page</tspan></text></g>
+  <g><title>Trash with refuse, move_up or trash for children. → PageStructure.delete_page</title><text class="detail" x="1212" y="399">• <tspan class="code">delete_page</tspan></text></g>
+  <g><title>Visible trashed pages, one space or all. → PageStructure.list_trash</title><text class="detail" x="1212" y="420">• <tspan class="code">list_trash</tspan></text></g>
+  <g><title>Restore, then caller, saved or space-root placement. → PageStructure.restore_page</title><text class="detail" x="1212" y="441">• <tspan class="code">restore_page</tspan></text></g>
+  <g><title>Uploads files as new attachments, or as new versions of same-named ones. → AttachmentManagement.upload_attachments</title><text class="detail" x="1474" y="252">• <tspan class="code">upload_attachments</tspan></text></g>
+  <g><title>Renames an attachment or changes its comment or media type. → AttachmentManagement.update_attachment</title><text class="detail" x="1474" y="273">• <tspan class="code">update_attachment</tspan></text></g>
+  <g><title>Trashes one page's attachments; ones its body references need confirmation. → AttachmentManagement.trash_attachments</title><text class="detail" x="1474" y="294">• <tspan class="code">trash_attachments</tspan></text></g>
+  <g><title>Restores trashed attachments to their page. → AttachmentManagement.restore_attachments</title><text class="detail" x="1474" y="315">• <tspan class="code">restore_attachments</tspan></text></g>
+  <g><title>Read one footer or inline comment and its current version. → CommentManagement.get_comment</title><text class="detail" x="1474" y="336">• <tspan class="code">get_comment</tspan></text></g>
+  <g><title>Create a footer comment or reply; inline creation requires a selected text anchor. → CommentManagement.add_comment</title><text class="detail" x="1474" y="357">• <tspan class="code">add_comment</tspan></text></g>
+  <g><title>Update a comment at an expected version. → CommentManagement.update_comment</title><text class="detail" x="1474" y="378">• <tspan class="code">update_comment</tspan></text></g>
+  <g><title>Permanently delete a comment after explicit confirmation. → CommentManagement.delete_comment</title><text class="detail" x="1474" y="399">• <tspan class="code">delete_comment</tspan></text></g>
+  <g><title>Update selected email settings for the signed-in account. → EmailNotificationSettingsService.update_settings</title><text class="detail" x="1474" y="420">• <tspan class="code">update_email_settings</tspan></text></g>
 
   <path class="call-flow" d="M460 420 V476"/>
-  <path class="call-flow" d="M1340 450 V476"/>
+  <path class="call-flow" d="M1340 462 V476"/>
 
   <!-- Composition root. -->
   <rect x="60" y="480" width="1680" height="110" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="80" y="518"><tspan class="code">AppContext</tspan><tspan class="detail" dx="12">bootstrap.py</tspan></text>
-  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, comments, email_settings, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
+  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, comment_management, email_settings, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
 
   <path class="call-flow" d="M900 590 V646"/>
   <text class="flow-label" x="920" y="626"><tspan class="code">await services()</tspan> · domain models in, domain models out</text>
@@ -118,10 +122,10 @@
   <g><title>BeautifulSoup pre-pass over the view body (macro, attachment and image markers, typed references), then markdownify, then blocks for the budget.</title><text class="detail" x="96" y="1040">• <tspan class="code">page_text.render_page_body</tspan></text></g>
 
   <rect x="500" y="912" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title" x="516" y="944"><tspan class="code">AttachmentDownloads</tspan></text>
-  <g><title>One page and up to 500 attachment IDs. → ConfluenceApi.list_page_attachments, download_attachment</title><text class="detail" x="516" y="980">• <tspan class="code">download_attachments</tspan>: ≤ 500</text></g>
-  <g><title>The page's own attachment list is read first, so an ID from another page is refused.</title><text class="detail" x="516" y="1010">• ownership checked on the page</text></g>
-  <g><title>Collision-safe names in downloads/&lt;account&gt;/; a failed file is removed and listed.</title><text class="detail" x="516" y="1040">• <tspan class="code">localfiles.claim</tspan>, per-file failures</text></g>
+  <text class="group-title" x="516" y="944">Attachments</text>
+  <g><title>attachments.py: one page and up to 500 attachment IDs, checked against the page's own list and saved with collision-safe names. → ConfluenceApi.list_page_attachments, download_attachment</title><text class="detail" x="516" y="980">• <tspan class="code">AttachmentDownloads</tspan>: ≤ 500 files</text></g>
+  <g><title>attachment_management.py: uploads, new versions, renames, trash and restore. → ConfluenceApi.upload_page_attachment, upload_attachment_version, update_page_attachment, trash_page_attachment, restore_page_attachment</title><text class="detail" x="516" y="1010">• <tspan class="code">AttachmentManagement</tspan>: writes</text></g>
+  <g><title>IDs must belong to the named page; trashing an attachment the body references needs confirmation; an uncertain write stops the batch.</title><text class="detail" x="516" y="1040">• ownership · referenced-file guard</text></g>
 
   <rect x="920" y="912" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="936" y="944"><tspan class="code">PageExports</tspan><tspan class="detail" dx="10">exports.py</tspan></text>
@@ -137,27 +141,27 @@
 
   <rect x="80" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="96" y="1120"><tspan class="code">PageWrites</tspan><tspan class="detail" dx="10">writes.py</tspan></text>
-  <g><title>create_page checks for a duplicate title, converts the body and places the page; update_page refuses a stale expected_version, then sends the next version so a concurrent edit gets 409. → ConfluenceApi.create_page, update_page, position_page</title><text class="detail" x="96" y="1154">• <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan>: placement, version</text></g>
-  <g><title>New-page drafts only. delete_draft is permanent. → ConfluenceApi.list_drafts_page, publish_draft, delete_draft</title><text class="detail" x="96" y="1182">• <tspan class="code">list_drafts</tspan> · <tspan class="code">publish_draft</tspan> · <tspan class="code">delete_draft</tspan></text></g>
-  <g><title>One request per label change, in order, stopping at the first failure; successful changes are reported and never reversed. → ConfluenceApi.add_page_label, remove_page_label</title><text class="detail" x="96" y="1210">• <tspan class="code">set_labels</tspan>: sequential changes</text></g>
-  <g><title>to_storage checks rich markup, passes malformed XML through unchanged and converts well-formed code, expand and void tags; content_loss compares inline-comment anchors, macros and attachment references.</title><text class="detail" x="96" y="1238">• <tspan class="code">write_markup.py</tspan>: syntax, conversion, loss checks</text></g>
+  <g><title>create_page checks for a duplicate title, converts the body and places the page; update_page refuses a stale expected_version, then sends the next version so a concurrent edit gets 409. → ConfluenceApi.create_page, update_page, position_page</title><text class="detail" x="96" y="1154">• <tspan class="code">create_page</tspan> · <tspan class="code">update_page</tspan>: versions</text></g>
+  <g><title>New-page drafts only. → ConfluenceApi.list_drafts_page, publish_draft</title><text class="detail" x="96" y="1182">• <tspan class="code">list_drafts</tspan> · <tspan class="code">publish_draft</tspan></text></g>
+  <g><title>delete_draft is permanent. One request per label change, in order, stopping at the first failure; successful changes are reported and never reversed. → ConfluenceApi.delete_draft, add_page_label, remove_page_label</title><text class="detail" x="96" y="1210">• <tspan class="code">delete_draft</tspan> · <tspan class="code">set_labels</tspan></text></g>
+  <g><title>to_storage checks rich markup, passes malformed XML through unchanged and converts well-formed code, expand and void tags; content_loss compares inline-comment anchors, macro parameters and attachment references.</title><text class="detail" x="96" y="1238">• <tspan class="code">write_markup.py</tspan>: conversion, loss checks</text></g>
 
   <rect x="500" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="516" y="1120"><tspan class="code">CommentManagement</tspan></text>
-  <g><title>Read one comment with page, author, parent, version and inline metadata. → ConfluenceApi.get_comment</title><text class="detail" x="516" y="1154">• <tspan class="code">get_comment</tspan>: one comment by ID</text></g>
+  <g><title>comment_management.py: reads one comment with its page, URL, author, parent, version and inline metadata. → ConfluenceApi.get_comment</title><text class="detail" x="516" y="1154">• <tspan class="code">get_comment</tspan>: one comment by ID</text></g>
   <g><title>Create footer comments or replies after checking the page and parent ownership. Inline creation needs a text-selection anchor.</title><text class="detail" x="516" y="1182">• add footer comment or reply</text></g>
   <g><title>Updates require the current version; deletes are permanent and require explicit confirmation.</title><text class="detail" x="516" y="1210">• version checks · confirmed delete</text></g>
   <g><title>Optional page references are checked against the comment owner. Each write uses the account-bound transport.</title><text class="detail" x="516" y="1238">• ownership · account-bound writes</text></g>
 
   <rect x="920" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title" x="936" y="1120"><tspan class="code">UserSettings</tspan></text>
-  <g><title>Reads the signed-in account's eight email notification values from the view form. → EmailNotificationSettingsService.get_settings</title><text class="detail" x="936" y="1154">• <tspan class="code">get_email_settings</tspan></text></g>
-  <g><title>Merges selected fields into current state, sends the full form and rereads settings. → EmailNotificationSettingsService.update_settings</title><text class="detail" x="936" y="1182">• <tspan class="code">update_email_settings</tspan></text></g>
-  <g><title>Uses atl_token through the shared account-bound transport; does not depend on the REST adapter.</title><text class="detail" x="936" y="1210">• isolated UI form · account-bound</text></g>
-  <g><title>Returns mismatches after readback; the configured account received HTTP 403 for writes, an open live check.</title><text class="detail" x="936" y="1238">• full-state readback · mismatches</text></g>
+  <text class="section-title" x="936" y="1120"><tspan class="code">user_settings.py</tspan></text>
+  <g><title>Reads and updates the signed-in account's eight email notification settings. → get_settings, update_settings</title><text class="detail" x="936" y="1154">• <tspan class="code">EmailNotificationSettingsService</tspan></text></g>
+  <g><title>Merges selected fields into the current state, sends the full form, rereads it and reports mismatches; an unchanged update sends nothing.</title><text class="detail" x="936" y="1182">• full-state form, readback</text></g>
+  <g><title>Reads the editor's atl_token form and posts it with the no-check header through the shared account-bound transport; it does not depend on the REST adapter.</title><text class="detail" x="936" y="1210">• isolated UI form · account-bound</text></g>
+  <g><title>Values come from the view page; the editor's form (doeditmyemailsettings.action, confirm button) saves. A one-setting round trip and restore were verified live (research §6.7).</title><text class="detail" x="936" y="1238">• editor form saves · verified live</text></g>
 
   <rect x="1340" y="1088" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title" x="1356" y="1120"><tspan class="code">PageStructure</tspan></text>
+  <text class="section-title" x="1356" y="1120"><tspan class="code">PageStructure</tspan><tspan class="detail" dx="10">structure.py</tspan></text>
   <g><title>Moves pages by parent or position; cross-space moves wait for terminal long-task completion. → ConfluenceApi.move_page_action</title><text class="detail" x="1356" y="1154">• <tspan class="code">move_page</tspan>: parent / position</text></g>
   <g><title>Checks delete permission, saves placement, then trashes up to 100 pages according to child policy.</title><text class="detail" x="1356" y="1182">• <tspan class="code">delete_page</tspan>: child policy</text></g>
   <g><title>Lists the trash and restores a page to caller, saved or root placement.</title><text class="detail" x="1356" y="1210">• <tspan class="code">list_trash</tspan> · <tspan class="code">restore_page</tspan></text></g>

@@ -60,11 +60,12 @@ class _Macro:
 
 @dataclass(frozen=True)
 class IncludePageTarget:
-    """A page target declared by an include or excerpt-include macro."""
+    """A page target declared by an include or excerpt-include macro; excerpt shows only the excerpt."""
 
     page_id: str | None
     title: str | None
     space_key: str | None
+    excerpt: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,9 @@ def parse_storage(
     )
     blocks = tuple(_storage_top_level_blocks(storage_html, soup)) if include_top_level_blocks else ()
     include_targets = tuple(
-        IncludePageTarget(macro.page_id, macro.page_title, macro.page_space_key)
+        IncludePageTarget(
+            macro.page_id, macro.page_title, macro.page_space_key, excerpt=macro.name == "excerpt-include"
+        )
         for macro in macros
         if macro.name in _INCLUDE_MACROS
     )
@@ -145,6 +148,19 @@ def parse_storage(
         include_targets=include_targets,
         macro_references=macro_references,
     )
+
+
+def excerpt_storage(storage_html: str) -> str:
+    """Return the bodies of a page's excerpt macros, the only part an excerpt-include shows."""
+    soup = BeautifulSoup(storage_html, "html.parser")
+    parts: list[str] = []
+    for macro in soup.find_all("ac:structured-macro"):
+        if (macro.get("ac:name") or "").casefold() != "excerpt":
+            continue
+        body = macro.find("ac:rich-text-body")
+        if isinstance(body, Tag) and body.find_parent("ac:structured-macro") is macro:
+            parts.append(body.decode_contents())
+    return "".join(parts)
 
 
 def unique_references(references: list[PageReference]) -> list[PageReference]:

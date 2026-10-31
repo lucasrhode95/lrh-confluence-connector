@@ -6,7 +6,9 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter
+from typing import Any
 from html import escape
+from html.entities import html5
 from html.parser import HTMLParser
 
 from bs4 import CData, BeautifulSoup, Tag
@@ -49,7 +51,16 @@ _URL_ATTRIBUTES = frozenset(
 _LANGUAGE_CLASS = re.compile(r"(?:^|\s)language-([a-zA-Z0-9_+#.-]+)(?:\s|$)")
 _JAVASCRIPT_SCHEME = re.compile(r"^javascript\s*:", re.IGNORECASE)
 _XML_PREFIX = re.compile(r"(?<![\w.-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])")
+_NAMED_ENTITY = re.compile(r"&([A-Za-z][A-Za-z0-9]*);")
+_XML_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 MAX_RICH_MARKUP_DEPTH = 128
+
+
+def body_to_storage(value: Any, page_format: Any) -> str:
+    """Entry point for page and comment bodies: validate the text, then convert its format."""
+    if not isinstance(value, str):
+        raise InvalidRequest("body must be text.")
+    return to_storage(value, page_format)
 
 
 def to_storage(body: str, page_format: str) -> str:
@@ -172,7 +183,7 @@ def _is_well_formed_fragment(source: str) -> bool:
         if prefix not in {"xml", "xmlns"}
     }
     namespaces = " ".join(f'xmlns:{prefix}="urn:{prefix}"' for prefix in sorted(prefixes))
-    normalized = _close_html_void_elements(source)
+    normalized = _numeric_html_entities(_close_html_void_elements(source))
     try:
         ET.fromstring(f"<confluence-body {namespaces}>{normalized}</confluence-body>")
     except ET.ParseError:
@@ -180,8 +191,23 @@ def _is_well_formed_fragment(source: str) -> bool:
     return True
 
 
+def _numeric_html_entities(source: str) -> str:
+    """Spell HTML named entities numerically for XML validation; storage accepts them, XML does not."""
+
+    def numeric(match: re.Match[str]) -> str:
+        name = match.group(1)
+        text = html5.get(f"{name};")
+        if name in _XML_ENTITIES or text is None:
+            return match.group(0)
+        return "".join(f"&#{ord(character)};" for character in text)
+
+    return _NAMED_ENTITY.sub(numeric, source)
+
+
 def _close_html_void_elements(source: str) -> str:
     """Normalize only HTML void start tags for XML validation; do not repair other malformed markup."""
+    if not any(f"<{tag}" in source.casefold() for tag in _VOID_TAGS):
+        return source
     parser = _VoidTagNormalizer(source)
     parser.feed(source)
     parser.close()
@@ -349,9 +375,8 @@ def _source_items(source: str) -> list[tuple[str, ...]]:
             identity = _attachment_identity(node)
             items.append(("attachment", identity))
         elif node.name == "ac:structured-macro":
-            macro_id, fallback_identity, signature = _macro_identity(node)
-            name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
-            items.append(("macro", macro_id or "", fallback_identity, name, signature))
+            name, macro_id, fallback_identity = _macro_identity(node)
+            items.append(("macro", macro_id or "", fallback_identity, name))
     return items
 
 
@@ -361,25 +386,30 @@ def _macros_by_identity(
     shared_ids: set[str],
     other_items: list[tuple[str, ...]],
 ) -> dict[str, Counter[tuple[str, str]]]:
-    """Group macros by IDs shared across both bodies, or by the fallback when one lacks an ID."""
+    """Group macros by IDs shared across both bodies, or by the fallback when one lacks an ID.
+
+    Within a group a macro's shape is its name and parameters, so a changed parameter counts as a
+    change and an edited body inside the macro does not.
+    """
     grouped: dict[str, Counter[tuple[str, str]]] = {}
     other_without_id = {
         item[2] for item in other_items if item[0] == "macro" and not item[1]
     }
     for item in items:
         if item[0] == "macro":
-            _kind, macro_id, fallback, name, signature = item
+            _kind, macro_id, fallback, name = item
             if macro_id in shared_ids:
                 identity = f"macro-id:{macro_id}"
             elif not macro_id or fallback in other_without_id:
                 identity = f"fallback:{fallback}"
             else:
                 identity = f"unmatched-id:{macro_id}"
-            grouped.setdefault(identity, Counter())[(name, signature)] += 1
+            grouped.setdefault(identity, Counter())[(name, fallback)] += 1
     return grouped
 
 
-def _macro_identity(node: Tag) -> tuple[str | None, str, str]:
+def _macro_identity(node: Tag) -> tuple[str, str | None, str]:
+    """Return the macro name, its trimmed ac:macro-id and its name-and-parameters fallback identity."""
     name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
     macro_id = node.get("ac:macro-id") or node.get("macro-id")
     parameters: list[tuple[str, str]] = []
@@ -400,19 +430,7 @@ def _macro_identity(node: Tag) -> tuple[str | None, str, str]:
         ensure_ascii=False,
     )
     macro_id = macro_id.strip() if isinstance(macro_id, str) and macro_id.strip() else None
-    return macro_id, fallback_identity, _macro_signature(node)
-
-
-def _macro_signature(node: Tag) -> str:
-    """Serialize a macro's own source body while excluding nested macro implementations."""
-    soup = BeautifulSoup(str(node), "html.parser")
-    root = soup.find("ac:structured-macro")
-    if not isinstance(root, Tag):
-        return str(node)
-    for nested in list(root.find_all("ac:structured-macro")):
-        if nested is not root:
-            nested.decompose()
-    return str(root)
+    return name, macro_id, fallback_identity
 
 
 def _page_identity(node: Tag) -> tuple[str, ...]:

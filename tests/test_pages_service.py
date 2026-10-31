@@ -15,6 +15,7 @@ from confluence_connector.domain.models import (
     PageParseScope,
     RemotePageComment,
     RemotePageContent,
+    RemotePageStorage,
     ResolvedPageReference,
     PersonSummary,
 )
@@ -50,8 +51,50 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
             {(item.macro_name, item.owner_page_id) for item in macro_references},
             {("status", "90"), ("expand", "90"), ("html", "90"), ("plantuml", "91")},
         )
-        self.assertEqual(api.content_calls.count(("90", None)), 1)
-        self.assertEqual(api.content_calls.count(("91", None)), 1)
+        self.assertEqual(api.storage_calls, ["90", "91"])
+        self.assertEqual(api.content_calls, [("55", None)])
+
+    async def test_excerpt_include_reports_only_macros_inside_the_excerpt(self) -> None:
+        host = _page("55", 1, "<p>Host</p>", _include("90", macro="excerpt-include"))
+        included = _page(
+            "90",
+            2,
+            "<p>Included</p>",
+            '<ac:structured-macro ac:name="excerpt"><ac:rich-text-body>'
+            '<ac:structured-macro ac:name="status"/></ac:rich-text-body></ac:structured-macro>'
+            '<ac:structured-macro ac:name="html"/>',
+        )
+        api = _ReadApi(pages={"55": host, "90": included})
+
+        result = await _service(api).get_pages(
+            "55", parse_scope={"comments": False, "attachments": False}
+        )
+
+        included_macros = {
+            item.macro_name for item in result.pages[0].references
+            if item.kind == "macro" and item.owner_page_id == "90"
+        }
+        self.assertEqual(included_macros, {"status"})
+
+    async def test_continuation_does_not_read_included_pages_again(self) -> None:
+        host = _page(
+            "55",
+            1,
+            "".join(f"<p>Paragraph {index} with enough text to split.</p>" for index in range(6)),
+            _include("90"),
+        )
+        included = _page("90", 2, "<p>Included</p>", '<ac:structured-macro ac:name="status"/>')
+        api = _ReadApi(pages={"55": host, "90": included})
+        service = _service(api)
+
+        first = await service.get_pages(
+            "55", max_chars=80, parse_scope={"comments": False, "attachments": False, "header": False}
+        )
+        self.assertIsNotNone(first.next_cursor)
+        second = await service.get_pages(cursor=first.next_cursor)
+
+        self.assertEqual(api.storage_calls, ["90"])
+        self.assertIn("Included-page macro references were returned with the first part of this page.", second.notes)
 
     async def test_include_title_uses_host_space_and_reports_cycles_and_read_failures(self) -> None:
         host = _page("55", 1, "<p>Host</p>", _include(title="Shared page"))
@@ -68,7 +111,7 @@ class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("SYNTH", "Shared page"), api.title_lookups)
         self.assertIn("An include cycle was detected; recursion stopped.", result.pages[0].notes)
         self.assertTrue(any("included page could not be read (NotFound)" in note for note in result.pages[0].notes))
-        self.assertEqual(api.content_calls.count(("55", None)), 1)
+        self.assertEqual(api.content_calls, [("55", None)])
 
     async def test_text_read_renders_sections_and_keeps_typed_references(self) -> None:
         api = _ReadApi(
@@ -509,7 +552,13 @@ def _page(page_id: str, version: int, view: str, storage: str) -> RemotePageCont
     )
 
 
-def _include(page_id: str | None = None, *, title: str | None = None, space_key: str | None = None) -> str:
+def _include(
+    page_id: str | None = None,
+    *,
+    title: str | None = None,
+    space_key: str | None = None,
+    macro: str = "include",
+) -> str:
     target_attributes = []
     if page_id is not None:
         target_attributes.append(f'ri:content-id="{page_id}"')
@@ -519,7 +568,7 @@ def _include(page_id: str | None = None, *, title: str | None = None, space_key:
         target_attributes.append(f'ri:space-key="{space_key}"')
     target = "<ri:page " + " ".join(target_attributes) + "/>" if target_attributes else ""
     return (
-        '<ac:structured-macro ac:name="include"><ac:parameter ac:name="">'
+        f'<ac:structured-macro ac:name="{macro}"><ac:parameter ac:name="">'
         + target
         + "</ac:parameter></ac:structured-macro>"
     )
@@ -552,6 +601,15 @@ class _ReadApi:
         self.content_calls: list[tuple[str, int | None]] = []
         self.optional_calls: list[tuple[str, str]] = []
         self.title_lookups: list[tuple[str, str]] = []
+        self.storage_calls: list[str] = []
+
+    async def get_page_storage(self, page_id: str, *, expected_username: str) -> RemotePageStorage:
+        self.storage_calls.append(page_id)
+        try:
+            page = self.pages[page_id]
+        except KeyError:
+            raise NotFound("Synthetic included page unavailable") from None
+        return RemotePageStorage(page_id=page_id, space_key=page.metadata.space_key, storage_body=page.storage_body)
 
     async def get_page_content(
         self,

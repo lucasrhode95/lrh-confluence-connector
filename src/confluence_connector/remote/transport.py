@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any, BinaryIO
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -120,20 +120,31 @@ class ConfluenceTransport:
         form_fields: Mapping[str, str],
         expected_username: str,
     ) -> FormResponse:
-        """Submit one account-bound HTML form without following its redirect or retrying uncertain writes."""
+        """Submit one account-bound HTML form without following its redirect or retrying uncertain writes.
+
+        The form carries its own ``atl_token``; the no-check header is also sent, as for REST writes. A
+        redirect to the login page means the token was not accepted and nothing was saved.
+        """
         result = await self._exchange(
             "POST",
             path,
             form_fields=form_fields,
             expected_username=expected_username,
             allow_redirect=True,
+            skip_atlassian_token_check=True,
             accept="text/html",
         )
         response = result.response
-        return FormResponse(
-            status_code=response.status_code,
-            location=response.headers.get("location"),
-        )
+        location = response.headers.get("location")
+        if response.status_code in REDIRECT_STATUSES and urlsplit(location or "").path.casefold().endswith("login.action"):
+            raise AuthenticationRequired(
+                "Confluence redirected the form to its login page; the stored token was not accepted and nothing was saved."
+            )
+        return FormResponse(status_code=response.status_code, location=location)
+
+    def clear_session(self) -> None:
+        """Drop cookies Confluence set, so a later account never reuses an earlier account's session."""
+        self._client.cookies.clear()
 
     async def download_to(
         self,
