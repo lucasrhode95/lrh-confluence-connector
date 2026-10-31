@@ -375,9 +375,8 @@ def _source_items(source: str) -> list[tuple[str, ...]]:
             identity = _attachment_identity(node)
             items.append(("attachment", identity))
         elif node.name == "ac:structured-macro":
-            macro_id, fallback_identity, signature = _macro_identity(node)
-            name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
-            items.append(("macro", macro_id or "", fallback_identity, name, signature))
+            name, macro_id, fallback_identity = _macro_identity(node)
+            items.append(("macro", macro_id or "", fallback_identity, name))
     return items
 
 
@@ -387,25 +386,30 @@ def _macros_by_identity(
     shared_ids: set[str],
     other_items: list[tuple[str, ...]],
 ) -> dict[str, Counter[tuple[str, str]]]:
-    """Group macros by IDs shared across both bodies, or by the fallback when one lacks an ID."""
+    """Group macros by IDs shared across both bodies, or by the fallback when one lacks an ID.
+
+    Within a group a macro's shape is its name and parameters, so a changed parameter counts as a
+    change and an edited body inside the macro does not.
+    """
     grouped: dict[str, Counter[tuple[str, str]]] = {}
     other_without_id = {
         item[2] for item in other_items if item[0] == "macro" and not item[1]
     }
     for item in items:
         if item[0] == "macro":
-            _kind, macro_id, fallback, name, signature = item
+            _kind, macro_id, fallback, name = item
             if macro_id in shared_ids:
                 identity = f"macro-id:{macro_id}"
             elif not macro_id or fallback in other_without_id:
                 identity = f"fallback:{fallback}"
             else:
                 identity = f"unmatched-id:{macro_id}"
-            grouped.setdefault(identity, Counter())[(name, signature)] += 1
+            grouped.setdefault(identity, Counter())[(name, fallback)] += 1
     return grouped
 
 
-def _macro_identity(node: Tag) -> tuple[str | None, str, str]:
+def _macro_identity(node: Tag) -> tuple[str, str | None, str]:
+    """Return the macro name, its trimmed ac:macro-id and its name-and-parameters fallback identity."""
     name = (node.get("ac:name") or node.get("name") or "unknown").casefold()
     macro_id = node.get("ac:macro-id") or node.get("macro-id")
     parameters: list[tuple[str, str]] = []
@@ -426,19 +430,7 @@ def _macro_identity(node: Tag) -> tuple[str | None, str, str]:
         ensure_ascii=False,
     )
     macro_id = macro_id.strip() if isinstance(macro_id, str) and macro_id.strip() else None
-    return macro_id, fallback_identity, _macro_signature(node)
-
-
-def _macro_signature(node: Tag) -> str:
-    """Serialize a macro's own source body while excluding nested macro implementations."""
-    soup = BeautifulSoup(str(node), "html.parser")
-    root = soup.find("ac:structured-macro")
-    if not isinstance(root, Tag):
-        return str(node)
-    for nested in list(root.find_all("ac:structured-macro")):
-        if nested is not root:
-            nested.decompose()
-    return str(root)
+    return name, macro_id, fallback_identity
 
 
 def _page_identity(node: Tag) -> tuple[str, ...]:

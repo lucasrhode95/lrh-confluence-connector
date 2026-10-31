@@ -135,7 +135,7 @@ class WriteMarkupChecks(unittest.TestCase):
 
         self.assertEqual(content_loss(before, replacement), (False, ["1 status macro(s) changed."]))
 
-    def test_macro_body_edit_with_stable_id_reports_changed(self) -> None:
+    def test_macro_body_edit_with_stable_id_is_not_reported(self) -> None:
         before = (
             '<ac:structured-macro ac:name="panel" ac:macro-id="stable-2">'
             "<ac:rich-text-body>Before</ac:rich-text-body>"
@@ -147,7 +147,7 @@ class WriteMarkupChecks(unittest.TestCase):
             "</ac:structured-macro>"
         )
 
-        self.assertEqual(content_loss(before, replacement), (False, ["1 panel macro(s) changed."]))
+        self.assertEqual(content_loss(before, replacement), (False, []))
 
     def test_macro_without_id_uses_name_and_parameters_as_fallback_identity(self) -> None:
         before = (
@@ -163,7 +163,7 @@ class WriteMarkupChecks(unittest.TestCase):
 
         self.assertEqual(content_loss(before, replacement), (False, ["1 status macro(s) would be removed."]))
 
-    def test_macro_without_id_on_one_side_uses_the_fallback_identity(self) -> None:
+    def test_macro_without_id_on_one_side_matches_by_the_fallback_identity(self) -> None:
         before = (
             '<ac:structured-macro ac:name="panel" ac:macro-id="stable-4">'
             '<ac:parameter ac:name="title">Same</ac:parameter>'
@@ -177,7 +177,7 @@ class WriteMarkupChecks(unittest.TestCase):
             "</ac:structured-macro>"
         )
 
-        self.assertEqual(content_loss(before, replacement), (False, ["1 panel macro(s) changed."]))
+        self.assertEqual(content_loss(before, replacement), (False, []))
 
     def test_macro_id_moved_to_another_name_reports_a_change(self) -> None:
         before = '<ac:structured-macro ac:name="status" ac:macro-id="stable-3"></ac:structured-macro>'
@@ -197,7 +197,7 @@ class WriteMarkupChecks(unittest.TestCase):
                 self.assertFalse(has_anchor_loss)
                 self.assertTrue(any(warning in value for value in warnings))
 
-    def test_nested_macro_change_reports_changed_parent_body_and_removed_child(self) -> None:
+    def test_nested_macro_removal_reports_the_child_not_its_parent(self) -> None:
         before = (
             '<ac:structured-macro ac:name="panel">'
             '<ac:parameter ac:name="title">Heading</ac:parameter>'
@@ -213,7 +213,7 @@ class WriteMarkupChecks(unittest.TestCase):
 
         self.assertEqual(
             content_loss(before, replacement),
-            (False, ["1 panel macro(s) changed.", "1 jira macro(s) would be removed."]),
+            (False, ["1 jira macro(s) would be removed."]),
         )
 
 

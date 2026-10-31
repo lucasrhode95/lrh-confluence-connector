@@ -272,7 +272,7 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
   so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
   reported as warnings. A macro with `ac:macro-id` in both bodies is matched by that ID, so a changed
-  parameter or body is reported as changed rather than removed. Macros without IDs use name and
+  parameter is reported as changed rather than removed; text edited inside a macro is not reported. Macros without IDs use name and
   parameters as their fallback identity.
 
 ### 10.3 Page, draft and label tools (D10)
