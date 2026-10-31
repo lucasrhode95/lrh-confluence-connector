@@ -61,7 +61,7 @@ class EmailNotificationSettingsService:
             if getattr(form.settings, name) != getattr(desired, name)
         ]
         if not changed:
-            raise InvalidRequest("The selected settings already have those values; nothing was sent.")
+            return EmailNotificationSettingsUpdateResult(settings=form.settings)
         response = await self._transport.send_form(
             UPDATE_SETTINGS_ROUTE,
             form_fields=form.submission_fields(desired),

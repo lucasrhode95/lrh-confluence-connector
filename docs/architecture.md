@@ -88,7 +88,8 @@ Only design rules that the code layout does not make obvious are listed here. To
 
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
   timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
-  across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk.
+  across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk. Cookies Confluence
+  sets are cleared when the stored account changes, so no session outlives its account.
 - JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
   destination stream while the transport applies the shared retry, status and account checks. Fixture
   multipart uploads use the same write policy. Decoded response snapshots omit compression headers.
@@ -272,7 +273,9 @@ saved comment for the result.
 **[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
 undocumented HTML email settings form from the REST adapter. It reads the form through the shared,
 account-bound transport, merges partial updates with the currently read values, submits all eight
-settings with the form token, and rereads them to report mismatches.
+settings with the form token and the `X-Atlassian-Token: no-check` header, and rereads them to report
+mismatches. A redirect to the login page is an authentication failure, not a save. An update that
+changes nothing returns the current values without a form submission.
 
 **[`localfiles.py`](../src/confluence_connector/service/localfiles.py)**: account-specific output
 folders, cleanup of files older than seven days when a folder is next used (tolerating files another

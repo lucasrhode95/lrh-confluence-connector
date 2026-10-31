@@ -66,7 +66,7 @@ class EmailNotificationSettingsUpdateResult(BaseModel):
     settings: EmailNotificationSettings
     changed_settings: list[str] = Field(default_factory=list)
     mismatches: list[str] = Field(default_factory=list)
-    response_status: int
+    response_status: int | None = None
 
 
 class SpaceSummary(BaseModel):

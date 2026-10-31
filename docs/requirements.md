@@ -395,8 +395,9 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   network, new followers, own-action notifications, changed-content display and recommended updates.
 - `update_email_settings` changes only provided fields. It reads current values, merges the requested
   fields, submits the complete state through the isolated email settings form, then rereads all eight
-  values. Results report the confirmed values and any mismatches. An unchanged or empty update sends
-  no request.
+  values. Results report the confirmed values and any mismatches. An empty update is refused. An
+  update that changes nothing returns the current values and sends no form. A redirect to the login
+  page is reported as an authentication failure.
 - This changes account configuration. The tool and server instructions state that plainly. Every
   request is bound to the username stored with the token; the undocumented form is isolated from the
   REST adapter.

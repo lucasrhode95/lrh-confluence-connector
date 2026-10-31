@@ -39,12 +39,16 @@ class EmailNotificationSettingsChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport.submitted["notifyByEmail"], "on")
         self.assertEqual(transport.submitted["siteBlogWatchForUser"], "on")
 
-    async def test_empty_or_unchanged_update_does_not_post(self) -> None:
+    async def test_empty_update_is_refused_and_unchanged_update_does_not_post(self) -> None:
         transport = _Transport()
         service = _service(transport)
-        for update in (EmailNotificationSettingsUpdate(), EmailNotificationSettingsUpdate(autowatch=True)):
-            with self.subTest(update=update), self.assertRaises(InvalidRequest):
-                await service.update_settings(update)
+        with self.assertRaises(InvalidRequest):
+            await service.update_settings(EmailNotificationSettingsUpdate())
+
+        result = await service.update_settings(EmailNotificationSettingsUpdate(autowatch=True))
+
+        self.assertEqual((result.changed_settings, result.mismatches, result.response_status), ([], [], None))
+        self.assertTrue(result.settings.autowatch)
         self.assertEqual(transport.posts, 0)
 
     async def test_reports_server_values_that_differ_after_save(self) -> None:
