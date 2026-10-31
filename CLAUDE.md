@@ -97,6 +97,7 @@ A local MCP connector for one user's Confluence Data Center account. Requirement
 full page/tree reads, metadata, attachment retrieval, exports, and draft/page CRUD and moves.
 The current MCP surface implements `auth_status`, `list_spaces`, `search_content`, `find_users`,
 `get_page_tree`, `get_page_metadata`, `get_pages`, `download_attachments`, `export_pages`,
+`upload_attachments`, `update_attachment`, `trash_attachments`, `restore_attachments`,
 `create_page`, `update_page`, `get_comment`, `add_comment`, `update_comment`, `delete_comment`,
 `get_email_settings`, `update_email_settings`,
 `list_drafts`, `publish_draft`, `delete_draft`, `set_labels`, `move_page`, `delete_page`, `list_trash`

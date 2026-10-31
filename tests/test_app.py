@@ -52,8 +52,11 @@ class AppContextChecks(unittest.IsolatedAsyncioTestCase):
         context = AppContext(settings(), store=store)  # type: ignore[arg-type]
         try:
             first = await context.services()
+            transport = context._transport_or_raise()
+            transport._client.cookies.set("JSESSIONID", "synthetic-session-a")
             store.credential = StoredCredential(username="sample-user-b", token="synthetic-pat-b")
             second = await context.services()
+            self.assertEqual(len(transport._client.cookies), 0)
             self.assertEqual(first.username, "sample-user-a")
             self.assertEqual(second.username, "sample-user-b")
             self.assertIsNot(first, second)

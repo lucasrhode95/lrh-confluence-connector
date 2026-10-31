@@ -86,6 +86,8 @@ class AppContext:
             if credential is None:
                 raise AuthenticationRequired("No Confluence token is stored.")
             if self._services is None or self._services.username.casefold() != credential.username.casefold():
+                if self._services is not None and self._transport is not None:
+                    self._transport.clear_session()
                 self._services = self._build(credential.username)
             return self._services
 

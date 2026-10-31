@@ -175,7 +175,8 @@ storage technique is shared (§5).
 - A typed `references` list (kind, IDs, filename, media type, size, owner page) is collected from
   `view` attributes and `storage` elements **before** conversion. When `macros_from_storage` is on,
   `include` and `excerpt-include` targets are resolved and their macro identities are added with the
-  source page as `owner_page_id`. Nested includes are followed to depth 5 and at most 100 included
+  source page as `owner_page_id`; an `excerpt-include` adds only macros inside the target's excerpt.
+  Continuations of a page do not repeat this. Nested includes are followed to depth 5 and at most 100 included
   pages per requested page; cycles, unresolved targets and pages that cannot be read are reported in
   `notes`. Agents never parse marker text, and the connector never reads identity back from it.
 - A requested body that is missing or malformed is an upstream error, never an empty page.
@@ -238,8 +239,8 @@ Writes run only when a write tool is called, and are tested only on disposable s
   other local files into a page.
 - Page bodies have no connector-imposed character limit. Before converting a `rich` body, active
   content and nesting checks run. If it is not well-formed XML markup, the original body is sent
-  unchanged so Confluence can return its 400 syntax error and row/column; only HTML void-tag closure
-  is normalized while checking well-formedness. Well-formed rich input receives the targeted
+  unchanged so Confluence can return its 400 syntax error and row/column. The check accepts HTML
+  void tags and HTML named entities such as `&nbsp;`, which storage allows and XML alone does not. Well-formed rich input receives the targeted
   conversions observed in research §6.5: `<pre><code class="language-X">` and plain `<pre>` become
   the code macro; HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
   `body_file` is sent byte for byte except new `<pre>` and `<details>` blocks, which get the same
@@ -272,7 +273,7 @@ Outlook connectors; there are no section, append or find-and-replace modes.
 - The stored and new bodies are compared first. Dropping inline-comment anchors detaches those comments,
   so it is refused unless `allow_comment_loss: true`; removed macros and attachment references are
   reported as warnings. A macro with `ac:macro-id` in both bodies is matched by that ID, so a changed
-  parameter or body is reported as changed rather than removed. Macros without IDs use name and
+  parameter is reported as changed rather than removed; text edited inside a macro is not reported. Macros without IDs use name and
   parameters as their fallback identity.
 
 ### 10.3 Page, draft and label tools (D10)
@@ -364,17 +365,17 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   multipart uploads. The result echoes the requested value; Confluence reads `minorEdit` back as
   `false`, so it cannot confirm which value was sent.
 - Page creation, footer comment creation, draft deletion, label changes, moves, comment deletion and
-  trash routes have no verified suppression field. Their tool descriptions and results report that
-  limitation and the server's default behavior.
-  A page restore followed by a placement move reports the same limitation when the move is applied.
+  trash routes have no verified suppression field. Their tool descriptions say so, and their results
+  set `notification_suppression_supported: false`; a note explains it only when `false` was requested.
+  A page restore reports the same limitation when its placement move ran or may have run.
 
 ### 10.8 Comment management
 
 - `get_comment` reads one footer or inline comment by decimal ID and returns its body, version, page
   and URL, parent, author, creation time, location, resolution and selected text when available.
 - `add_comment` creates a footer comment on one current page, or a reply when `parent_comment_id`
-  belongs to that same page. Bodies use the same rich-storage or escaped-text conversion and 2-million
-  character limit as page writes. Inline comments cannot be created because they require a text
+  belongs to that same page. Bodies use the same rich-storage or escaped-text conversion as page writes,
+  with no connector-imposed length limit. Inline comments cannot be created because they require a text
   selection anchor.
 - `update_comment` replaces the body at an exact `expected_version`; stale versions are refused.
   An optional page reference must match the comment's owner. Inline anchors are separate source
@@ -384,7 +385,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   instance and cannot be undone. An optional page reference must match the owner; server permission
   failures remain explicit. The DELETE route has no notification-suppression control.
 - Every write is bound to the authenticated account; an uncertain outcome is never resent. Results
-  include the comment ID, page, URL and version where applicable. Inline-comment
+  include the comment ID, page, URL and version where applicable; create and update reread the saved
+  comment, and a failed reread returns the known ID and version with a warning. Inline-comment
   resolve/reopen is not exposed because the configured instance has no verified REST write route for
   that state.
 
@@ -393,9 +395,10 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 - `get_email_settings` reads the signed-in account's autowatch, daily updates, all blog posts,
   network, new followers, own-action notifications, changed-content display and recommended updates.
 - `update_email_settings` changes only provided fields. It reads current values, merges the requested
-  fields, submits the complete state through the isolated email settings form, then rereads all eight
-  values. Results report the confirmed values and any mismatches. An unchanged or empty update sends
-  no request.
+  fields, submits the complete state through the editor's save form, then rereads all eight
+  values. Results report the confirmed values and any mismatches. An empty update is refused. An
+  update that changes nothing returns the current values and sends no form. A redirect to the login
+  page is reported as an authentication failure.
 - This changes account configuration. The tool and server instructions state that plainly. Every
   request is bound to the username stored with the token; the undocumented form is isolated from the
   REST adapter.

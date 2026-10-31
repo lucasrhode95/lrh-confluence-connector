@@ -25,6 +25,20 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(client.aclose)
         return ConfluenceApi(settings(), transport)
 
+    async def test_included_page_read_requests_storage_and_space_only(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            return httpx.Response(
+                200, json={"id": "90", "space": {"key": "SYNTH"}, "body": {"storage": {"value": "<p>x</p>"}}}
+            )
+
+        page = await self.make_api(handler).get_page_storage("90", expected_username="sample-user")
+
+        self.assertEqual((page.page_id, page.space_key, page.storage_body), ("90", "SYNTH", "<p>x</p>"))
+        self.assertEqual(observed[0].url.params["expand"], "space,body.storage")
+
     async def test_attachment_and_comment_collections_follow_short_pages(self) -> None:
         starts = {"attachment": [], "comment": []}
         def handler(request):

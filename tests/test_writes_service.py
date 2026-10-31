@@ -64,7 +64,7 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.title_checks, [("SYNTH", "New page")])
         self.assertTrue(result.notify_watchers)
         self.assertFalse(result.notification_suppression_supported)
-        self.assertIsNotNone(result.notification_note)
+        self.assertIsNone(result.notification_note)
 
     async def test_create_page_accepts_a_personal_space_key_prefix(self) -> None:
         result = await self.service.create_page(

@@ -239,12 +239,14 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
         self.api.move_error = Upstream("Synthetic position refusal")
 
         result = await self.service.restore_page(
-            "90", parent_id="30", position="before", sibling="21"
+            "90", parent_id="30", position="before", sibling="21", notify_watchers=False
         )
 
         self.assertEqual(result.placement_source, "space_root")
         self.assertEqual(result.placement_status, "root")
         self.assertIsNone(result.parent_id)
+        self.assertTrue(result.notification_suppression_supported)
+        self.assertIsNone(result.notification_note)
         self.assertEqual(self.api.restore_calls, ["90"])
         self.assertEqual(self.api.properties_removed, ["90"])
         self.assertEqual(len(self.api.move_calls), 1)
@@ -300,10 +302,12 @@ class PageStructureChecks(unittest.IsolatedAsyncioTestCase):
             "sibling_id": "21",
         }
 
-        result = await self.service.restore_page("90")
+        result = await self.service.restore_page("90", notify_watchers=False)
 
         self.assertEqual(result.placement_source, "saved_property")
         self.assertEqual(result.placement_status, "applied")
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
         self.assertEqual(result.parent_id, "30")
         self.assertEqual(self.api.move_calls[0]["target_id"], "21")
         self.assertEqual(self.api.pages["90"].version, 1)

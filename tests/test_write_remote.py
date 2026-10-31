@@ -714,7 +714,10 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                     json={
                         "id": "501",
                         "type": "comment",
-                        "container": {"id": "301", "type": "page"},
+                        "container": {
+                            "id": "301", "type": "page",
+                            "_links": {"webui": "/spaces/SYNTH/pages/301/Synthetic"},
+                        },
                         "ancestors": [{"id": "500", "type": "comment"}],
                         "version": {"number": 3},
                         "body": {
@@ -743,6 +746,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((comment.comment_id, comment.container_page_id, comment.version), ("501", "301", 3))
         self.assertEqual((comment.parent_comment_id, comment.location, comment.resolution), ("500", "inline", "open"))
         self.assertEqual(comment.body_storage, "<p>Current text</p>")
+        self.assertEqual(comment.container_page_url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/301/Synthetic")
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/501")
         self.assertIn("body.storage", observed[0].url.params["expand"])
         self.assertEqual(observed[1].method, "PUT")

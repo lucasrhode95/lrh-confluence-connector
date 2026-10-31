@@ -319,7 +319,7 @@ Live synthetic comment check, 2026-10-30:
   after cleanup and was not purged.
 - This test used only the configured account's own synthetic footer comments. Inline edit/anchor
   preservation, inline resolution writes and a 403 from editing another user's comment remain
-  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v951/api-group-content-resource/)
+  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-content-resource/)
   documents generic content operations; no inline-resolution write route has been verified here.
 
 ## 6. Writes
@@ -477,8 +477,20 @@ PAT, 2026-10-30, Data Center 9.2.10:
   the view page, so the connector uses the view-page values for a complete-state submission.
 - A form submission with the token and full settings returned HTTP 403. No retry was sent. The
   subsequent same-state guard found no differences to restore; the original account settings were
-  unchanged. The reason for the denial is unknown and may be instance- or account-specific. Read
-  access works, but write round trips are not verified on this account.
+  unchanged.
+
+PAT, 2026-10-31, same instance:
+
+- The view page's form is only the editor's entry point: its one button is `edit` ("Edit"), and
+  posting it with the `X-Atlassian-Token: no-check` header returned HTTP 200 and saved nothing.
+- `GET /users/editmyemailsettings.action` returns the save form: it posts to
+  `users/doeditmyemailsettings.action` with its own `atl_token`, the same eight checkboxes, and two
+  buttons, `confirm` ("Submit") and `cancel` ("Cancel"). Its checked states matched the view page on
+  this read.
+- Posting the complete state with the editor's token, `confirm=Submit` and the no-check header returned
+  HTTP 302. Toggling one setting changed only that setting; a second submission restored it, and all
+  eight values then matched the originals. The 2026-10-30 403 came from the view page's form without
+  the header; which of the two changes cured it was not isolated.
 
 ## 7. Private routes seen but not used
 

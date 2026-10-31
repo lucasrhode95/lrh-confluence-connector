@@ -2,7 +2,7 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-30**. Offline checks: 385 tests pass (one platform skip), compilation, pyflakes and
+Snapshot **2026-10-31**. Offline checks: 392 tests pass (one platform skip), compilation, pyflakes and
 probe CLI help.
 
 ## Decisions
@@ -28,8 +28,6 @@ and removed immediately. Use the [research toolkit](../research/README.md#synthe
 - **Comments:** on disposable synthetic content, verify inline body edits preserve anchors and
   whether inline resolution can be changed through REST. A second authorized test account is needed
   to verify the 403 for editing another user's comment.
-- **Email settings:** the configured PAT read the settings form, but its save request returned 403.
-  Verify independent round trips and restoration on an instance/account that permits this form write.
 - **Token lifecycle:** verify an expired PAT's response and cross-process sign-out with the bound
   credential format, without signing out the user's working credential.
 - **Attachment upload size:** determine the configured instance's maximum upload size with a disposable

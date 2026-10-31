@@ -85,7 +85,7 @@ class AttachmentManagementChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.attachments[0].attachment_id, "91")
         self.assertIn("other pages are not searched", result.notes[0])
         self.assertFalse(result.notification_suppression_supported)
-        self.assertIsNotNone(result.notification_note)
+        self.assertIsNone(result.notification_note)
         api.attachment_supports_delete.assert_awaited_once_with("91", expected_username="sample-user")
         api.trash_page_attachment.assert_awaited_once()
 

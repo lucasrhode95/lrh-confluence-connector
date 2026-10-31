@@ -22,8 +22,10 @@ from confluence_connector.domain.models import (
 )
 from confluence_connector.remote.transport import ConfluenceTransport
 
+# The view page holds the stored values; its form only opens the editor. The editor's form saves.
 VIEW_SETTINGS_ROUTE = "users/viewmyemailsettings.action"
-UPDATE_SETTINGS_ROUTE = "users/editmyemailsettings.action"
+EDIT_SETTINGS_ROUTE = "users/editmyemailsettings.action"
+SAVE_SETTINGS_ROUTE = "users/doeditmyemailsettings.action"
 SETTING_FIELDS = {
     "autowatch": "watchMyOwnContent",
     "daily_updates": "notifyByEmail",
@@ -44,7 +46,7 @@ class EmailNotificationSettingsService:
         self._username = username
 
     async def get_settings(self) -> EmailNotificationSettings:
-        form = await self._read_form()
+        form = await self._read_form(VIEW_SETTINGS_ROUTE, action="editmyemailsettings.action", submit_name="edit")
         return form.settings
 
     async def update_settings(
@@ -53,18 +55,23 @@ class EmailNotificationSettingsService:
         requested = changes.model_dump(exclude_none=True)
         if not requested:
             raise InvalidRequest("Set at least one email notification setting.")
-        form = await self._read_form()
-        desired = form.settings.model_copy(update=requested)
+        current = await self.get_settings()
+        desired = current.model_copy(update=requested)
         changed = [
             name
             for name in SETTING_FIELDS
-            if getattr(form.settings, name) != getattr(desired, name)
+            if getattr(current, name) != getattr(desired, name)
         ]
         if not changed:
-            raise InvalidRequest("The selected settings already have those values; nothing was sent.")
+            return EmailNotificationSettingsUpdateResult(settings=current)
+        # The editor's checked states can differ from the stored values, so only its token and
+        # submit control are used; every checkbox is sent from the view page's values.
+        editor = await self._read_form(
+            EDIT_SETTINGS_ROUTE, action="doeditmyemailsettings.action", submit_name="confirm"
+        )
         response = await self._transport.send_form(
-            UPDATE_SETTINGS_ROUTE,
-            form_fields=form.submission_fields(desired),
+            SAVE_SETTINGS_ROUTE,
+            form_fields=editor.submission_fields(desired),
             expected_username=self._username,
         )
         try:
@@ -88,9 +95,9 @@ class EmailNotificationSettingsService:
             response_status=response.status_code,
         )
 
-    async def _read_form(self) -> _EmailSettingsForm:
-        html = await self._transport.get_text(VIEW_SETTINGS_ROUTE, expected_username=self._username)
-        return _email_settings_form(html)
+    async def _read_form(self, route: str, *, action: str, submit_name: str) -> _EmailSettingsForm:
+        html = await self._transport.get_text(route, expected_username=self._username)
+        return _email_settings_form(html, action=action, submit_name=submit_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,12 +121,13 @@ class _EmailSettingsForm:
         return fields
 
 
-def _email_settings_form(html: str) -> _EmailSettingsForm:
+def _email_settings_form(html: str, *, action: str, submit_name: str) -> _EmailSettingsForm:
+    """Parse the one form posting to ``action`` and its ``submit_name`` button; other buttons are ignored."""
     soup = BeautifulSoup(html, "html.parser")
     forms = [
         form
         for form in soup.find_all("form")
-        if urlsplit(form.get("action") or "").path.casefold().endswith("editmyemailsettings.action")
+        if urlsplit(form.get("action") or "").path.rsplit("/", 1)[-1].casefold() == action
     ]
     if len(forms) != 1:
         raise Upstream("Confluence returned no unique email settings form.")
@@ -147,7 +155,7 @@ def _email_settings_form(html: str) -> _EmailSettingsForm:
                 if csrf_token is not None or not value:
                     raise Upstream("Confluence returned an invalid email settings form token.")
                 csrf_token = value
-        elif kind == "submit" and submit is None:
+        elif kind == "submit" and name == submit_name:
             submit = (name, str(control.get("value") or ""))
     if set(checkboxes) != known_form_names:
         raise Upstream("Confluence returned an incomplete email notification settings form.")

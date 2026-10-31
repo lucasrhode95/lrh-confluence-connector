@@ -82,7 +82,20 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].headers["Accept"], "text/html")
         self.assertEqual(observed[1].headers["Accept"], "text/html")
         self.assertIn(b"atl_token=synthetic-token", observed[1].content)
+        self.assertEqual(observed[1].headers["X-Atlassian-Token"], "no-check")
         self.assertNotEqual(observed[1].url.path, "/wiki/users/viewmyemailsettings.action")
+
+    async def test_form_redirect_to_login_is_an_authentication_failure(self) -> None:
+        _, transport = self.make_client(
+            lambda request: httpx.Response(302, headers={"location": "/wiki/login.action?os_destination=x"})
+        )
+
+        with self.assertRaisesRegex(AuthenticationRequired, "nothing was saved"):
+            await transport.send_form(
+                "users/editmyemailsettings.action",
+                form_fields={"atl_token": "synthetic-token"},
+                expected_username="sample-user",
+            )
 
     async def test_compressed_json_is_decoded_once_for_reads_and_writes(self) -> None:
         attempts = []
