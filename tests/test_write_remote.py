@@ -703,6 +703,17 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(calls, 1)
 
+    async def test_comment_read_refuses_other_content_or_a_different_id(self) -> None:
+        for content_type, identifier in (("attachment", "501"), ("page", "501"), ("comment", "502")):
+            with self.subTest(content_type=content_type, identifier=identifier):
+                api = self.make_api(lambda _: httpx.Response(200, json={
+                    "id": identifier, "type": content_type,
+                    "container": {"id": "301", "type": "page"},
+                    "version": {"number": 1}, "body": {"view": {"value": "<p>x</p>"}},
+                }))
+                with self.assertRaisesRegex(Upstream, "not the requested comment"):
+                    await api.get_comment("501", expected_username="sample-user")
+
     async def test_comment_read_update_and_delete_use_content_resource(self) -> None:
         observed: list[httpx.Request] = []
 

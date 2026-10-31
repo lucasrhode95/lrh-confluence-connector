@@ -951,6 +951,8 @@ class ConfluenceApi:
             },
             expected_username=expected_username,
         )
+        if payload.get("type") != "comment" or _identifier(payload.get("id")) != comment_id:
+            raise Upstream("Confluence returned content that is not the requested comment.")
         comment = _page_comment(payload)
         if comment is None or comment.container_page_id is None or comment.version is None:
             raise Upstream("Confluence returned a comment without its page or version.")
