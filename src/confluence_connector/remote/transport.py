@@ -45,6 +45,14 @@ class _ExchangeResult:
     streamed_bytes: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FormResponse:
+    """Small account-checked response record for an HTML form submission."""
+
+    status_code: int
+    location: str | None = None
+
+
 class ConfluenceTransport:
     """Send requests to validated configured routes without retaining credentials in memory.
 
@@ -93,6 +101,39 @@ class ConfluenceTransport:
             "GET", path, params=params, token_override=token_override, expected_username=expected_username
         )
         return _json_payload(result.response)
+
+    async def get_text(self, path: str, *, expected_username: str) -> str:
+        """Read one HTML response through the shared read and account-check policy."""
+        result = await self._exchange(
+            "GET", path, expected_username=expected_username, accept="text/html"
+        )
+        if not 200 <= result.response.status_code < 300:
+            _raise_status(result.response.status_code, result.response.content, method="GET")
+        if "html" not in result.response.headers.get("content-type", "").casefold():
+            raise Upstream("Confluence returned an unexpected non-HTML response.")
+        return result.response.text
+
+    async def send_form(
+        self,
+        path: str,
+        *,
+        form_fields: Mapping[str, str],
+        expected_username: str,
+    ) -> FormResponse:
+        """Submit one account-bound HTML form without following its redirect or retrying uncertain writes."""
+        result = await self._exchange(
+            "POST",
+            path,
+            form_fields=form_fields,
+            expected_username=expected_username,
+            allow_redirect=True,
+            accept="text/html",
+        )
+        response = result.response
+        return FormResponse(
+            status_code=response.status_code,
+            location=response.headers.get("location"),
+        )
 
     async def download_to(
         self,

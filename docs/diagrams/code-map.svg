@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1700" viewBox="0 0 1800 1700" role="img" aria-labelledby="title description">
   <title id="title">Confluence connector code map</title>
-  <desc id="description">The Confluence connector's main classes and who calls whom. The command line stores or clears the personal access token, shows status, or starts the MCP server after configuring logging. The MCP server's twenty-seven tools call account-bound services that AppContext in bootstrap.py builds and rebuilds when the stored username changes. The services validate input and call ConfluenceApi and PageLinkResolver, which send every request through ConfluenceTransport; the transport reads the token from TokenStore through the CredentialSource port. Hover an item for details.</desc>
+  <desc id="description">The Confluence connector's main classes and who calls whom. The command line stores or clears the personal access token, shows status, or starts the MCP server after configuring logging. The MCP server's twenty-nine tools call account-bound services that AppContext in bootstrap.py builds and rebuilds when the stored username changes. The services validate input and call ConfluenceApi and PageLinkResolver, which send every request through ConfluenceTransport; the transport reads the token from TokenStore through the CredentialSource port. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -51,6 +51,8 @@
   <g><title>Ordered children from a page or space root. → PageTree.get_page_tree</title><text class="detail" x="976" y="340">• <tspan class="code">get_page_tree</tspan></text></g>
   <g><title>History, versions, labels, contributors and ancestors. → PageMetadataService.get_page_metadata</title><text class="detail" x="976" y="362">• <tspan class="code">get_page_metadata</tspan></text></g>
   <g><title>Budgeted text or unchanged storage, with version-pinned cursors. → PageTextService.get_pages</title><text class="detail" x="976" y="384">• <tspan class="code">get_pages</tspan></text></g>
+  <g><title>Read the signed-in account's eight email notification settings. → EmailNotificationSettingsService.get_settings</title><text class="detail" x="976" y="406">• <tspan class="code">get_email_settings</tspan></text></g>
+  <g><title>Update selected email settings for the signed-in account. → EmailNotificationSettingsService.update_settings</title><text class="detail" x="976" y="428">• <tspan class="code">update_email_settings</tspan></text></g>
   <g><title>Saves selected attachments of one page locally. LOCAL_FILE annotation. → AttachmentDownloads.download_attachments</title><text class="detail" x="1212" y="252">• <tspan class="code">download_attachments</tspan></text></g>
   <g><title>Full pages as one file or a flat ZIP. LOCAL_FILE annotation. → PageExports.export_pages</title><text class="detail" x="1212" y="274">• <tspan class="code">export_pages</tspan></text></g>
   <g><title>Current page or new-page draft. → PageWrites.create_page</title><text class="detail" x="1212" y="296">• <tspan class="code">create_page</tspan></text></g>
@@ -74,7 +76,7 @@
   <!-- Composition root. -->
   <rect x="60" y="480" width="1680" height="110" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="80" y="518"><tspan class="code">AppContext</tspan><tspan class="detail" dx="12">bootstrap.py</tspan></text>
-  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, comments, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
+  <g><title>Reads the stored username for each call and returns the services bound to it, building them again when the username changes. One lazy httpx.AsyncClient serves the whole process and is closed with aclose().</title><text class="detail" x="80" y="556">• <tspan class="code">services()</tspan> → <tspan class="code">Services(username, api, links, search, tree, pages, writes, comments, email_settings, structure, …)</tspan>, rebuilt when the stored username changes</text></g>
 
   <path class="call-flow" d="M900 590 V646"/>
   <text class="flow-label" x="920" y="626"><tspan class="code">await services()</tspan> · domain models in, domain models out</text>
@@ -147,12 +149,19 @@
   <g><title>Updates require the current version; deletes are permanent and require explicit confirmation.</title><text class="detail" x="516" y="1210">• version checks · confirmed delete</text></g>
   <g><title>Optional page references are checked against the comment owner. Each write uses the account-bound transport.</title><text class="detail" x="516" y="1238">• ownership · account-bound writes</text></g>
 
-  <rect x="920" y="1088" width="800" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title" x="936" y="1120"><tspan class="code">PageStructure</tspan><tspan class="detail" dx="10">structure.py</tspan></text>
-  <g><title>One same-space move action preserves the content version; cross-space moves wait for terminal long-task completion. → ConfluenceApi.move_page_action</title><text class="detail" x="936" y="1154">• <tspan class="code">move_page</tspan>: parent, position, cross-space long task</text></g>
-  <g><title>Checks delete permission on every affected page, saves placement in a content property, then trashes. → ConfluenceApi.page_supports_delete, set_page_property, trash_page</title><text class="detail" x="936" y="1182">• <tspan class="code">delete_page</tspan>: refuse · move_up · trash (≤ 100 pages)</text></g>
-  <g><title>Trash listing in batches of 100; restore through the documented status update. → ConfluenceApi.list_trash_page, restore_trashed_page, get_page_property</title><text class="detail" x="936" y="1210">• <tspan class="code">list_trash</tspan> · <tspan class="code">restore_page</tspan>: caller → saved → root</text></g>
-  <g><title>Every write stops at its first failure; results separate done, unknown and unattempted steps.</title><text class="detail" x="936" y="1238">• exact partial results, nothing undone</text></g>
+  <rect x="920" y="1088" width="400" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="936" y="1120"><tspan class="code">UserSettings</tspan></text>
+  <g><title>Reads the signed-in account's eight email notification values from the view form. → EmailNotificationSettingsService.get_settings</title><text class="detail" x="936" y="1154">• <tspan class="code">get_email_settings</tspan></text></g>
+  <g><title>Merges selected fields into current state, sends the full form and rereads settings. → EmailNotificationSettingsService.update_settings</title><text class="detail" x="936" y="1182">• <tspan class="code">update_email_settings</tspan></text></g>
+  <g><title>Uses atl_token through the shared account-bound transport; does not depend on the REST adapter.</title><text class="detail" x="936" y="1210">• isolated UI form · account-bound</text></g>
+  <g><title>Returns mismatches after readback; the configured account received HTTP 403 for writes, an open live check.</title><text class="detail" x="936" y="1238">• full-state readback · mismatches</text></g>
+
+  <rect x="1340" y="1088" width="380" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="1356" y="1120"><tspan class="code">PageStructure</tspan></text>
+  <g><title>Moves pages by parent or position; cross-space moves wait for terminal long-task completion. → ConfluenceApi.move_page_action</title><text class="detail" x="1356" y="1154">• <tspan class="code">move_page</tspan>: parent / position</text></g>
+  <g><title>Checks delete permission, saves placement, then trashes up to 100 pages according to child policy.</title><text class="detail" x="1356" y="1182">• <tspan class="code">delete_page</tspan>: child policy</text></g>
+  <g><title>Lists the trash and restores a page to caller, saved or root placement.</title><text class="detail" x="1356" y="1210">• <tspan class="code">list_trash</tspan> · <tspan class="code">restore_page</tspan></text></g>
+  <g><title>Every write stops at its first failure; results separate done, unknown and unattempted steps.</title><text class="detail" x="1356" y="1238">• exact partial results</text></g>
 
   <path class="call-flow" d="M650 1268 V1326"/>
   <text class="flow-label" x="670" y="1304">calls</text>

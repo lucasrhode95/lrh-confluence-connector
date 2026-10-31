@@ -30,6 +30,37 @@ class AuthStatus(BaseModel):
     checked: bool = False
 
 
+class EmailNotificationSettings(BaseModel):
+    autowatch: bool
+    daily_updates: bool
+    all_blog_posts: bool
+    network: bool
+    new_followers: bool
+    notify_on_my_actions: bool
+    show_changed_content: bool
+    recommended_updates: bool
+
+
+class EmailNotificationSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    autowatch: bool | None = None
+    daily_updates: bool | None = None
+    all_blog_posts: bool | None = None
+    network: bool | None = None
+    new_followers: bool | None = None
+    notify_on_my_actions: bool | None = None
+    show_changed_content: bool | None = None
+    recommended_updates: bool | None = None
+
+
+class EmailNotificationSettingsUpdateResult(BaseModel):
+    settings: EmailNotificationSettings
+    changed_settings: list[str] = Field(default_factory=list)
+    mismatches: list[str] = Field(default_factory=list)
+    response_status: int
+
+
 class SpaceSummary(BaseModel):
     id: str | None = None
     key: str

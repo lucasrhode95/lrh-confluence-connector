@@ -252,6 +252,8 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "add_comment",
                 "update_comment",
                 "delete_comment",
+                "get_email_settings",
+                "update_email_settings",
                 "list_drafts",
                 "publish_draft",
                 "delete_draft",
@@ -307,6 +309,12 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(tools_by_name["add_comment"].annotations.destructiveHint)
         self.assertTrue(tools_by_name["update_comment"].annotations.destructiveHint)
         self.assertTrue(tools_by_name["delete_comment"].annotations.destructiveHint)
+        self.assertTrue(tools_by_name["get_email_settings"].annotations.readOnlyHint)
+        self.assertTrue(tools_by_name["update_email_settings"].annotations.destructiveHint)
+        email_schema = tools_by_name["update_email_settings"].model_dump(mode="json")["inputSchema"]
+        self.assertIn("settings", email_schema["properties"])
+        self.assertIn("signed-in Confluence account", tools_by_name["update_email_settings"].description)
+        self.assertIn("changes the signed-in account's email notification configuration", server.instructions)
         comment_schema = tools_by_name["delete_comment"].model_dump(mode="json")["inputSchema"]
         self.assertIn("confirm_permanent_delete", comment_schema["properties"])
         self.assertNotIn("confirm_permanent_delete", comment_schema.get("required", []))
