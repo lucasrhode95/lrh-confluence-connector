@@ -25,6 +25,7 @@ from confluence_connector.domain.models import (
     PageTextFormat,
     RemotePageComment,
     RemotePageContent,
+    RemotePageStorage,
     ResolvedPageReference,
 )
 from confluence_connector.domain.validation import page_references
@@ -451,16 +452,35 @@ class PageTextService:
         references: list[PageReference] = []
         notes: list[str] = []
         attempted: set[tuple[str, bool]] = {(host_page_id, False)}
+        resolved_targets: dict[IncludePageTarget, str | BaseException] = {}
+        page_cache: dict[str, RemotePageStorage | BaseException] = {}
         cycle_seen = capped = depth_stopped = False
         level = [(target, frozenset({host_page_id}), host_space_key) for target in storage.include_targets]
+        deferred: list[tuple[IncludePageTarget, frozenset[str], str | None]] = []
         depth = 1
         while level:
-            resolved = await asyncio.gather(
-                *(self._resolve_include_target(target, fallback_space_key=space) for target, _, space in level),
+            # Resolve only a bounded batch before applying the page cap. Normalize the resolution
+            # key so full and excerpt includes of one title share the lookup, including failures.
+            batch, remainder = level[:MAX_INCLUDED_PAGES], level[MAX_INCLUDED_PAGES:]
+            keys = [
+                IncludePageTarget(target.page_id, target.title, target.space_key or space)
+                for target, _, space in batch
+            ]
+            missing = list(dict.fromkeys(key for key in keys if key not in resolved_targets))
+            if len(page_cache) >= MAX_INCLUDED_PAGES:
+                capped = capped or any(key.page_id is None for key in missing)
+                missing = [key for key in missing if key.page_id is not None]
+            outcomes = await asyncio.gather(
+                *(self._resolve_include_target(key, fallback_space_key=None) for key in missing),
                 return_exceptions=True,
             )
+            resolved_targets.update(zip(missing, outcomes, strict=True))
             reads: list[tuple[str, IncludePageTarget, frozenset[str]]] = []
-            for (target, ancestors, _space), outcome in zip(level, resolved, strict=True):
+            read_ids: dict[str, None] = {}
+            for (target, ancestors, _space), resolution_key in zip(batch, keys, strict=True):
+                outcome = resolved_targets.get(resolution_key)
+                if outcome is None:
+                    continue  # New title resolution was skipped after reaching the page cap.
                 if isinstance(outcome, BaseException):
                     _include_failure(outcome)
                     notes.append(f"An include target could not be resolved ({type(outcome).__name__}).")
@@ -468,20 +488,27 @@ class PageTextService:
                 if outcome in ancestors:
                     cycle_seen = True
                     continue
-                key = (outcome, target.excerpt)
-                if key in attempted:
+                mode_key = (outcome, target.excerpt)
+                if mode_key in attempted:
                     continue
-                if len(attempted) > MAX_INCLUDED_PAGES:
+                if (
+                    outcome not in page_cache and outcome not in read_ids
+                    and len(page_cache) + len(read_ids) >= MAX_INCLUDED_PAGES
+                ):
                     capped = True
                     continue
-                attempted.add(key)
+                attempted.add(mode_key)
                 reads.append((outcome, target, ancestors))
+                if outcome not in page_cache:
+                    read_ids[outcome] = None
             pages = await asyncio.gather(
-                *(self._api.get_page_storage(page_id, expected_username=self._username) for page_id, _, _ in reads),
+                *(self._api.get_page_storage(page_id, expected_username=self._username) for page_id in read_ids),
                 return_exceptions=True,
             )
+            page_cache.update(zip(read_ids, pages, strict=True))
             next_level: list[tuple[IncludePageTarget, frozenset[str], str | None]] = []
-            for (page_id, target, ancestors), page in zip(reads, pages, strict=True):
+            for page_id, target, ancestors in reads:
+                page = page_cache[page_id]
                 if isinstance(page, BaseException):
                     _include_failure(page)
                     notes.append(f"An included page could not be read ({type(page).__name__}).")
@@ -495,15 +522,21 @@ class PageTextService:
                     next_level.extend(
                         (nested, ancestors | {page_id}, page.space_key) for nested in included.include_targets
                     )
-            level = next_level
-            depth += 1
+            # Finish this level before walking deeper; otherwise a wide level would consume depth.
+            if remainder:
+                level = remainder
+                deferred.extend(next_level)
+            else:
+                level = deferred + next_level
+                deferred = []
+                depth += 1
         if cycle_seen:
             notes.append("An include cycle was detected; recursion stopped.")
         if capped:
             notes.append(f"Include expansion stopped after {MAX_INCLUDED_PAGES} included pages.")
         if depth_stopped:
             notes.append(f"Nested include expansion stopped at depth {MAX_INCLUDED_PAGE_DEPTH}.")
-        return references, notes
+        return references, list(dict.fromkeys(notes))
 
     async def _resolve_include_target(
         self,

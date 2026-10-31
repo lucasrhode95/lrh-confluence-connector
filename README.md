@@ -137,7 +137,7 @@ selected comments to a separate read-only file. Use the result's `body` file wit
 without attachment bytes are separate files; larger or attachment-bearing exports are ZIP archives.
 The result lists each output with its role and location.
 
-Write tools accept `notify_watchers` (default `true`). Set it to `false` to suppress email on supported
+Content write tools accept `notify_watchers` (default `true`). Set it to `false` to suppress email on supported
 versioned writes; operations without a suppression control report that in their result.
 `update_email_settings` changes the signed-in account's configuration, applies only the provided
 settings and returns a readback of the saved values.

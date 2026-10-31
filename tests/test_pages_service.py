@@ -23,6 +23,40 @@ from confluence_connector.service.pages import PageTextService
 
 
 class PageTextServiceChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_full_and_excerpt_includes_share_title_lookup_storage_and_page_cap(self) -> None:
+        host = _page("55", 1, "<p>Host</p>", _include(title="Shared")
+                     + _include(title="Shared", macro="excerpt-include") + _include("91"))
+        shared = _page("90", 1, "", '<ac:structured-macro ac:name="excerpt"><ac:rich-text-body>'
+                       '<ac:structured-macro ac:name="status"/></ac:rich-text-body></ac:structured-macro>'
+                       '<ac:structured-macro ac:name="note"/>')
+        api = _ReadApi(pages={"55": host, "90": shared, "91": _page("91", 1, "", "")},
+                       title_matches={("SYNTH", "Shared"): "90"})
+        with patch("confluence_connector.service.pages.MAX_INCLUDED_PAGES", 2):
+            result = await _service(api).get_pages("55", parse_scope={"comments": False, "attachments": False})
+        self.assertEqual(api.title_lookups, [("SYNTH", "Shared")])
+        self.assertEqual(api.storage_calls, ["90", "91"])
+        self.assertFalse(any("stopped after" in note for note in result.notes))
+
+    async def test_wide_include_list_stops_title_lookups_at_the_page_cap(self) -> None:
+        host = _page("55", 1, "<p>Host</p>", "".join(_include(title=f"Page {i}") for i in range(12)))
+        api = _ReadApi(
+            pages={"55": host, **{str(90 + i): _page(str(90 + i), 1, "", "") for i in range(12)}},
+            title_matches={("SYNTH", f"Page {i}"): str(90 + i) for i in range(12)},
+        )
+        with patch("confluence_connector.service.pages.MAX_INCLUDED_PAGES", 2):
+            result = await _service(api).get_pages("55", parse_scope={"comments": False, "attachments": False})
+        self.assertEqual(len(api.title_lookups), 2)
+        self.assertEqual(api.storage_calls, ["90", "91"])
+        self.assertIn("Include expansion stopped after 2 included pages.", result.notes)
+
+    async def test_nested_include_depth_stops_before_reading_the_next_page(self) -> None:
+        pages = {str(i): _page(str(i), 1, "<p>Page</p>", _include(str(i + 1))) for i in range(55, 60)}
+        api = _ReadApi(pages=pages)
+        with patch("confluence_connector.service.pages.MAX_INCLUDED_PAGE_DEPTH", 2):
+            result = await _service(api).get_pages("55", parse_scope={"comments": False, "attachments": False})
+        self.assertEqual(api.storage_calls, ["56", "57"])
+        self.assertIn("Nested include expansion stopped at depth 2.", result.notes)
+
     async def test_macros_from_included_pages_are_typed_owned_and_read_once(self) -> None:
         host = _page(
             "55",

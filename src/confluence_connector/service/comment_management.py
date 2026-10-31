@@ -18,6 +18,7 @@ from confluence_connector.domain.validation import (
 )
 from confluence_connector.remote.confluence import ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
+from confluence_connector.service.errors import raise_account_error
 from confluence_connector.service.page_text import render_page_body
 from confluence_connector.service.write_markup import body_to_storage
 
@@ -138,6 +139,7 @@ class CommentManagement:
                 await self._api.get_comment(saved.comment_id, expected_username=self._username)
             )
         except ConnectorError as exc:
+            raise_account_error(exc)
             record = saved
             warnings.append(
                 f"The comment was saved, but it could not be read back ({type(exc).__name__}); the body is omitted."

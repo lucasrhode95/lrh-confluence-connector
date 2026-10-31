@@ -174,7 +174,7 @@
   <rect x="60" y="1330" width="1180" height="320" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M60 1400 V1344 Q60 1330 74 1330 H1226 Q1240 1330 1240 1344 V1400 Z" fill="#183153"/>
   <text class="card-title" x="80" y="1362">REMOTE</text>
-  <text class="card-subtitle" x="80" y="1386"><tspan class="code">remote/</tspan> · the only code that knows Confluence routes, JSON and paging</text>
+  <text class="card-subtitle" x="80" y="1386"><tspan class="code">remote/</tspan> · REST adapters and shared HTTP; the settings service owns its UI form</text>
   <rect x="80" y="1416" width="680" height="214" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="96" y="1448"><tspan class="code">ConfluenceApi</tspan><tspan class="detail" dx="10">confluence.py</tspan></text>
   <g><title>Page bodies (view, storage), children, versions, attachments and comments, mapped to domain models.</title><text class="detail" x="96" y="1480">• reads: <tspan class="code">get_page_content</tspan> · <tspan class="code">list_child_pages</tspan> · <tspan class="code">list_page_versions</tspan></text></g>
@@ -200,7 +200,7 @@
   <rect x="1300" y="1330" width="440" height="140" rx="14" fill="#eef5f9" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="1320" y="1370">Confluence Data Center</text>
   <text class="detail" x="1320" y="1406">REST API and the private</text>
-  <text class="detail" x="1320" y="1432"><tspan class="code">movepage.action</tspan>, one PAT</text>
+  <text class="detail" x="1320" y="1432">move and email actions, one PAT</text>
   <rect x="1300" y="1500" width="440" height="150" rx="14" fill="#eef5f9" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="1320" y="1540"><tspan class="code">TokenStore</tspan><tspan class="detail" dx="10">auth/store.py</tspan></text>
   <text class="detail" x="1320" y="1576">encrypted PAT and username, read</text>

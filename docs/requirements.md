@@ -57,8 +57,8 @@ storage technique is shared (§5).
 - A local search index, ranking or content cache. Live search found known pages reliably (research
   §4); revisit only on evidence of gaps.
 - Raw CQL from agents: search takes literal text and structured filters.
-- Purging the trash, ever. `delete_draft` is the only permanent delete, because Confluence offers no
-  trash for drafts.
+- Purging the trash, ever. Draft and comment deletion is permanent because these operations offer
+  no trash; comment deletion requires explicit confirmation.
 - Unpublished edits of published pages: the editor-draft route cannot be read back and belongs to the
   non-collaborative editor (research §6.2). Agents propose changes as new-page drafts or edit with
   `expected_version`.
@@ -359,7 +359,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 
 ### 10.7 Watcher notifications
 
-- Every write tool accepts `notify_watchers`, default `true`. For writes that create a content version,
+- Every content write tool accepts `notify_watchers`, default `true`. Email account settings do not
+  use this option. For writes that create a content version,
   `false` sends `minorEdit: true`; `true` omits the field and keeps Confluence's default behavior.
   This applies to page edits, draft publishing, page restore and attachment versions, including
   multipart uploads. The result echoes the requested value; Confluence reads `minorEdit` back as
@@ -386,7 +387,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   failures remain explicit. The DELETE route has no notification-suppression control.
 - Every write is bound to the authenticated account; an uncertain outcome is never resent. Results
   include the comment ID, page, URL and version where applicable; create and update reread the saved
-  comment, and a failed reread returns the known ID and version with a warning. Inline-comment
+  comment, and an ordinary failed reread returns the known ID and version with a warning. Account
+  changes or sign-out during readback remain explicit errors. Inline-comment
   resolve/reopen is not exposed because the configured instance has no verified REST write route for
   that state.
 
