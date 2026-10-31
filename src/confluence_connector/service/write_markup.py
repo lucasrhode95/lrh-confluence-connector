@@ -7,6 +7,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from html import escape
+from html.entities import html5
 from html.parser import HTMLParser
 
 from bs4 import CData, BeautifulSoup, Tag
@@ -49,6 +50,8 @@ _URL_ATTRIBUTES = frozenset(
 _LANGUAGE_CLASS = re.compile(r"(?:^|\s)language-([a-zA-Z0-9_+#.-]+)(?:\s|$)")
 _JAVASCRIPT_SCHEME = re.compile(r"^javascript\s*:", re.IGNORECASE)
 _XML_PREFIX = re.compile(r"(?<![\w.-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])")
+_NAMED_ENTITY = re.compile(r"&([A-Za-z][A-Za-z0-9]*);")
+_XML_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 MAX_RICH_MARKUP_DEPTH = 128
 
 
@@ -172,7 +175,7 @@ def _is_well_formed_fragment(source: str) -> bool:
         if prefix not in {"xml", "xmlns"}
     }
     namespaces = " ".join(f'xmlns:{prefix}="urn:{prefix}"' for prefix in sorted(prefixes))
-    normalized = _close_html_void_elements(source)
+    normalized = _numeric_html_entities(_close_html_void_elements(source))
     try:
         ET.fromstring(f"<confluence-body {namespaces}>{normalized}</confluence-body>")
     except ET.ParseError:
@@ -180,8 +183,23 @@ def _is_well_formed_fragment(source: str) -> bool:
     return True
 
 
+def _numeric_html_entities(source: str) -> str:
+    """Spell HTML named entities numerically for XML validation; storage accepts them, XML does not."""
+
+    def numeric(match: re.Match[str]) -> str:
+        name = match.group(1)
+        text = html5.get(f"{name};")
+        if name in _XML_ENTITIES or text is None:
+            return match.group(0)
+        return "".join(f"&#{ord(character)};" for character in text)
+
+    return _NAMED_ENTITY.sub(numeric, source)
+
+
 def _close_html_void_elements(source: str) -> str:
     """Normalize only HTML void start tags for XML validation; do not repair other malformed markup."""
+    if not any(f"<{tag}" in source.casefold() for tag in _VOID_TAGS):
+        return source
     parser = _VoidTagNormalizer(source)
     parser.feed(source)
     parser.close()

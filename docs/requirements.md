@@ -238,8 +238,8 @@ Writes run only when a write tool is called, and are tested only on disposable s
   other local files into a page.
 - Page bodies have no connector-imposed character limit. Before converting a `rich` body, active
   content and nesting checks run. If it is not well-formed XML markup, the original body is sent
-  unchanged so Confluence can return its 400 syntax error and row/column; only HTML void-tag closure
-  is normalized while checking well-formedness. Well-formed rich input receives the targeted
+  unchanged so Confluence can return its 400 syntax error and row/column. The check accepts HTML
+  void tags and HTML named entities such as `&nbsp;`, which storage allows and XML alone does not. Well-formed rich input receives the targeted
   conversions observed in research §6.5: `<pre><code class="language-X">` and plain `<pre>` become
   the code macro; HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
   `body_file` is sent byte for byte except new `<pre>` and `<details>` blocks, which get the same

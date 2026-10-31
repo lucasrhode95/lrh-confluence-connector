@@ -24,8 +24,15 @@ class WriteMarkupChecks(unittest.TestCase):
             '<p data-x="a">&amp;<br/><img src="image.png"/></p>',
         )
 
+    def test_html_named_entities_keep_well_formed_markup_converted(self) -> None:
+        converted = to_storage(
+            '<p>a&nbsp;b&mdash;c<br></p><pre><code class="language-python">x</code></pre>', "rich"
+        )
+        self.assertIn("<br/>", converted)
+        self.assertIn('ac:name="code"', converted)
+
     def test_malformed_rich_markup_is_passed_to_confluence_without_repair(self) -> None:
-        for value in ("<p><strong>unfinished</p>", "<p>first</p><p>second"):
+        for value in ("<p><strong>unfinished</p>", "<p>first</p><p>second", "<p>&unknownentity; <br></p>"):
             with self.subTest(value=value):
                 self.assertEqual(to_storage(value, "rich"), value)
 

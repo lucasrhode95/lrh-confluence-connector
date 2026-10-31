@@ -231,7 +231,8 @@ anchors follow the pinned block order, attachment and comment anchors their IDs.
 **[`writes.py`](../src/confluence_connector/service/writes.py) and
 [`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: page body strings have no
 connector-imposed length limit. `to_storage` checks active content and nesting, then validates rich
-markup as an XML fragment before conversion. Malformed markup is passed unchanged to Confluence for
+markup as an XML fragment before conversion, after spelling HTML named entities numerically
+and closing void tags for the check only. Malformed markup is passed unchanged to Confluence for
 its syntax error; well-formed markup gets the targeted code, expand and void-tag conversions
 (requirements §10.1).
 `file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
