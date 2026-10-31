@@ -222,9 +222,12 @@ deepest level read is cut short, and `complete` is false.
    matching code fences.
 
 When `macros_from_storage` is enabled, the page service resolves `include` and `excerpt-include`
-targets and reads each included page's storage once. It adds those macro references with the source
-page ID, follows nested includes to depth 5, and reads at most 100 included pages per requested page.
-Cycles, unresolved targets and unreadable pages stop that branch and appear in the page's `notes`.
+targets and reads each included page's storage once, without its view or metadata. It walks one
+include level at a time, resolving and reading each level's pages concurrently, adds their macro
+references with the source page ID, follows nested includes to depth 5, and reads at most 100 included
+pages per requested page. An `excerpt-include` contributes only the target's excerpt. Cycles,
+unresolved targets and unreadable pages stop that branch and appear in the page's `notes`. A cursor
+continuation of the same page skips the walk; the first part already returned those references.
 
 A `rich` read returns storage verbatim, split between top-level elements by the parser's source
 positions so the slices join back exactly. Cursors carry page ID, version and a stable anchor; body

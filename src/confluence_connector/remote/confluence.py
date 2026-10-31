@@ -30,6 +30,7 @@ from confluence_connector.domain.models import (
     PageAttachment,
     RemotePageComment,
     RemotePageContent,
+    RemotePageStorage,
     PageSummary,
     PageVersion,
     PersonSummary,
@@ -438,6 +439,24 @@ class ConfluenceApi:
             self._content_collection_route(), params=params, expected_username=expected_username
         )
         return _page_envelope(payload, requested_start=start)
+
+    async def get_page_storage(self, page_id: str, *, expected_username: str) -> RemotePageStorage:
+        """Read only a current page's space and storage body; include expansion needs nothing else."""
+        if not page_id.isdecimal():
+            raise InvalidRequest("Page IDs must be decimal identifiers.")
+        payload = await self._transport.get_json(
+            self._content_route(page_id),
+            params={"expand": "space,body.storage"},
+            expected_username=expected_username,
+        )
+        body = payload.get("body") if isinstance(payload, dict) else None
+        storage = body.get("storage") if isinstance(body, dict) else None
+        storage_value = storage.get("value") if isinstance(storage, dict) else None
+        if not isinstance(storage_value, str):
+            raise Upstream("Confluence returned a page without its storage body.")
+        space = payload.get("space")
+        space_key = _optional_string(space.get("key")) if isinstance(space, dict) else None
+        return RemotePageStorage(page_id=page_id, space_key=space_key, storage_body=storage_value)
 
     async def get_page_content(
         self,

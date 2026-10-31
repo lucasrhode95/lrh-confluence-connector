@@ -175,7 +175,8 @@ storage technique is shared (§5).
 - A typed `references` list (kind, IDs, filename, media type, size, owner page) is collected from
   `view` attributes and `storage` elements **before** conversion. When `macros_from_storage` is on,
   `include` and `excerpt-include` targets are resolved and their macro identities are added with the
-  source page as `owner_page_id`. Nested includes are followed to depth 5 and at most 100 included
+  source page as `owner_page_id`; an `excerpt-include` adds only macros inside the target's excerpt.
+  Continuations of a page do not repeat this. Nested includes are followed to depth 5 and at most 100 included
   pages per requested page; cycles, unresolved targets and pages that cannot be read are reported in
   `notes`. Agents never parse marker text, and the connector never reads identity back from it.
 - A requested body that is missing or malformed is an upstream error, never an empty page.

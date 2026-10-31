@@ -608,6 +608,14 @@ class RemotePageComment(BaseModel):
     selected_text: str | None = None
 
 
+class RemotePageStorage(BaseModel):
+    """A current page's storage body and space, read without rendering for include expansion."""
+
+    page_id: str
+    space_key: str | None = None
+    storage_body: str
+
+
 class RemotePageContent(BaseModel):
     """Mapped page source fields required to render one current or historical version."""
 

@@ -36,6 +36,7 @@ from confluence_connector.service.page_text import (
     IncludePageTarget,
     PageTextBlock,
     ParsedStorage,
+    excerpt_storage,
     parse_storage,
     render_page_body,
     unique_references,
@@ -208,6 +209,8 @@ class PageTextService:
                     page_format=page_format,
                     parse_scope=parse_scope,
                     forced_version=pinned_first_version if index == 0 else None,
+                    # A continued page already returned its included-page references.
+                    include_pages=not (index == 0 and first_anchor is not None),
                 )
             )
 
@@ -306,6 +309,7 @@ class PageTextService:
         parse_scope: PageParseScope,
         forced_version: int | None,
         attachment_override: list[PageAttachment] | None = None,
+        include_pages: bool = True,
     ) -> _LoadedPage:
         version = forced_version if forced_version is not None else request.version
         include_storage = page_format == "rich" or parse_scope.macros_from_storage
@@ -365,7 +369,10 @@ class PageTextService:
             convert_markdown=page_format != "rich",
         )
         included_references: list[PageReference] = []
-        if parsed_storage is not None and parse_scope.macros_from_storage:
+        if parsed_storage is not None and parse_scope.macros_from_storage and not include_pages:
+            if parsed_storage.include_targets:
+                notes.append("Included-page macro references were returned with the first part of this page.")
+        elif parsed_storage is not None and parse_scope.macros_from_storage:
             included_references, include_notes = await self._included_macro_references(
                 parsed_storage,
                 host_page_id=request.page_id,
@@ -435,80 +442,67 @@ class PageTextService:
         host_page_id: str,
         host_space_key: str | None,
     ) -> tuple[list[PageReference], list[str]]:
+        """Collect macro references from included pages, one include level at a time.
+
+        Each level resolves its targets and reads their storage concurrently (the transport bounds
+        requests in flight). Paths stop at cycles, at depth 5 and after 100 included pages; an
+        excerpt-include contributes only the target's excerpt.
+        """
         references: list[PageReference] = []
         notes: list[str] = []
-        attempted: set[str] = {host_page_id}
-        depth_note_added = False
-        page_cap_note_added = False
-        cycle_note_added = False
-
-        async def visit_target(
-            target: IncludePageTarget,
-            *,
-            depth: int,
-            ancestors: frozenset[str],
-            fallback_space_key: str | None,
-        ) -> None:
-            nonlocal depth_note_added, page_cap_note_added, cycle_note_added
-            try:
-                page_id = await self._resolve_include_target(
-                    target,
-                    fallback_space_key=fallback_space_key,
-                )
-            except ConnectorError as exc:
-                raise_account_error(exc)
-                notes.append(f"An include target could not be resolved ({type(exc).__name__}).")
-                return
-            if page_id in ancestors:
-                if not cycle_note_added:
-                    notes.append("An include cycle was detected; recursion stopped.")
-                    cycle_note_added = True
-                return
-            if page_id in attempted:
-                return
-            if len(attempted) >= MAX_INCLUDED_PAGES + 1:
-                if not page_cap_note_added:
-                    notes.append(f"Include expansion stopped after {MAX_INCLUDED_PAGES} included pages.")
-                    page_cap_note_added = True
-                return
-            attempted.add(page_id)
-            try:
-                included_page = await self._api.get_page_content(
-                    page_id,
-                    include_storage=True,
-                    expected_username=self._username,
-                )
-            except ConnectorError as exc:
-                raise_account_error(exc)
-                notes.append(f"An included page could not be read ({type(exc).__name__}).")
-                return
-            included_storage = parse_storage(
-                included_page.storage_body,
-                page_id=page_id,
-                include_metadata=True,
+        attempted: set[tuple[str, bool]] = {(host_page_id, False)}
+        cycle_seen = capped = depth_stopped = False
+        level = [(target, frozenset({host_page_id}), host_space_key) for target in storage.include_targets]
+        depth = 1
+        while level:
+            resolved = await asyncio.gather(
+                *(self._resolve_include_target(target, fallback_space_key=space) for target, _, space in level),
+                return_exceptions=True,
             )
-            references.extend(included_storage.macro_references)
-            next_ancestors = ancestors | {page_id}
-            if depth >= MAX_INCLUDED_PAGE_DEPTH:
-                if included_storage.include_targets and not depth_note_added:
-                    notes.append(f"Nested include expansion stopped at depth {MAX_INCLUDED_PAGE_DEPTH}.")
-                    depth_note_added = True
-                return
-            for nested_target in included_storage.include_targets:
-                await visit_target(
-                    nested_target,
-                    depth=depth + 1,
-                    ancestors=next_ancestors,
-                    fallback_space_key=included_page.metadata.space_key,
-                )
-
-        for target in storage.include_targets:
-            await visit_target(
-                target,
-                depth=1,
-                ancestors=frozenset({host_page_id}),
-                fallback_space_key=host_space_key,
+            reads: list[tuple[str, IncludePageTarget, frozenset[str]]] = []
+            for (target, ancestors, _space), outcome in zip(level, resolved, strict=True):
+                if isinstance(outcome, BaseException):
+                    _include_failure(outcome)
+                    notes.append(f"An include target could not be resolved ({type(outcome).__name__}).")
+                    continue
+                if outcome in ancestors:
+                    cycle_seen = True
+                    continue
+                key = (outcome, target.excerpt)
+                if key in attempted:
+                    continue
+                if len(attempted) > MAX_INCLUDED_PAGES:
+                    capped = True
+                    continue
+                attempted.add(key)
+                reads.append((outcome, target, ancestors))
+            pages = await asyncio.gather(
+                *(self._api.get_page_storage(page_id, expected_username=self._username) for page_id, _, _ in reads),
+                return_exceptions=True,
             )
+            next_level: list[tuple[IncludePageTarget, frozenset[str], str | None]] = []
+            for (page_id, target, ancestors), page in zip(reads, pages, strict=True):
+                if isinstance(page, BaseException):
+                    _include_failure(page)
+                    notes.append(f"An included page could not be read ({type(page).__name__}).")
+                    continue
+                source = excerpt_storage(page.storage_body) if target.excerpt else page.storage_body
+                included = parse_storage(source, page_id=page_id, include_metadata=True)
+                references.extend(included.macro_references)
+                if included.include_targets and depth >= MAX_INCLUDED_PAGE_DEPTH:
+                    depth_stopped = True
+                elif included.include_targets:
+                    next_level.extend(
+                        (nested, ancestors | {page_id}, page.space_key) for nested in included.include_targets
+                    )
+            level = next_level
+            depth += 1
+        if cycle_seen:
+            notes.append("An include cycle was detected; recursion stopped.")
+        if capped:
+            notes.append(f"Include expansion stopped after {MAX_INCLUDED_PAGES} included pages.")
+        if depth_stopped:
+            notes.append(f"Nested include expansion stopped at depth {MAX_INCLUDED_PAGE_DEPTH}.")
         return references, notes
 
     async def _resolve_include_target(
@@ -529,6 +523,13 @@ class PageTextService:
             target.title.strip(),
             expected_username=self._username,
         )
+
+
+def _include_failure(error: BaseException) -> None:
+    """Re-raise account changes and programming errors; other include failures become notes."""
+    if not isinstance(error, ConnectorError):
+        raise error
+    raise_account_error(error)
 
 
 def _parse_scope(value: PageParseScope | dict[str, Any] | None) -> PageParseScope:
