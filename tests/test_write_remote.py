@@ -633,7 +633,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/301")
         self.assertEqual(dict(observed[0].url.params), {})
 
-    async def test_fixture_comment_and_reply_use_the_content_collection_route(self) -> None:
+    async def test_comment_and_reply_use_the_content_collection_route(self) -> None:
         observed: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -641,10 +641,10 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json={"id": "501" if len(observed) == 1 else "502"})
 
         api = self.make_api(handler)
-        comment_id = await api.create_page_comment(
+        comment_id = await api.create_comment(
             "301", "<p>synthetic footer</p>", expected_username="sample-user"
         )
-        reply_id = await api.create_page_comment(
+        reply_id = await api.create_comment(
             "301",
             "<p>synthetic reply</p>",
             expected_username="sample-user",
@@ -659,7 +659,7 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(observed[0].content)["container"], {"id": "301", "type": "page"})
         self.assertEqual(json.loads(observed[1].content)["ancestors"], [{"id": "501"}])
 
-    async def test_fixture_comment_rejects_invalid_ids_and_uncertain_missing_id(self) -> None:
+    async def test_comment_create_rejects_invalid_ids_and_uncertain_missing_id(self) -> None:
         calls = 0
 
         def handler(_request: httpx.Request) -> httpx.Response:
@@ -669,15 +669,67 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
 
         api = self.make_api(handler)
         with self.assertRaises(InvalidRequest):
-            await api.create_page_comment(
+            await api.create_comment(
                 "not-a-page", "<p>synthetic</p>", expected_username="sample-user"
             )
         self.assertEqual(calls, 0)
         with self.assertRaisesRegex(UncertainWrite, "inspect before retrying"):
-            await api.create_page_comment(
+            await api.create_comment(
                 "301", "<p>synthetic</p>", expected_username="sample-user"
             )
         self.assertEqual(calls, 1)
+
+    async def test_comment_read_update_and_delete_use_content_resource(self) -> None:
+        observed: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.append(request)
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "501",
+                        "type": "comment",
+                        "container": {"id": "301", "type": "page"},
+                        "ancestors": [{"id": "500", "type": "comment"}],
+                        "version": {"number": 3},
+                        "body": {
+                            "view": {"value": "<p>Current text</p>"},
+                            "storage": {"value": "<p>Current text</p>"},
+                        },
+                        "extensions": {"location": "inline", "resolutionStatus": "open"},
+                    },
+                )
+            if request.method == "DELETE":
+                return httpx.Response(204)
+            return httpx.Response(200, json={"id": "501"})
+
+        api = self.make_api(handler)
+        comment = await api.get_comment("501", expected_username="sample-user")
+        await api.update_comment(
+            "501", "301", "<p>Not a minor edit</p>", next_version=4,
+            expected_username="sample-user",
+        )
+        await api.update_comment(
+            "501", "301", "<p>New text</p>", next_version=5,
+            expected_username="sample-user", notify_watchers=False,
+        )
+        await api.delete_comment("501", expected_username="sample-user")
+
+        self.assertEqual((comment.comment_id, comment.container_page_id, comment.version), ("501", "301", 3))
+        self.assertEqual((comment.parent_comment_id, comment.location, comment.resolution), ("500", "inline", "open"))
+        self.assertEqual(comment.body_storage, "<p>Current text</p>")
+        self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/501")
+        self.assertIn("body.storage", observed[0].url.params["expand"])
+        self.assertEqual(observed[1].method, "PUT")
+        default_update = json.loads(observed[1].content)
+        self.assertEqual(default_update["version"], {"number": 4})
+        self.assertEqual(observed[2].method, "PUT")
+        update_body = json.loads(observed[2].content)
+        self.assertEqual(update_body["container"], {"id": "301", "type": "page"})
+        self.assertEqual(update_body["version"], {"number": 5, "minorEdit": True})
+        self.assertEqual(observed[3].method, "DELETE")
+        self.assertEqual(observed[3].url.path, "/wiki/rest/api/content/501")
 
     async def test_success_status_with_unreadable_page_response_is_uncertain(self) -> None:
         api = self.make_api(lambda _: httpx.Response(200, text="<html>maintenance</html>"))

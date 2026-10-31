@@ -97,9 +97,9 @@ A local MCP connector for one user's Confluence Data Center account. Requirement
 full page/tree reads, metadata, attachment retrieval, exports, and draft/page CRUD and moves.
 The current MCP surface implements `auth_status`, `list_spaces`, `search_content`, `find_users`,
 `get_page_tree`, `get_page_metadata`, `get_pages`, `download_attachments`, `export_pages`,
-`create_page`, `update_page`, `list_drafts`, `publish_draft`, `delete_draft`, `set_labels`,
-`move_page`, `delete_page`, `list_trash` and `restore_page`. Do not describe unimplemented roadmap
-work as implemented.
+`create_page`, `update_page`, `get_comment`, `add_comment`, `update_comment`, `delete_comment`,
+`list_drafts`, `publish_draft`, `delete_draft`, `set_labels`, `move_page`, `delete_page`, `list_trash`
+and `restore_page`. Do not describe unimplemented roadmap work as implemented.
 Confluence credentials are separate from the Microsoft OAuth library.
 
 - Documentation index: `docs/README.md`

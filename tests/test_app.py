@@ -248,6 +248,10 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
                 "export_pages",
                 "create_page",
                 "update_page",
+                "get_comment",
+                "add_comment",
+                "update_comment",
+                "delete_comment",
                 "list_drafts",
                 "publish_draft",
                 "delete_draft",
@@ -299,9 +303,18 @@ class McpSurfaceChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(structure_annotations)
         self.assertTrue(structure_annotations.destructiveHint)
         self.assertTrue(tools_by_name["list_trash"].annotations.readOnlyHint)
+        self.assertTrue(tools_by_name["get_comment"].annotations.readOnlyHint)
+        self.assertFalse(tools_by_name["add_comment"].annotations.destructiveHint)
+        self.assertTrue(tools_by_name["update_comment"].annotations.destructiveHint)
+        self.assertTrue(tools_by_name["delete_comment"].annotations.destructiveHint)
+        comment_schema = tools_by_name["delete_comment"].model_dump(mode="json")["inputSchema"]
+        self.assertIn("confirm_permanent_delete", comment_schema["properties"])
+        self.assertNotIn("confirm_permanent_delete", comment_schema.get("required", []))
+        self.assertIn("permanently removes a comment", server.instructions)
         write_tools = (
             "upload_attachments", "update_attachment", "trash_attachments", "restore_attachments",
-            "create_page", "update_page", "publish_draft", "delete_draft", "set_labels",
+            "create_page", "update_page", "add_comment", "update_comment", "delete_comment",
+            "publish_draft", "delete_draft", "set_labels",
             "move_page", "delete_page", "restore_page",
         )
         for name in write_tools:

@@ -149,6 +149,7 @@ versioned writes; operations without a suppression control report that in their 
 | `get_page_tree` | [`service/tree.py`](src/confluence_connector/service/tree.py) | Read ordered child pages from a page or space root |
 | `get_page_metadata` | [`service/metadata.py`](src/confluence_connector/service/metadata.py) | Read versions, labels, contributors and ancestors |
 | `get_pages` | [`service/pages.py`](src/confluence_connector/service/pages.py) | Read pages as text or unchanged storage, with typed references, attachments and comments |
+| `get_comment`, `add_comment`, `update_comment`, `delete_comment` | [`service/comment_management.py`](src/confluence_connector/service/comment_management.py) | Read one comment, create a footer comment or reply, update by version, and explicitly confirm permanent deletion |
 | `download_attachments` | [`service/attachments.py`](src/confluence_connector/service/attachments.py) | Save selected attachments of one page locally |
 | `upload_attachments`, `update_attachment`, `trash_attachments`, `restore_attachments` | [`service/attachment_management.py`](src/confluence_connector/service/attachment_management.py) | Create attachment versions, update metadata, trash and restore page attachments |
 | `export_pages` | [`service/exports.py`](src/confluence_connector/service/exports.py) | Export up to 500 full pages with body, comments, attachment, report or archive file roles |
