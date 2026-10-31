@@ -232,17 +232,19 @@ Writes run only when a write tool is called, and are tested only on disposable s
   UTF-8 `rich` storage file; a leading byte-order mark is ignored. The resolved file must be inside the
   connector's exports folder or a folder the MCP client shares as a root, so a request cannot copy
   other local files into a page.
-- Before sending `rich`, three conversions fix HTML that AI tools write and Confluence stores badly
-  (research §6.5): `<pre><code class="language-X">` and plain `<pre>` become the code macro;
-  HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
+- Page bodies have no connector-imposed character limit. Before converting a `rich` body, active
+  content and nesting checks run. If it is not well-formed XML markup, the original body is sent
+  unchanged so Confluence can return its 400 syntax error and row/column; only HTML void-tag closure
+  is normalized while checking well-formedness. Well-formed rich input receives the targeted
+  conversions observed in research §6.5: `<pre><code class="language-X">` and plain `<pre>` become
+  the code macro; HTML5 void elements are self-closed; `<details>`/`<summary>` become the expand macro. A
   `body_file` is sent byte for byte except new `<pre>` and `<details>` blocks, which get the same
   conversions; a `<pre>` already in the stored body (Confluence's preformatted style) is kept, and void
   elements are not rewritten, so unparseable markup returns Confluence's 400.
 - Refused before sending: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `on*` attributes,
   `javascript:` URLs, the HTML macro, and more than 128 nested elements. Inline `body` markup is
-  currently reparsed with BeautifulSoup, which repairs some malformed input before sending (roadmap §7
-  tracks returning Confluence's error instead); a `body_file` is sent as is, so its unparseable markup
-  returns Confluence's 400 with row and column.
+  parsed for safety checks without rewriting malformed source; a `body_file` is sent as is, so its
+  unparseable markup returns Confluence's 400 with row and column.
 - Write tool descriptions carry a short storage reference (code, panels, expand, status, table of
   contents, tasks, page and attachment links, images, mentions).
 - `get_pages(format="rich")` returns storage unchanged for editing, like Outlook's `body="html"`.

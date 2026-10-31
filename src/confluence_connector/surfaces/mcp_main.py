@@ -457,8 +457,7 @@ def build_server(context: AppContext) -> FastMCP:
         body: Annotated[
             str | None,
             Field(
-                max_length=2_000_000,
-                description="Complete page body, up to 2 million characters; use exactly one of body and body_file.",
+                description="Complete page body with no connector-imposed length limit; use exactly one of body and body_file.",
             ),
         ] = None,
         format: Annotated[
@@ -494,8 +493,9 @@ def build_server(context: AppContext) -> FastMCP:
         """Create a page or new-page draft in exactly one parent or space root.
 
         Rich is the default format: provide HTML and Confluence storage tags, not Markdown or wiki
-        markup. The connector converts pre/code to the code macro, details/summary to expand, and
-        HTML void tags to self-closing tags. It refuses scripts, styles, frames, objects, embeds,
+        markup. Well-formed input converts pre/code to the code macro, details/summary to expand, and
+        HTML void tags to self-closing tags. Malformed rich markup is sent unchanged so
+        Confluence can report its syntax error. It refuses scripts, styles, frames, objects, embeds,
         event handlers, javascript URLs and the Confluence HTML macro. Storage can use code, expand,
         panels, status, table of contents, task lists, page/attachment links, images and mentions.
         Text is escaped and split into paragraphs. A duplicate title in the target space is refused.
@@ -531,8 +531,7 @@ def build_server(context: AppContext) -> FastMCP:
         body: Annotated[
             str | None,
             Field(
-                max_length=2_000_000,
-                description="Replacement body, up to 2 million characters; use exactly one of body and body_file.",
+                description="Replacement body with no connector-imposed length limit; use exactly one of body and body_file.",
             ),
         ] = None,
         expected_version: Annotated[
@@ -561,10 +560,10 @@ def build_server(context: AppContext) -> FastMCP:
         apart from new pre/details blocks. Files without the header, text exports and files with the
         comments section are refused; separate comments files have no header and are refused. With body,
         expected_version is required. A stale version is
-        never overwritten. Rich is the default:
-        provide HTML and Confluence storage tags, not Markdown or wiki markup. The connector converts
-        pre/code to the code macro, details/summary to expand, and HTML void tags to self-closing
-        tags. It refuses scripts, styles, frames, objects, embeds, event handlers, javascript URLs
+        never overwritten. Rich is the default: provide HTML and Confluence storage tags, not Markdown
+        or wiki markup. Malformed rich markup is sent unchanged so Confluence can return its syntax
+        error. Well-formed input converts pre/code to the code macro, details/summary to expand, and
+        HTML void tags to self-closing tags. It refuses scripts, styles, frames, objects, embeds, event handlers, javascript URLs
         and the Confluence HTML macro. Storage can use code, expand, panels, status, table of
         contents, task lists, page/attachment links, images and mentions. Text is escaped and split
         into paragraphs. Inline-comment anchors that would be detached require allow_comment_loss.

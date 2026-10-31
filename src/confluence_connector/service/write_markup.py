@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
 from collections import Counter
 from html import escape
 from html.parser import HTMLParser
@@ -47,11 +48,12 @@ _URL_ATTRIBUTES = frozenset(
 )
 _LANGUAGE_CLASS = re.compile(r"(?:^|\s)language-([a-zA-Z0-9_+#.-]+)(?:\s|$)")
 _JAVASCRIPT_SCHEME = re.compile(r"^javascript\s*:", re.IGNORECASE)
+_XML_PREFIX = re.compile(r"(?<![\w.-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])")
 MAX_RICH_MARKUP_DEPTH = 128
 
 
 def to_storage(body: str, page_format: str) -> str:
-    """Convert one validated body format; rich HTML is checked before any write request."""
+    """Convert rich input only when its XML fragment is well formed; let Confluence validate malformed input."""
     if page_format == "text":
         return _plain_text_to_storage(body)
     if page_format != "rich":
@@ -60,6 +62,8 @@ def to_storage(body: str, page_format: str) -> str:
     soup = BeautifulSoup(body, "html.parser")
     _check_active_content(soup)
     _check_markup_depth(soup, MAX_RICH_MARKUP_DEPTH)
+    if not _is_well_formed_fragment(body):
+        return body
     _replace_code_blocks(soup)
     _replace_expands(soup)
     return str(soup)
@@ -158,6 +162,49 @@ def content_loss(previous: str, replacement: str) -> tuple[bool, list[str]]:
     if attachment_loss:
         warnings.append(f"{attachment_loss} attachment reference(s) would be removed.")
     return anchor_loss > 0, warnings
+
+
+def _is_well_formed_fragment(source: str) -> bool:
+    """Check storage markup as XML while allowing Confluence's unbound ac:/ri: fragment prefixes."""
+    prefixes = {
+        prefix
+        for prefix in _XML_PREFIX.findall(source)
+        if prefix not in {"xml", "xmlns"}
+    }
+    namespaces = " ".join(f'xmlns:{prefix}="urn:{prefix}"' for prefix in sorted(prefixes))
+    normalized = _close_html_void_elements(source)
+    try:
+        ET.fromstring(f"<confluence-body {namespaces}>{normalized}</confluence-body>")
+    except ET.ParseError:
+        return False
+    return True
+
+
+def _close_html_void_elements(source: str) -> str:
+    """Normalize only HTML void start tags for XML validation; do not repair other malformed markup."""
+    parser = _VoidTagNormalizer(source)
+    parser.feed(source)
+    parser.close()
+    for offset in reversed(parser.insertions):
+        source = source[:offset] + "/" + source[offset:]
+    return source
+
+
+class _VoidTagNormalizer(HTMLParser):
+    def __init__(self, source: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self._line_starts = [0, *(match.end() for match in re.finditer(r"\n", source))]
+        self.insertions: list[int] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in _VOID_TAGS:
+            return
+        source_tag = self.get_starttag_text()
+        if source_tag is None or re.search(r"/\s*>$", source_tag):
+            return
+        line, column = self.getpos()
+        start = self._line_starts[line - 1] + column
+        self.insertions.append(start + len(source_tag) - 1)
 
 
 def _plain_text_to_storage(body: str) -> str:

@@ -41,6 +41,18 @@ class WriteServiceChecks(unittest.IsolatedAsyncioTestCase):
         roots.start()
         self.addCleanup(roots.stop)
 
+    async def test_create_page_body_has_no_artificial_character_limit(self) -> None:
+        body = "x" * 2_000_001
+        await self.service.create_page("Large body", body, format="text", space_key="SYNTH")
+        self.assertEqual(self.api.create_calls[0]["storage_body"], f"<p>{body}</p>")
+
+    async def test_create_page_passes_malformed_rich_markup_unchanged_to_confluence(self) -> None:
+        body = "<p><strong>unfinished</p>"
+
+        await self.service.create_page("Malformed body", body, space_key="SYNTH")
+
+        self.assertEqual(self.api.create_calls[0]["storage_body"], body)
+
     async def test_create_page_converts_text_and_uses_parent_space(self) -> None:
         result = await self.service.create_page("New page", "<safe>", format="text", parent_id="100")
 

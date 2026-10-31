@@ -224,10 +224,11 @@ positions so the slices join back exactly. Cursors carry page ID, version and a 
 anchors follow the pinned block order, attachment and comment anchors their IDs.
 
 **[`writes.py`](../src/confluence_connector/service/writes.py) and
-[`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: `to_storage` converts and
-checks `rich` input with BeautifulSoup, converts code blocks and expand sections, and refuses active
-content and excessive nesting (requirements §10.1). The HTML parser repairs some malformed input
-before sending it to Confluence; the roadmap tracks whether that matches the D5 error contract.
+[`write_markup.py`](../src/confluence_connector/service/write_markup.py)**: page body strings have no
+connector-imposed length limit. `to_storage` checks active content and nesting, then validates rich
+markup as an XML fragment before conversion. Malformed markup is passed unchanged to Confluence for
+its syntax error; well-formed markup gets the targeted code, expand and void-tag conversions
+(requirements §10.1).
 `file_to_storage` runs the same checks on a `body_file` but never reserializes it: `html.parser` source
 positions locate the outermost `<pre>` and `<details>` elements (CDATA is not markup), and only those not
 already in the stored body are converted and spliced back, so every other byte is unchanged.
