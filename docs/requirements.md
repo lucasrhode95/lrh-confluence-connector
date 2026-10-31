@@ -373,8 +373,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 - `get_comment` reads one footer or inline comment by decimal ID and returns its body, version, page
   and URL, parent, author, creation time, location, resolution and selected text when available.
 - `add_comment` creates a footer comment on one current page, or a reply when `parent_comment_id`
-  belongs to that same page. Bodies use the same rich-storage or escaped-text conversion and 2-million
-  character limit as page writes. Inline comments cannot be created because they require a text
+  belongs to that same page. Bodies use the same rich-storage or escaped-text conversion as page writes,
+  with no connector-imposed length limit. Inline comments cannot be created because they require a text
   selection anchor.
 - `update_comment` replaces the body at an exact `expected_version`; stale versions are refused.
   An optional page reference must match the comment's owner. Inline anchors are separate source
@@ -384,7 +384,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
   instance and cannot be undone. An optional page reference must match the owner; server permission
   failures remain explicit. The DELETE route has no notification-suppression control.
 - Every write is bound to the authenticated account; an uncertain outcome is never resent. Results
-  include the comment ID, page, URL and version where applicable. Inline-comment
+  include the comment ID, page, URL and version where applicable; create and update reread the saved
+  comment, and a failed reread returns the known ID and version with a warning. Inline-comment
   resolve/reopen is not exposed because the configured instance has no verified REST write route for
   that state.
 

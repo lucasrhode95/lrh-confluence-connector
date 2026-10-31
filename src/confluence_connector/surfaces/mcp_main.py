@@ -599,7 +599,7 @@ def build_server(context: AppContext) -> FastMCP:
     @_logged
     async def add_comment(
         page: Annotated[str, Field(description="Current page ID or supported same-instance page URL.")],
-        body: Annotated[str, Field(max_length=2_000_000, description="Comment body, up to 2 million characters.")],
+        body: Annotated[str, Field(description="Comment body; same rich or text conversion as page bodies.")],
         format: Annotated[PageTextFormat | None, Field(description="rich markup (default) or escaped plain text.")] = None,
         parent_comment_id: Annotated[str | None, Field(description="Optional comment ID to reply to on this page.")] = None,
         notify_watchers: Annotated[bool, Field(description="Comment creation has no notification-suppression control; the result reports this.")] = True,
@@ -618,13 +618,17 @@ def build_server(context: AppContext) -> FastMCP:
     @_logged
     async def update_comment(
         comment_id: Annotated[str, Field(description="Decimal footer or inline comment ID.")],
-        body: Annotated[str, Field(max_length=2_000_000, description="Replacement comment body, up to 2 million characters.")],
+        body: Annotated[str, Field(description="Replacement comment body; same rich or text conversion as page bodies.")],
         expected_version: Annotated[int, Field(ge=1, description="Current comment version; stale versions are refused.")],
         format: Annotated[PageTextFormat | None, Field(description="rich markup (default) or escaped plain text.")] = None,
         page: Annotated[str | None, Field(description="Optional page ID or URL used to verify comment ownership.")] = None,
         notify_watchers: Annotated[bool, Field(description="Notify watchers; false sends version.minorEdit=true.")] = True,
     ) -> CommentWriteResult:
-        """Replace a footer or inline comment body after checking its version; the inline anchor is retained."""
+        """Replace a footer or inline comment body after checking its version.
+
+        Only the body is sent; whether Confluence keeps an inline comment's anchor on edit is not yet
+        verified. The result rereads the saved comment.
+        """
         services = await context.services()
         return await services.comment_management.update_comment(
             comment_id,

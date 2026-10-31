@@ -319,7 +319,7 @@ Live synthetic comment check, 2026-10-30:
   after cleanup and was not purged.
 - This test used only the configured account's own synthetic footer comments. Inline edit/anchor
   preservation, inline resolution writes and a 403 from editing another user's comment remain
-  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v951/api-group-content-resource/)
+  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-content-resource/)
   documents generic content operations; no inline-resolution write route has been verified here.
 
 ## 6. Writes

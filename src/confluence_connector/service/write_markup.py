@@ -6,6 +6,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter
+from typing import Any
 from html import escape
 from html.entities import html5
 from html.parser import HTMLParser
@@ -53,6 +54,13 @@ _XML_PREFIX = re.compile(r"(?<![\w.-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])")
 _NAMED_ENTITY = re.compile(r"&([A-Za-z][A-Za-z0-9]*);")
 _XML_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 MAX_RICH_MARKUP_DEPTH = 128
+
+
+def body_to_storage(value: Any, page_format: Any) -> str:
+    """Entry point for page and comment bodies: validate the text, then convert its format."""
+    if not isinstance(value, str):
+        raise InvalidRequest("body must be text.")
+    return to_storage(value, page_format)
 
 
 def to_storage(body: str, page_format: str) -> str:

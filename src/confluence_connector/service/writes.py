@@ -36,7 +36,7 @@ from confluence_connector.remote.links import PageLinkResolver
 from confluence_connector.service import cursors
 from confluence_connector.service.placement import PagePlacementResolver
 from confluence_connector.service.storage_files import exports_root, read_storage_file, split_export_header
-from confluence_connector.service.write_markup import content_loss, file_to_storage, to_storage
+from confluence_connector.service.write_markup import body_to_storage, content_loss, file_to_storage
 
 MAX_TITLE_CHARS = 255
 MAX_DRAFT_OFFSET = 1_000_000
@@ -88,7 +88,7 @@ class PageWrites:
             header, file_body = split_export_header(_read_body_file(body_file, body_file_roots))
             storage_body = file_to_storage(file_body, file_body if header is not None else None)
         else:
-            storage_body = _write_body(body, format)
+            storage_body = body_to_storage(body, format)
         if not isinstance(status, str) or status not in {"current", "draft"}:
             raise InvalidRequest("status must be current or draft.")
         placement_kind, parent_reference, selected_space, validated_sibling = placement_inputs(
@@ -178,7 +178,7 @@ class PageWrites:
             if expected_version is None:
                 raise InvalidRequest("expected_version is required with body.")
             version = _expected_version(expected_version)
-            storage_body = _write_body(body, format)
+            storage_body = body_to_storage(body, format)
         new_title = _title(title) if title is not None else None
         if not isinstance(allow_comment_loss, bool):
             raise InvalidRequest("allow_comment_loss must be a boolean.")
@@ -451,12 +451,6 @@ def _one_body_source(body: Any, body_file: Any, page_format: Any) -> None:
         raise InvalidRequest("Pass exactly one of body and body_file.")
     if body_file is not None and page_format != "rich":
         raise InvalidRequest("body_file holds rich storage markup; omit format or pass rich.")
-
-
-def _write_body(value: Any, page_format: Any) -> str:
-    if not isinstance(value, str):
-        raise InvalidRequest("body must be text.")
-    return to_storage(value, page_format)
 
 
 def _expected_version(value: Any) -> int:

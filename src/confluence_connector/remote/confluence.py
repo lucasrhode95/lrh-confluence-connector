@@ -935,7 +935,13 @@ class ConfluenceApi:
         comment = _page_comment(payload)
         if comment is None or comment.container_page_id is None or comment.version is None:
             raise Upstream("Confluence returned a comment without its page or version.")
-        return comment
+        container = payload.get("container") if isinstance(payload, dict) else None
+        links = container.get("_links") if isinstance(container, dict) else None
+        if not isinstance(links, dict):
+            return comment
+        return comment.model_copy(
+            update={"container_page_url": same_instance_link(str(self._settings["base_url"]), links.get("webui"))}
+        )
 
     async def _collection_rows(
         self, route: str, *, expected_username: str, params: Mapping[str, str] | None = None

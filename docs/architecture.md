@@ -265,8 +265,9 @@ uncertain writes. It distinguishes attachment-delete access from page-update acc
 
 **[`comment_management.py`](../src/confluence_connector/service/comment_management.py)** reads one
 comment, validates page and reply ownership, checks comment versions before updates, and requires an
-explicit flag before permanent deletion. The REST adapter supplies comment source metadata so inline
-anchors remain outside the body update.
+explicit flag before permanent deletion. The comment read carries its page ID and URL, so ownership
+checks need no page read. Updates send the body only, never inline anchor metadata; writes reread the
+saved comment for the result.
 
 **[`user_settings.py`](../src/confluence_connector/service/user_settings.py)** isolates the
 undocumented HTML email settings form from the REST adapter. It reads the form through the shared,

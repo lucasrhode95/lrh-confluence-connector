@@ -578,6 +578,7 @@ class CommentRecord(BaseModel):
 
 class CommentWriteResult(NotificationOutcome):
     comment: CommentRecord
+    warnings: list[str] = Field(default_factory=list)
     notification_suppression_supported: bool = False
 
 
@@ -601,6 +602,7 @@ class RemotePageComment(BaseModel):
     body_storage: str | None = None
     version: int | None = None
     container_page_id: str | None = None
+    container_page_url: str | None = None
     location: str | None = None
     resolution: str | None = None
     selected_text: str | None = None
