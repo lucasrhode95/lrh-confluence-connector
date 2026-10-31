@@ -143,6 +143,8 @@ versioned writes; operations without a suppression control report that in their 
 settings and returns a readback of the saved values.
 Page bodies have no connector-imposed character limit. Malformed rich markup is sent unchanged so
 Confluence can report the syntax error and its location.
+Page reads include typed macro references from included pages when `macros_from_storage` is enabled;
+include traversal is bounded and reports cycles or unreadable pages in the result notes.
 
 | MCP tool | Service module | Behavior |
 |---|---|---|

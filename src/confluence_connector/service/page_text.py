@@ -55,6 +55,16 @@ class _Macro:
     body: str
     page_id: str | None = None
     page_title: str | None = None
+    page_space_key: str | None = None
+
+
+@dataclass(frozen=True)
+class IncludePageTarget:
+    """A page target declared by an include or excerpt-include macro."""
+
+    page_id: str | None
+    title: str | None
+    space_key: str | None
 
 
 @dataclass(frozen=True)
@@ -64,6 +74,8 @@ class ParsedStorage:
     macros: tuple[_Macro, ...] = ()
     references: tuple[PageReference, ...] = ()
     top_level_blocks: tuple[str, ...] = ()
+    include_targets: tuple[IncludePageTarget, ...] = ()
+    macro_references: tuple[PageReference, ...] = ()
 
 
 def render_page_body(
@@ -82,7 +94,8 @@ def render_page_body(
     The caller validates page references and parse scope once; this converter trusts that contract.
     With ``macros_from_storage`` false, macro parameters and storage references are not used. Callers
     reading one page can pass storage parsed for that page ID and body so macros, references and
-    rich-body slices share a parse.
+    rich-body slices share a parse. The page service separately follows bounded include targets when
+    collecting macro references; each reference records the page whose storage declared it.
     """
     storage = parsed_storage
     if macros_from_storage and storage is None:
@@ -115,7 +128,23 @@ def parse_storage(
         tuple(_storage_references(soup, page_id, list(macros))) if include_metadata else ()
     )
     blocks = tuple(_storage_top_level_blocks(storage_html, soup)) if include_top_level_blocks else ()
-    return ParsedStorage(macros=macros, references=references, top_level_blocks=blocks)
+    include_targets = tuple(
+        IncludePageTarget(macro.page_id, macro.page_title, macro.page_space_key)
+        for macro in macros
+        if macro.name in _INCLUDE_MACROS
+    )
+    macro_references = tuple(
+        reference
+        for macro in macros
+        if (reference := _macro_reference(macro, page_id, include_text_macros=True)) is not None
+    )
+    return ParsedStorage(
+        macros=macros,
+        references=references,
+        top_level_blocks=blocks,
+        include_targets=include_targets,
+        macro_references=macro_references,
+    )
 
 
 def unique_references(references: list[PageReference]) -> list[PageReference]:
@@ -531,6 +560,7 @@ def _storage_macros(soup: BeautifulSoup) -> list[_Macro]:
                 body=body.strip("\n"),
                 page_id=(page.get("ri:content-id") or page.get("ri:page-id")) if page else None,
                 page_title=page.get("ri:content-title") if page else None,
+                page_space_key=page.get("ri:space-key") if page else None,
             )
         )
     return macros
@@ -573,13 +603,17 @@ def _storage_references(
     return references
 
 
-def _macro_reference(macro: _Macro, page_id: str) -> PageReference | None:
+def _macro_reference(
+    macro: _Macro, page_id: str, *, include_text_macros: bool = False
+) -> PageReference | None:
     if macro.name in _INCLUDE_MACROS:
         return PageReference(kind="page", page_id=macro.page_id, title=macro.page_title, owner_page_id=page_id)
     if macro.name == "jira":
         key = macro.parameters.get("key")
-        return PageReference(kind="jira", key=key, macro_name="jira") if key else None
-    if macro.name in _TEXT_MACROS:
+        return PageReference(
+            kind="jira", key=key, macro_name="jira", owner_page_id=page_id or None
+        ) if key else None
+    if macro.name in _TEXT_MACROS and not include_text_macros:
         return None
     return PageReference(kind="macro", macro_name=macro.name, owner_page_id=page_id or None)
 

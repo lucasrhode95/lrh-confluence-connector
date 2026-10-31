@@ -173,8 +173,11 @@ storage technique is shared (§5).
   body, `## Attachments` (type and size), then `## Comments`, threaded, with author, date, location,
   resolution and an inline comment's selected text.
 - A typed `references` list (kind, IDs, filename, media type, size, owner page) is collected from
-  `view` attributes and `storage` elements **before** conversion. Agents never parse marker text, and
-  the connector never reads identity back from it.
+  `view` attributes and `storage` elements **before** conversion. When `macros_from_storage` is on,
+  `include` and `excerpt-include` targets are resolved and their macro identities are added with the
+  source page as `owner_page_id`. Nested includes are followed to depth 5 and at most 100 included
+  pages per requested page; cycles, unresolved targets and pages that cannot be read are reported in
+  `notes`. Agents never parse marker text, and the connector never reads identity back from it.
 - A requested body that is missing or malformed is an upstream error, never an empty page.
 
 ### 8.2 Budgets and continuation (D4)
@@ -190,7 +193,8 @@ storage technique is shared (§5).
   resume by item ID. A removed anchor asks the caller to restart. Joined fragments reproduce the
   original text exactly. Nothing is kept in process memory.
 - `parse_scope` defaults: `comments` (footer and inline, resolved included), `attachments` (the list
-  only), `macros_from_storage` and `header`, all on. Reads never download attachment bytes.
+  only), `macros_from_storage` (including bounded included-page macro identities) and `header`, all on.
+  Reads never download attachment bytes.
 - A reference with `pageVersion` reads that version. Metadata always describes the current page.
 
 ## 9. Exports (D8)
