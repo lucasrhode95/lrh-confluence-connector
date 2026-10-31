@@ -44,6 +44,7 @@ class _StructureApi:
         self.property_writes: list[str] = []
         self.properties_removed: list[str] = []
         self.restore_calls: list[str] = []
+        self.restore_arguments: list[dict[str, object]] = []
         self.trash_requests: list[tuple[str | None, int, int]] = []
         self.trash_page_response = RemoteTrashPage(pages=[], start=0, size=0, total_size=0, has_more=False)
         self.metadata_calls: list[str] = []
@@ -145,6 +146,7 @@ class _StructureApi:
 
     async def restore_trashed_page(self, page_id: str, **kwargs) -> PageMetadata:
         self.restore_calls.append(page_id)
+        self.restore_arguments.append(kwargs)
         self.pages[page_id].status = "current"
         self.pages[page_id].ancestors = []
         return self.pages[page_id]

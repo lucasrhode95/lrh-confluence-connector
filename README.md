@@ -137,6 +137,9 @@ selected comments to a separate read-only file. Use the result's `body` file wit
 without attachment bytes are separate files; larger or attachment-bearing exports are ZIP archives.
 The result lists each output with its role and location.
 
+Write tools accept `notify_watchers` (default `true`). Set it to `false` to suppress email on supported
+versioned writes; operations without a suppression control report that in their result.
+
 | MCP tool | Service module | Behavior |
 |---|---|---|
 | `auth_status` | [`bootstrap.py`](src/confluence_connector/bootstrap.py) | Report the stored account offline |

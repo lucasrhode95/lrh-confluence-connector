@@ -319,6 +319,12 @@ repeated create, update, label, parent change, trash and the move action.
   and editor, 2026-10-30): unchecking the editor's "Notify watchers" sends exactly
   `version.minorEdit: true` to `PUT /rest/api/content/{id}`. On four watched synthetic pages, edits
   with it sent no email; edits without it did, about 9 minutes later (batched).
+- The [Data Center Content Version reference](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-content-version/)
+  places `minorEdit` on a version object. The [Content Resource](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-content-resource/)
+  and [Attachments](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-attachments/)
+  references document versioned request shapes, but show no separate suppression field for page
+  creation, moves, label changes, deletion or trash. Their default notification behavior is not
+  inferred from the absence of a field; tool results report that suppression is unavailable.
 - An update with the stored title and a byte-identical body creates no version (PAT, 2026-10-30): the
   response and later reads keep the current version. `view` differs between any two reads of an
   expand macro, whose element IDs are random, so compare `storage`, not `view`.

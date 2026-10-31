@@ -28,6 +28,8 @@ class AttachmentManagementChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.attachments[0].media_type, "image/svg+xml")
         self.assertEqual(api.upload_page_attachment.await_args.kwargs["content"], b"<svg />")
         self.assertEqual(api.upload_page_attachment.await_args.kwargs["comment"], "second version")
+        self.assertTrue(api.upload_page_attachment.await_args.kwargs["notify_watchers"])
+        self.assertTrue(result.notify_watchers)
 
     async def test_upload_existing_filename_uses_attachment_version_route(self) -> None:
         api = _Api(attachments=[PageAttachment(attachment_id="91", filename="diagram.svg", version=1)])
@@ -82,6 +84,8 @@ class AttachmentManagementChecks(unittest.IsolatedAsyncioTestCase):
         result = await _service(api).trash_attachments("55", ["91"], allow_referenced=True)
         self.assertEqual(result.attachments[0].attachment_id, "91")
         self.assertIn("other pages are not searched", result.notes[0])
+        self.assertFalse(result.notification_suppression_supported)
+        self.assertIsNotNone(result.notification_note)
         api.attachment_supports_delete.assert_awaited_once_with("91", expected_username="sample-user")
         api.trash_page_attachment.assert_awaited_once()
 

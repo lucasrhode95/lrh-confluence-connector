@@ -98,6 +98,9 @@ Only design rules that the code layout does not make obvious are listed here. To
 - **Writes** are resent only when they provably never applied: the request was never sent, or the answer
   was 429 or 503. A timeout after sending, an incomplete answer or a 504 raises `UncertainWrite` and is
   never resent.
+- **Watcher notifications.** Versioned writes omit `version.minorEdit` by default; `notify_watchers=false`
+  adds it as `true`. Multipart attachment writes send the equivalent form field. Routes without a
+  version field leave Confluence's behavior untouched and return a capability note.
 - **Account checks.** The username is read before and after every exchange; if it changed, the result
   is discarded (`AccountMismatch`), and for a write the outcome becomes `UncertainWrite`. The store's
   revision (its file's modification time and size, read before decrypting) is compared after the
@@ -264,7 +267,8 @@ Returns typed models directly; FastMCP handles serialization and result schemas.
 Annotations: reads are read-only and idempotent (`auth_status` also closed-world). Writes are never
 read-only, and all but `create_page` and `restore_page` are marked destructive. `download_attachments`
 and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
-outputs.
+outputs. Every write declaration exposes `notify_watchers`; the result model echoes the flag and
+indicates whether the route supports suppression.
 
 ### 5.8 [`config.py`](../src/confluence_connector/config.py) and [`logs.py`](../src/confluence_connector/logs.py)
 

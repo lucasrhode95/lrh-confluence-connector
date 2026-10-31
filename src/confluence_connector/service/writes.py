@@ -24,10 +24,12 @@ from confluence_connector.domain.models import (
     ResolvedPageReference,
 )
 from confluence_connector.domain.validation import (
+    NOTIFICATION_SUPPRESSION_UNAVAILABLE,
     optional_space_key,
     page_reference,
     require_current_page,
     placement_inputs,
+    validate_notify_watchers,
 )
 from confluence_connector.remote.confluence import DRAFT_PAGE_SIZE, ConfluenceApi
 from confluence_connector.remote.links import PageLinkResolver
@@ -73,12 +75,14 @@ class PageWrites:
         sibling: str | None = None,
         body_file: str | None = None,
         body_file_roots: Sequence[Path] = (),
+        notify_watchers: bool = True,
     ) -> PageWriteResult:
         """Create a current page or new-page draft under one validated placement.
 
         ``body_file`` is a storage file; a rich export's header is dropped and its body is treated as
         existing Confluence storage, so only the caller's new pre/details blocks are converted.
         """
+        notify = validate_notify_watchers(notify_watchers)
         clean_title = _title(title)
         _one_body_source(body, body_file, format)
         if body_file is not None:
@@ -130,6 +134,9 @@ class PageWrites:
             version=created.version,
             url=created.url,
             warnings=warnings,
+            notify_watchers=notify,
+            notification_suppression_supported=False,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
         )
 
     async def update_page(
@@ -143,6 +150,7 @@ class PageWrites:
         allow_comment_loss: bool = False,
         body_file: str | None = None,
         body_file_roots: Sequence[Path] = (),
+        notify_watchers: bool = True,
     ) -> PageWriteResult:
         """Replace a whole page body after checking its version and source references.
 
@@ -150,6 +158,7 @@ class PageWrites:
         page ID only has to agree with ``page``; it never selects the page. The header's version is the
         expected version unless ``expected_version`` is given, which must then agree with it.
         """
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(page)
         _one_body_source(body, body_file, format)
         header = None
@@ -215,6 +224,7 @@ class PageWrites:
             storage_body=storage_body,
             next_version=version + 1,
             expected_username=self._username,
+            notify_watchers=notify,
         )
         return PageWriteResult(
             page_id=updated.page_id,
@@ -223,6 +233,8 @@ class PageWrites:
             version=updated.version or version + 1,
             url=updated.url or current.metadata.url,
             warnings=warnings,
+            notify_watchers=notify,
+            notification_suppression_supported=True,
         )
 
     async def list_drafts(
@@ -270,8 +282,9 @@ class PageWrites:
             next_cursor=next_cursor,
         )
 
-    async def publish_draft(self, draft: str) -> PageWriteResult:
+    async def publish_draft(self, draft: str, *, notify_watchers: bool = True) -> PageWriteResult:
         """Publish one readable new-page draft while retaining its content ID."""
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(draft, field="draft")
         resolved = await self._resolve_page(reference)
         source = await self._api.get_page_content(
@@ -299,6 +312,7 @@ class PageWrites:
             parent_id=parent_id,
             storage_body=source.storage_body,
             expected_username=self._username,
+            notify_watchers=notify,
         )
         return PageWriteResult(
             page_id=published.page_id,
@@ -306,10 +320,13 @@ class PageWrites:
             status="current",
             version=published.version,
             url=published.url or metadata.url,
+            notify_watchers=notify,
+            notification_suppression_supported=True,
         )
 
-    async def delete_draft(self, draft: str) -> DraftDeletionResult:
+    async def delete_draft(self, draft: str, *, notify_watchers: bool = True) -> DraftDeletionResult:
         """Permanently delete one verified new-page draft, bypassing the Confluence trash."""
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(draft, field="draft")
         resolved = await self._resolve_page(reference)
         metadata = await self._api.get_page_metadata(
@@ -318,7 +335,14 @@ class PageWrites:
         if metadata.content_type != "page" or metadata.status != "draft":
             raise InvalidRequest("delete_draft accepts new-page drafts only.")
         await self._api.delete_draft(metadata.page_id, expected_username=self._username)
-        return DraftDeletionResult(page_id=metadata.page_id, title=metadata.title, deleted=True)
+        return DraftDeletionResult(
+            page_id=metadata.page_id,
+            title=metadata.title,
+            deleted=True,
+            notify_watchers=notify,
+            notification_suppression_supported=False,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+        )
 
     async def set_labels(
         self,
@@ -326,8 +350,10 @@ class PageWrites:
         *,
         add: list[str] | None = None,
         remove: list[str] | None = None,
+        notify_watchers: bool = True,
     ) -> LabelChangeResult:
         """Add and remove global labels, stopping at the first failed write with an exact partial result."""
+        notify = validate_notify_watchers(notify_watchers)
         reference = page_reference(page)
         additions = _labels(add, "add")
         removals = _labels(remove, "remove")
@@ -353,7 +379,13 @@ class PageWrites:
                 unchanged.append(label)
             else:
                 operations.append(("remove", label))
-        result = LabelChangeResult(page_id=metadata.page_id, unchanged=unchanged)
+        result = LabelChangeResult(
+            page_id=metadata.page_id,
+            unchanged=unchanged,
+            notify_watchers=notify,
+            notification_suppression_supported=False,
+            notification_note=NOTIFICATION_SUPPRESSION_UNAVAILABLE,
+        )
         for index, (action, label) in enumerate(operations):
             try:
                 if action == "add":

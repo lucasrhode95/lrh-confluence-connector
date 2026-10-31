@@ -333,6 +333,7 @@ class ConfluenceApi:
         space_key: str,
         next_version: int,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageMetadata:
         """Restore one trashed page; Confluence places restored pages at the space root."""
         payload = await self._transport.send_json(
@@ -344,7 +345,7 @@ class ConfluenceApi:
                 "type": "page",
                 "title": title,
                 "status": "current",
-                "version": {"number": next_version},
+                "version": _version_body(next_version, notify_watchers),
                 "space": {"key": space_key},
             },
             expected_username=expected_username,
@@ -506,6 +507,7 @@ class ConfluenceApi:
         storage_body: str,
         next_version: int,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageMetadata:
         """Replace a validated current page's title and complete storage body once."""
         payload = await self._transport.send_json(
@@ -515,7 +517,7 @@ class ConfluenceApi:
                 "id": page_id,
                 "type": "page",
                 "title": title,
-                "version": {"number": next_version},
+                "version": _version_body(next_version, notify_watchers),
                 "body": {"storage": {"value": storage_body, "representation": "storage"}},
             },
             expected_username=expected_username,
@@ -549,6 +551,7 @@ class ConfluenceApi:
         parent_id: str | None,
         storage_body: str,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageMetadata:
         """Publish a validated new-page draft under the same ID."""
         body: dict[str, Any] = {
@@ -556,7 +559,7 @@ class ConfluenceApi:
             "type": "page",
             "title": title,
             "status": "current",
-            "version": {"number": 1},
+            "version": _version_body(1, notify_watchers),
             "space": {"key": space_key},
             "body": {"storage": {"value": storage_body, "representation": "storage"}},
         }
@@ -703,11 +706,12 @@ class ConfluenceApi:
         media_type: str,
         comment: str | None,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageAttachment:
         """Create a new attachment on a page; existing files use ``upload_attachment_version``."""
         if not page_id.isdecimal():
             raise InvalidRequest("The attachment target must be a numeric page ID.")
-        form_fields = {"minorEdit": "false"}
+        form_fields = {"minorEdit": "true"} if not notify_watchers else {}
         if comment is not None:
             form_fields["comment"] = comment
         payload = await self._transport.send_json(
@@ -735,11 +739,12 @@ class ConfluenceApi:
         media_type: str,
         comment: str | None,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageAttachment:
         """Upload bytes as a new version of the supplied page attachment."""
         if not page_id.isdecimal() or not attachment_id.isdecimal():
             raise InvalidRequest("Page and attachment IDs must be numeric.")
-        form_fields = {"minorEdit": "false"}
+        form_fields = {"minorEdit": "true"} if not notify_watchers else {}
         if comment is not None:
             form_fields["comment"] = comment
         payload = await self._transport.send_json(
@@ -766,6 +771,7 @@ class ConfluenceApi:
         media_type: str,
         comment: str | None,
         expected_username: str,
+        notify_watchers: bool = True,
     ) -> PageAttachment:
         """Update attachment properties at the version recorded on the page child list."""
         if not page_id.isdecimal() or not attachment.attachment_id.isdecimal():
@@ -779,7 +785,7 @@ class ConfluenceApi:
             "title": filename,
             "container": {"id": page_id, "type": "page"},
             "metadata": {"mediaType": media_type},
-            "version": {"number": attachment.version + 1},
+            "version": _version_body(attachment.version + 1, notify_watchers),
         }
         if comment is not None:
             body["version"]["message"] = comment
@@ -856,7 +862,7 @@ class ConfluenceApi:
         )
 
     async def restore_page_attachment(
-        self, attachment: PageAttachment, *, expected_username: str
+        self, attachment: PageAttachment, *, expected_username: str, notify_watchers: bool = True
     ) -> PageAttachment:
         """Restore a trashed attachment by updating its content status to current."""
         if attachment.version is None:
@@ -868,7 +874,7 @@ class ConfluenceApi:
                 "id": attachment.attachment_id,
                 "type": "attachment",
                 "status": "current",
-                "version": {"number": attachment.version + 1},
+                "version": _version_body(attachment.version + 1, notify_watchers),
             },
             expected_username=expected_username,
         )
@@ -1541,6 +1547,14 @@ def _optional_nonnegative_int(value: Any) -> int | None:
 def _positive_int(value: Any) -> int | None:
     number = _optional_nonnegative_int(value)
     return number if number is not None and number > 0 else None
+
+
+def _version_body(number: int, notify_watchers: bool) -> dict[str, int | bool]:
+    """Build a content-version object; minorEdit suppresses watcher email when requested."""
+    version: dict[str, int | bool] = {"number": number}
+    if not notify_watchers:
+        version["minorEdit"] = True
+    return version
 
 
 def _has_next_link(payload: dict[str, Any]) -> bool:
