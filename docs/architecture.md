@@ -291,7 +291,7 @@ Returns typed models directly; FastMCP handles serialization and result schemas.
 `build_server` declares the tools with their annotations and the server instructions; each tool calls
 `await context.services()` and one service method, and logs its name, outcome and duration.
 Annotations: reads are read-only and idempotent (`auth_status` also closed-world). Writes are never
-read-only, and all but `create_page` and `restore_page` are marked destructive. `download_attachments`
+read-only, and all but `create_page`, `add_comment` and `restore_page` are marked destructive. `download_attachments`
 and `export_pages` are marked destructive too: they write local files, and their cleanup removes expired
 outputs. Every write declaration exposes `notify_watchers`; the result model echoes the flag and
 indicates whether the route supports suppression. The account settings update has its own explicit
