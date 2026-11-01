@@ -510,7 +510,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
                             },
                             "extensions": {
                                 "location": "inline",
-                                "resolutionStatus": "resolved",
+                                "resolution": {"status": "reopened"},
                                 "inlineProperties": {"originalSelection": "selected words"},
                             },
                         }
@@ -525,7 +525,10 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].url.params["limit"], "500")
         self.assertEqual(observed[1].url.path, "/wiki/rest/api/content/55/child/comment")
         self.assertEqual(observed[1].url.params["depth"], "all")
-        self.assertIn("history", observed[1].url.params["expand"])
+        self.assertEqual(
+            observed[1].url.params["expand"],
+            "body.view,history,extensions.inlineProperties,extensions.resolution",
+        )
         self.assertEqual(attachments[0].attachment_id, "attachment-9")
         self.assertEqual(
             attachments[0].download_url,
@@ -534,6 +537,7 @@ class ReadRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comments[0].parent_comment_id, "comment-6")
         self.assertEqual(comments[0].location, "inline")
         self.assertEqual(comments[0].selected_text, "selected words")
+        self.assertEqual(comments[0].resolution, "reopened")
         self.assertEqual(comments[0].author.display_name, "Sample User")  # type: ignore[union-attr]
 
     async def test_page_comments_reject_missing_or_malformed_requested_view_bodies(self) -> None:

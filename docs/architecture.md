@@ -327,7 +327,7 @@ destructive annotation and does not accept that content-write option.
 | Trees | `…/space/{key}/content/page?depth=root`, `…/content/{id}/child/page` | Yes |
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
-| Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for footer comments; inline resolution has no verified write route |
+| Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for comment bodies; reads expand `extensions.inlineProperties` and `extensions.resolution`. Resolution writes are not implemented; only the inline-comments plugin route changes it safely (research §5.4) |
 | Email notification settings | `GET /users/viewmyemailsettings.action`, `GET /users/editmyemailsettings.action`, `POST /users/doeditmyemailsettings.action` | **No**; isolated UI form with `atl_token`, verified live (research §6.7) |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
 | Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |

@@ -735,7 +735,11 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                             "view": {"value": "<p>Current text</p>"},
                             "storage": {"value": "<p>Current text</p>"},
                         },
-                        "extensions": {"location": "inline", "resolutionStatus": "open"},
+                        "extensions": {
+                            "location": "inline",
+                            "inlineProperties": {"originalSelection": "anchored words", "markerRef": "marker-1"},
+                            "resolution": {"status": "open"},
+                        },
                     },
                 )
             if request.method == "DELETE":
@@ -759,7 +763,9 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comment.body_storage, "<p>Current text</p>")
         self.assertEqual(comment.container_page_url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/301/Synthetic")
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/501")
+        self.assertEqual(comment.selected_text, "anchored words")
         self.assertIn("body.storage", observed[0].url.params["expand"])
+        self.assertIn("extensions.inlineProperties,extensions.resolution", observed[0].url.params["expand"])
         self.assertEqual(observed[1].method, "PUT")
         default_update = json.loads(observed[1].content)
         self.assertEqual(default_update["version"], {"number": 4})

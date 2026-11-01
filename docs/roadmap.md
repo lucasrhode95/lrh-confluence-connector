@@ -7,9 +7,6 @@ probe CLI help.
 
 ## Implementation
 
-- **Inline comment fields:** `get_comment` and page comment reads expand only `extensions`, so
-  `selected_text` and `resolution` are always empty. Expand `extensions.inlineProperties` and
-  `extensions.resolution`, and read `resolution.status`, including `reopened` (research §5.4).
 - **Refused moves:** a refused move reports "Confluence rejected the requested page position." and
   drops Confluence's `actionErrors` text, such as a title conflict in the target space (research §6.3).
 
