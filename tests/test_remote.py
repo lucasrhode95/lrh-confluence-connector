@@ -125,6 +125,22 @@ class RemoteChecks(unittest.IsolatedAsyncioTestCase):
             self.assertIn("multipart/form-data", request.headers["Content-Type"])
             self.assertEqual(request.headers["X-Atlassian-Token"], "no-check")
 
+    async def test_upload_timeout_grows_with_the_body_and_other_requests_keep_the_default(self) -> None:
+        timeouts = []
+        def handler(request):
+            timeouts.append(request.extensions["timeout"])
+            return httpx.Response(200, json={})
+        client, transport = self.make_client(handler)
+        await transport.send_json("POST", "rest/api/content/42/child/attachment",
+            files={"file": ("big.bin", b"\0" * 3_000_000, "application/octet-stream")},
+            skip_atlassian_token_check=True, expected_username="sample-user")
+        await transport.send_json("POST", "rest/api/content", body={}, expected_username="sample-user")
+
+        upload, plain = timeouts
+        self.assertEqual((upload["write"], upload["read"]), (60.0, 60.0))
+        self.assertEqual((upload["connect"], upload["pool"]), (10.0, 10.0))
+        self.assertEqual(plain, client.timeout.as_dict())
+
     async def test_attachment_download_streams_binary_and_keeps_source_query(self) -> None:
         observed: list[httpx.Request] = []
 

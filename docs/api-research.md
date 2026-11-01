@@ -55,6 +55,8 @@ run, and nothing was purged. No tokens, cookies, page content, names or real ids
   the root, reorders, reparents and moves across spaces, without a page version (§6.3).
 - Trash loses the hierarchy: Confluence always restores at the space root, and CQL never sees trashed
   pages (§6.4).
+- Inline comment fields need explicit `extensions.*` expands, and resolution changes only safely
+  through the inline-comments plugin route (§5.4).
 
 ## 2. Instance and credentials
 
@@ -190,6 +192,10 @@ profile at site default (UTC+00:00) and then at `America/Sao_Paulo` (UTC−03:00
 an offset of zero both times. The profile settings form lists "Site Default" with the site zone's own
 value, so saving the form stores that zone explicitly.
 
+Live (PAT), 2026-10-31: the same binary search on pages last modified in January, April and July 2026
+measured an offset of zero each time. The server zone has no daylight saving, so this instance cannot
+show a repeated hour; that case has offline coverage only.
+
 ### 4.5 Users
 
 Live (browser), 2026-10-19:
@@ -302,6 +308,10 @@ Live (browser and PAT), 2026-10-19:
 - `child/comment` returns top-level comments only; `depth=all` adds replies, which carry comment
   ancestors. `extensions.location` is `footer` or `inline`; inline comments carry `originalSelection`
   and `markerRef`; resolution is `open`, `resolved` or `dangling`.
+- Live (PAT), 2026-10-31: `expand=extensions` returns only `location`; `inlineProperties` and
+  `resolution` stay under `_expandable` on both the comment read and `child/comment`. They need
+  `extensions.inlineProperties` and `extensions.resolution`. `resolution` is an object whose
+  `status` is the value above, and a comment reopened in the UI reads `reopened`.
 - `/rest/api/content/{id}/version` is 404. The experimental `/rest/experimental/content/{id}/version`
   lists versions (200 per page, `next` link), and `?status=historical&version=N` reads old bodies,
   including version 1 of a page at version 738.
@@ -317,10 +327,22 @@ Live synthetic comment check, 2026-10-30:
 - `DELETE /rest/api/content/{commentId}` permanently removes a comment: a follow-up GET returned
   not found. Deleting a parent comment leaves its reply. The synthetic test page was moved to trash
   after cleanup and was not purged.
-- This test used only the configured account's own synthetic footer comments. Inline edit/anchor
-  preservation, inline resolution writes and a 403 from editing another user's comment remain
-  unverified. The official [Data Center Content Resource reference](https://developer.atlassian.com/server/confluence/rest/v9210/api-group-content-resource/)
-  documents generic content operations; no inline-resolution write route has been verified here.
+- This test used only the configured account's own synthetic footer comments.
+
+Live inline comment check (PAT and browser), 2026-10-31, on one synthetic personal-space page:
+
+- Inline comments were added in the UI, which posts to `/rest/inlinecomments/1.0/comments`.
+- `update_comment` replaced an inline comment's body (version 1 to 2). The `markerRef`,
+  `originalSelection`, the page's `ac:inline-comment-marker` and the plugin's comment row were
+  unchanged, and the page stayed at version 1: a body edit keeps the anchor.
+- `PUT /rest/api/content/{commentId}` with `extensions.resolution.status: resolved` resolved the
+  comment without a new version, but recorded the resolver as anonymous. After that,
+  `expand=extensions.resolution` on that comment returned HTTP 500 until it was reopened. Do not
+  change resolution through the content resource.
+- The UI resolves with `PUT /rest/inlinecomments/1.0/comments/{id}/resolve/{true|false}/dangling/false`.
+  A PAT with `X-Atlassian-Token: no-check` reopened both comments through it, recorded the account as
+  resolver, and repaired the HTTP 500.
+- A 403 from editing another user's comment remains unverified: it needs a second account.
 
 ## 6. Writes
 
@@ -397,6 +419,15 @@ Live (PAT), 2026-10-30: `move_page` moved a synthetic page with a child and a la
 page in another global space, then back to the personal space root. Each long task finished in about
 1.1 s; the ID, version 1, child and label were unchanged at both destinations.
 
+Live (PAT), 2026-10-31, synthetic pages under the same authorized parent:
+
+- A cross-space `ASYNC` move whose title already exists in the target space is refused at once:
+  `actionErrors` says the page already exists in that space and must be renamed, and there is no
+  `longTaskId`. The page kept its space and version. A terminal long-task failure was not observed.
+- A 61-page subtree (three levels) moved across spaces in one long task: `elapsedTime` about 2.0 s,
+  4.6 s including polling. `finished` was absent, `percentageComplete` 100, `successful: true`, "Page
+  move complete.". Every level was in the target space; `move_page` returned it in 3.1 s.
+
 ### 6.4 Trash and restore
 
 - `DELETE /rest/api/content/{id}` is 204; the page is then 404 unless read with `?status=trashed`. A
@@ -464,8 +495,16 @@ Live PAT check, 2026-10-30, on one disposable synthetic page in the configured D
 - The connector refused trash while the current page body referenced the attachment. The account's
   attachment `operations` included `delete` on this page and the authorized trash/restore round trip
   succeeded. This single result does not generalize the separate 403 observed on another page.
-- The disposable page was trashed after the checks. Upload-size limits and cross-page link discovery
-  were not tested; the connector does not search other pages for references.
+- The disposable page was trashed after the checks. Cross-page link discovery was not tested; the
+  connector does not search other pages for references.
+
+Live PAT check, 2026-10-31, on one disposable synthetic page:
+
+- The page's HTML carries `ajs-global-settings-attachment-max-size` = 50,331,648 (48 MiB).
+- A file of exactly that size uploaded; one byte more returned HTTP 413 after the whole body was sent.
+- Over the VPN the uploads ran at about 0.25 MB/s (48 MiB in 198–214 s). With the transport's 30 s
+  write timeout both failed as `WriteTimeout` before Confluence answered, and nothing was stored; the
+  limit was measured with a longer timeout set in the test script.
 
 ### 6.7 Account email notification settings
 

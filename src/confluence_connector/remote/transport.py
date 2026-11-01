@@ -36,6 +36,9 @@ MAX_JSON_BYTES = 16 * 1024 * 1024
 READ_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 WRITE_RETRY_STATUSES = frozenset({429, 503})
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+# Uploads get 30 s plus time to send their bytes at this slowest supported rate (48 MiB in about 9 min).
+UPLOAD_MIN_BYTES_PER_SECOND = 100_000
 _log = logging.getLogger(__name__)
 
 
@@ -73,7 +76,7 @@ class ConfluenceTransport:
         self._base_url = str(settings["base_url"]).rstrip("/") + "/"
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
-            timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
+            timeout=REQUEST_TIMEOUT,
             limits=httpx.Limits(max_connections=6, max_keepalive_connections=6),
             http1=True,
             http2=False,
@@ -245,7 +248,14 @@ class ConfluenceTransport:
             if skip_atlassian_token_check:
                 headers["X-Atlassian-Token"] = "no-check"
             request = self._client.build_request(
-                method, path, params=params, json=body, data=form_fields, files=files, headers=headers
+                method,
+                path,
+                params=params,
+                json=body,
+                data=form_fields,
+                files=files,
+                headers=headers,
+                timeout=_upload_timeout(files) if files else httpx.USE_CLIENT_DEFAULT,
             )
             response: httpx.Response | None = None
             retry_delay: float | None = None
@@ -426,6 +436,13 @@ def _write_payload(response: httpx.Response) -> Any:
 def _validate_route(path: str) -> None:
     if not path or path.startswith(("/", "\\")) or "://" in path or ".." in path.split("/"):
         raise AssertionError("Confluence adapters must pass a safe relative route.")
+
+
+def _upload_timeout(files: Mapping[str, tuple[str, bytes, str]]) -> httpx.Timeout:
+    """Give a multipart upload time to send its body and for Confluence to store it before answering."""
+    size = sum(len(content) for _name, content, _media_type in files.values())
+    seconds = REQUEST_TIMEOUT.write + size / UPLOAD_MIN_BYTES_PER_SECOND
+    return httpx.Timeout(connect=REQUEST_TIMEOUT.connect, read=seconds, write=seconds, pool=REQUEST_TIMEOUT.pool)
 
 
 def _retry_delay(headers: httpx.Headers, attempt: int) -> float:

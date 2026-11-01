@@ -87,7 +87,8 @@ Only design rules that the code layout does not make obvious are listed here. To
 ### 5.2 [`remote/transport.py`](../src/confluence_connector/remote/transport.py)
 
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
-  timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
+  timeouts, 30 s read and write timeouts. A multipart upload gets 30 s plus one second per 100,000 bytes
+  for both, so a 48 MiB file has about 9 minutes over a slow link. A process-wide semaphore keeps **six requests in flight**
   across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk. Cookies Confluence
   sets are cleared when the stored account changes, so no session outlives its account.
 - JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a
@@ -128,7 +129,8 @@ Only design rules that the code layout does not make obvious are listed here. To
   malformed raises `Upstream`.
 - **The private move action** is isolated in `position_page` and `move_page_action`: `POST
   /pages/movepage.action` with `pageId`, `spaceKey`, `position`, `targetId` and `mode`. Application
-  errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise. Cross-space moves use
+  errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise with Confluence's own
+  text (unescaped, up to 500 characters), such as a title conflict in the target space. Cross-space moves use
   `ASYNC` and poll the documented `/rest/api/longtask/{id}` up to 40 times, at most 10 s; a task still
   running then is `UncertainWrite`. `successful` alone is not terminal: completion also needs
   `finished: true`, or 100 percent when `finished` is absent.
@@ -326,7 +328,7 @@ destructive annotation and does not accept that content-write option.
 | Trees | `…/space/{key}/content/page?depth=root`, `…/content/{id}/child/page` | Yes |
 | Metadata and versions | `GET /rest/api/content/{id}`, `/rest/experimental/content/{id}/version` | Versions experimental |
 | Page reads | `GET /rest/api/content/{id}`, `child/attachment`, `child/comment` | Yes |
-| Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for footer comments; inline resolution has no verified write route |
+| Comment management | `GET`, `POST`, `PUT`, `DELETE /rest/api/content/{id}` | Yes for comment bodies; reads expand `extensions.inlineProperties` and `extensions.resolution`. Resolution writes are not implemented; only the inline-comments plugin route changes it safely (research §5.4) |
 | Email notification settings | `GET /users/viewmyemailsettings.action`, `GET /users/editmyemailsettings.action`, `POST /users/doeditmyemailsettings.action` | **No**; isolated UI form with `atl_token`, verified live (research §6.7) |
 | Attachment bytes | `GET /download/attachments/{id}/{file}` | Link from the attachment record |
 | Attachment writes | `POST …/child/attachment`, `POST …/child/attachment/{id}/data`, content `PUT`, `DELETE ?status=current` | Yes; no permanent purge |

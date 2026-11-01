@@ -455,10 +455,12 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
     async def test_position_action_reports_application_level_failures(self) -> None:
         for payload in (
             {"validationErrors": ["Synthetic refusal"]},
+            {"validationErrors": {"title": [{"message": "Synthetic refusal"}]}},
             {"commandDelegate": {"actionErrors": ["Synthetic refusal"]}},
             {"errorMessage": "Synthetic refusal"},
+            {"actionErrors": ["Synthetic\n  refusal", "Synthetic refusal"]},
         ):
-            with self.subTest(payload=payload), self.assertRaisesRegex(Upstream, "rejected"):
+            with self.subTest(payload=payload), self.assertRaisesRegex(Upstream, "rejected.*said: Synthetic refusal$"):
                 await self.make_api(lambda _: httpx.Response(200, json=payload)).position_page(
                     "700",
                     space_key="SYNTH",
@@ -466,6 +468,23 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                     target_id="101",
                     expected_username="sample-user",
                 )
+
+    async def test_position_action_keeps_confluence_reason_readable(self) -> None:
+        payload = {"actionErrors": ["The page 'Synthetic &amp; Co' already exists in space 'Synthetic Space'."]}
+        with self.assertRaises(Upstream) as raised:
+            await self.make_api(lambda _: httpx.Response(200, json=payload)).position_page(
+                "700", space_key="SYNTH", position="above", target_id="101", expected_username="sample-user"
+            )
+        self.assertEqual(
+            str(raised.exception),
+            "Confluence rejected the requested page position. Confluence said: "
+            "The page 'Synthetic & Co' already exists in space 'Synthetic Space'.",
+        )
+        with self.assertRaises(Upstream) as bare:
+            await self.make_api(lambda _: httpx.Response(200, json={"success": False})).position_page(
+                "700", space_key="SYNTH", position="above", target_id="101", expected_username="sample-user"
+            )
+        self.assertEqual(str(bare.exception), "Confluence rejected the requested page position.")
 
     async def test_structure_routes_preflight_trash_restore_properties_and_page_listing(self) -> None:
         observed: list[httpx.Request] = []
@@ -735,7 +754,11 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
                             "view": {"value": "<p>Current text</p>"},
                             "storage": {"value": "<p>Current text</p>"},
                         },
-                        "extensions": {"location": "inline", "resolutionStatus": "open"},
+                        "extensions": {
+                            "location": "inline",
+                            "inlineProperties": {"originalSelection": "anchored words", "markerRef": "marker-1"},
+                            "resolution": {"status": "open"},
+                        },
                     },
                 )
             if request.method == "DELETE":
@@ -759,7 +782,9 @@ class WriteRemoteChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comment.body_storage, "<p>Current text</p>")
         self.assertEqual(comment.container_page_url, "https://confluence.example.test/wiki/spaces/SYNTH/pages/301/Synthetic")
         self.assertEqual(observed[0].url.path, "/wiki/rest/api/content/501")
+        self.assertEqual(comment.selected_text, "anchored words")
         self.assertIn("body.storage", observed[0].url.params["expand"])
+        self.assertIn("extensions.inlineProperties,extensions.resolution", observed[0].url.params["expand"])
         self.assertEqual(observed[1].method, "PUT")
         default_update = json.loads(observed[1].content)
         self.assertEqual(default_update["version"], {"number": 4})

@@ -626,8 +626,8 @@ def build_server(context: AppContext) -> FastMCP:
     ) -> CommentWriteResult:
         """Replace a footer or inline comment body after checking its version.
 
-        Only the body is sent; whether Confluence keeps an inline comment's anchor on edit is not yet
-        verified. The result rereads the saved comment.
+        Only the body is sent; Confluence keeps an inline comment's anchor and placement (verified
+        live). The result rereads the saved comment.
         """
         services = await context.services()
         return await services.comment_management.update_comment(

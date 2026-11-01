@@ -51,6 +51,9 @@ MAX_PAGE_VERSIONS = 5_000
 MAX_COLLECTION_ITEMS = 5_000
 DRAFT_PAGE_SIZE = 100
 TRASH_PAGE_SIZE = 100
+# A bare "extensions" expand returns only location; inline anchors and resolution need their own expands.
+COMMENT_EXTENSIONS_EXPAND = "extensions.inlineProperties,extensions.resolution"
+MAX_MOVE_ERROR_CHARS = 500
 LONGTASK_MAX_POLLS = 40
 LONGTASK_POLL_INTERVAL_SECONDS = 0.25
 LONGTASK_MAX_WAIT_SECONDS = 10.0
@@ -930,7 +933,8 @@ class ConfluenceApi:
         """Read footer and inline comments with replies, paging to the collection safety cap."""
         rows = await self._collection_rows(
             f"{self._content_route(page_id)}/child/comment",
-            params={"depth": "all", "expand": "body.view,history"}, expected_username=expected_username,
+            params={"depth": "all", "expand": f"body.view,history,{COMMENT_EXTENSIONS_EXPAND}"},
+            expected_username=expected_username,
         )
         comments = []
         for row in rows:
@@ -947,7 +951,7 @@ class ConfluenceApi:
         payload = await self._transport.get_json(
             self._content_route(comment_id),
             params={
-                "expand": "body.view,body.storage,version,container,ancestors,history,extensions",
+                "expand": f"body.view,body.storage,version,container,ancestors,history,{COMMENT_EXTENSIONS_EXPAND}",
             },
             expected_username=expected_username,
         )
@@ -1373,7 +1377,28 @@ def _raise_move_action_errors(payload: Any, *, allow_pending: bool = False) -> N
         or (not allow_pending and response.get("successful") is False)
         for response in responses
     ):
-        raise Upstream("Confluence rejected the requested page position.")
+        reasons = [
+            reason
+            for response in responses
+            for key in ("actionErrors", "validationErrors", "errorMessage")
+            for reason in _move_error_texts(response.get(key))
+        ]
+        detail = f" Confluence said: {' '.join(dict.fromkeys(reasons))[:MAX_MOVE_ERROR_CHARS]}" if reasons else ""
+        raise Upstream(f"Confluence rejected the requested page position.{detail}")
+
+
+def _move_error_texts(value: Any) -> list[str]:
+    """Collect the readable messages of one move-action error field (text, lists or field maps)."""
+    if isinstance(value, str):
+        text = " ".join(html.unescape(value).split())
+        return [text] if text else []
+    if isinstance(value, list):
+        return [text for item in value for text in _move_error_texts(item)]
+    if isinstance(value, dict):
+        if "message" in value:
+            return _move_error_texts(value["message"])
+        return [text for item in value.values() for text in _move_error_texts(item)]
+    return []
 
 
 def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:
@@ -1560,6 +1585,8 @@ def _page_comment(value: Any) -> RemotePageComment | None:
     extensions = extensions if isinstance(extensions, dict) else {}
     inline_properties = extensions.get("inlineProperties")
     inline_properties = inline_properties if isinstance(inline_properties, dict) else {}
+    resolution = extensions.get("resolution")
+    resolution = resolution if isinstance(resolution, dict) else {}
     ancestors = value.get("ancestors")
     ancestors = ancestors if isinstance(ancestors, list) else []
     version = value.get("version")
@@ -1595,8 +1622,7 @@ def _page_comment(value: Any) -> RemotePageComment | None:
             else None
         ),
         location=_optional_string(extensions.get("location")),
-        resolution=_optional_string(extensions.get("resolutionStatus"))
-        or _optional_string(extensions.get("resolution")),
+        resolution=_optional_string(resolution.get("status")),
         selected_text=_optional_string(inline_properties.get("originalSelection")),
     )
 
