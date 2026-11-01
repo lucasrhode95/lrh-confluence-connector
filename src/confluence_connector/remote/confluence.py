@@ -53,6 +53,7 @@ DRAFT_PAGE_SIZE = 100
 TRASH_PAGE_SIZE = 100
 # A bare "extensions" expand returns only location; inline anchors and resolution need their own expands.
 COMMENT_EXTENSIONS_EXPAND = "extensions.inlineProperties,extensions.resolution"
+MAX_MOVE_ERROR_CHARS = 500
 LONGTASK_MAX_POLLS = 40
 LONGTASK_POLL_INTERVAL_SECONDS = 0.25
 LONGTASK_MAX_WAIT_SECONDS = 10.0
@@ -1376,7 +1377,28 @@ def _raise_move_action_errors(payload: Any, *, allow_pending: bool = False) -> N
         or (not allow_pending and response.get("successful") is False)
         for response in responses
     ):
-        raise Upstream("Confluence rejected the requested page position.")
+        reasons = [
+            reason
+            for response in responses
+            for key in ("actionErrors", "validationErrors", "errorMessage")
+            for reason in _move_error_texts(response.get(key))
+        ]
+        detail = f" Confluence said: {' '.join(dict.fromkeys(reasons))[:MAX_MOVE_ERROR_CHARS]}" if reasons else ""
+        raise Upstream(f"Confluence rejected the requested page position.{detail}")
+
+
+def _move_error_texts(value: Any) -> list[str]:
+    """Collect the readable messages of one move-action error field (text, lists or field maps)."""
+    if isinstance(value, str):
+        text = " ".join(html.unescape(value).split())
+        return [text] if text else []
+    if isinstance(value, list):
+        return [text for item in value for text in _move_error_texts(item)]
+    if isinstance(value, dict):
+        if "message" in value:
+            return _move_error_texts(value["message"])
+        return [text for item in value.values() for text in _move_error_texts(item)]
+    return []
 
 
 def _page_summaries(value: Any, *, base_url: str) -> list[PageSummary]:

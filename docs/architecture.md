@@ -129,7 +129,8 @@ Only design rules that the code layout does not make obvious are listed here. To
   malformed raises `Upstream`.
 - **The private move action** is isolated in `position_page` and `move_page_action`: `POST
   /pages/movepage.action` with `pageId`, `spaceKey`, `position`, `targetId` and `mode`. Application
-  errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise. Cross-space moves use
+  errors in its JSON (`actionErrors`, `validationErrors`, `errorMessage`) raise with Confluence's own
+  text (unescaped, up to 500 characters), such as a title conflict in the target space. Cross-space moves use
   `ASYNC` and poll the documented `/rest/api/longtask/{id}` up to 40 times, at most 10 s; a task still
   running then is `UncertainWrite`. `successful` alone is not terminal: completion also needs
   `finished: true`, or 100 percent when `finished` is absent.

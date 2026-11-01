@@ -2,13 +2,8 @@
 
 Pending implementation, decisions and live verification only. Requirements own behavior; architecture
 owns design; research holds dated integration evidence. Finished work lives in Git/PR history.
-Snapshot **2026-10-31**. Offline checks: 399 tests (398 pass, one platform skip), compilation, pyflakes and
+Snapshot **2026-10-31**. Offline checks: 401 tests (400 pass, one platform skip), compilation, pyflakes and
 probe CLI help.
-
-## Implementation
-
-- **Refused moves:** a refused move reports "Confluence rejected the requested page position." and
-  drops Confluence's `actionErrors` text, such as a title conflict in the target space (research §6.3).
 
 ## Decisions
 
