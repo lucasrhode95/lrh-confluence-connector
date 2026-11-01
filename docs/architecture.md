@@ -87,7 +87,8 @@ Only design rules that the code layout does not make obvious are listed here. To
 ### 5.2 [`remote/transport.py`](../src/confluence_connector/remote/transport.py)
 
 - One `httpx.AsyncClient` per process: HTTP/1.1, no redirects, six connections, 10 s connect and pool
-  timeouts, 30 s read and write timeouts. A process-wide semaphore keeps **six requests in flight**
+  timeouts, 30 s read and write timeouts. A multipart upload gets 30 s plus one second per 100,000 bytes
+  for both, so a 48 MiB file has about 9 minutes over a slow link. A process-wide semaphore keeps **six requests in flight**
   across all tool calls. JSON responses are capped at 16 MiB; downloads stream to disk. Cookies Confluence
   sets are cleared when the stored account changes, so no session outlives its account.
 - JSON calls and streamed downloads use the same `_exchange` attempt loop; downloads provide a

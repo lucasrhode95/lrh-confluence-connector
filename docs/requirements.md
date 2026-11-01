@@ -416,7 +416,8 @@ a definite operation failure (`failed`), uncertain application (`unknown`), and 
 - Each page read is up to three parallel requests (bodies with version and history; attachments;
   comments with replies), skipping parts the parse scope turns off. Embedded `children.*` expansions
   are not used: they stop at 25 and omit replies.
-- Timeouts: 10 s to connect or wait for a pooled connection, 30 s to read or write.
+- Timeouts: 10 s to connect or wait for a pooled connection, 30 s to read or write. Attachment uploads
+  add one second per 100,000 bytes to the read and write timeouts, so large files survive a slow link.
 - Reads retry up to three attempts on connection errors, timeouts, 429, 500, 502, 503 and 504, honoring
   `Retry-After` up to 30 s; a longer `Retry-After` is reported at once. A write is retried only when it
   provably never applied (not sent, or answered 429 or

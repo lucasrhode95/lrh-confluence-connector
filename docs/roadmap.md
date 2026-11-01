@@ -7,9 +7,6 @@ probe CLI help.
 
 ## Implementation
 
-- **Upload timeout:** the transport's 30 s write timeout fails any upload that takes longer to send
-  (about 7 MB over a 0.25 MB/s link) as an uncertain write. Size the write timeout to the body, up to
-  the instance limit of 48 MiB (research §6.6).
 - **Inline comment fields:** `get_comment` and page comment reads expand only `extensions`, so
   `selected_text` and `resolution` are always empty. Expand `extensions.inlineProperties` and
   `extensions.resolution`, and read `resolution.status`, including `reopened` (research §5.4).
